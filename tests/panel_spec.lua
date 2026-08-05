@@ -74,15 +74,107 @@ describe("cli agent panel", function()
     assert.are.same({ "codex-1", "claude-1" }, Panel.panels[vim.api.nvim_get_current_tabpage()].order)
   end)
 
-  it("renders icon-only agent names and activity state", function()
+  it("renders tool names and activity state by default", function()
     local codex = fake("codex-1", "codex", "Implement panel")
     Panel.show(codex)
     codex.status = "done"
     local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
 
     assert.matches("Implement panel", line)
+    assert.matches("codex", line)
     assert.matches("SidekickCliStatusDone", line)
-    assert.is_nil(line:find("codex:", 1, true))
+  end)
+
+  it("uses configured agent icons before falling back to the tool name", function()
+    local old = Config.cli.win.tabs.icons
+    local codex = fake("codex-1", "codex", "Implement panel")
+    Panel.show(codex)
+
+    Config.cli.win.tabs.icons = {}
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    assert.is_not_nil(line:find("codex", 1, true))
+
+    Config.cli.win.tabs.icons = { codex = "X", default = "D" }
+    line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    assert.is_not_nil(line:find("X", 1, true))
+    assert.is_nil(line:find(" D", 1, true))
+
+    Config.cli.win.tabs.icons = old
+  end)
+
+  it("supports configurable tab separators", function()
+    local old = Config.cli.win.tabs.separator_style
+    local first = fake("one", "codex", "One")
+    Panel.show(first)
+
+    local cases = {
+      { style = "thin", left = "▏", right = "▕" },
+      { style = "thick", left = "▌", right = "▐" },
+      { style = "slant", left = "", right = "" },
+      { style = "slope", left = "", right = "" },
+      { style = "padded_slant", left = " ", right = " " },
+      { style = "padded_slope", left = " ", right = " " },
+    }
+    for _, case in ipairs(cases) do
+      Config.cli.win.tabs.separator_style = case.style
+      local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+      assert.is_not_nil(line:find(case.left, 1, true))
+      assert.is_not_nil(line:find(case.right, 1, true))
+    end
+
+    Config.cli.win.tabs.separator_style = { left = "<", right = ">" }
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    assert.is_not_nil(line:find("<", 1, true))
+    assert.is_not_nil(line:find(">", 1, true))
+
+    Config.cli.win.tabs.separator_style = old
+  end)
+
+  it("keeps the active tab visible while truncating overflowing tabs", function()
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "codex", "Two")
+    local third = fake("three", "codex", "Three")
+    local fourth = fake("four", "codex", "Four")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.show(third)
+    Panel.show(fourth)
+    Panel.resize({ width = 50 })
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    assert.matches("Three", line)
+    assert.matches("Four", line)
+    assert.matches("…2", line)
+    assert.is_nil(line:find("One", 1, true))
+    assert.is_nil(line:find("Two", 1, true))
+    assert.are.equal(fourth, Panel.active())
+  end)
+
+  it("keeps a middle active tab visible while truncating both sides", function()
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "codex", "Two")
+    local third = fake("three", "codex", "Three")
+    local fourth = fake("four", "codex", "Four")
+    local fifth = fake("five", "codex", "Five")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.show(third)
+    Panel.show(fourth)
+    Panel.show(fifth)
+    Panel.select(third.id)
+    Panel.resize({ width = 50 })
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    assert.matches("Three", line)
+    assert.matches("Two", line)
+    assert.matches("…1", line)
+    assert.matches("…2", line)
+    assert.is_nil(line:find("One", 1, true))
+    assert.is_nil(line:find("Four", 1, true))
+    assert.is_nil(line:find("Five", 1, true))
+    assert.are.equal(third, Panel.active())
   end)
 
   it("escapes percent signs after display-width title truncation", function()

@@ -1,10 +1,30 @@
 ---@module 'luassert'
 
+local Config = require("sidekick.config")
 local Session = require("sidekick.cli.session")
 
 describe("cli sessions", function()
   before_each(function()
     Session.setup()
+  end)
+
+  it("initializes the terminal backend for direct first-session creation", function()
+    local old_backends = Session.backends
+    local old_did_setup = Session.did_setup
+    local old_mux_enabled = Config.cli.mux.enabled
+    Session.backends = {}
+    Session.did_setup = false
+    Config.cli.mux.enabled = false
+
+    local ok, session = pcall(Session.new, { tool = "codex" })
+
+    Session.backends = old_backends
+    Session.did_setup = old_did_setup
+    Config.cli.mux.enabled = old_mux_enabled
+
+    assert.is_true(ok)
+    assert.are.equal("terminal", session.backend)
+    session:close()
   end)
 
   it("gives new agents of the same tool unique session ids", function()

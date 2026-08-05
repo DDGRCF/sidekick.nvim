@@ -300,15 +300,10 @@ local defaults = {
         enabled = true,
         max_name_length = 28,
         show_close = true,
-        icons = { ---@type table<string, string>
-          default = "󰚩",
-          aider = "󰚩",
-          claude = "󰋦",
-          codex = "",
-          copilot = "",
-          gemini = "󰊭",
-          opencode = "󰨞",
-        },
+        ---@type "thin"|"thick"|"slant"|"slope"|"padded_slant"|"padded_slope"|{left:string,right:string}
+        separator_style = "thin",
+        --- Set per-tool icons here. Unconfigured tools use their name.
+        icons = {}, ---@type table<string, string>
         status = { ---@type table<sidekick.cli.ActivityStatus, string>
           idle = "○",
           starting = "◌",
@@ -543,9 +538,11 @@ require("sidekick.nes").update()
 
 Sidekick runs every AI agent in an independent session and terminal buffer, including
 multiple agents of the same type. A native Neovim tabpage gets one shared, movable
-agent container; the icon-only tabs inside it switch buffers without opening more
-windows. The active agent receives prompts first, so normal send/prompt actions do not
-ask for a target again.
+agent container; the tabs inside it switch buffers without opening more
+windows. Tabs show tool names by default, with optional per-tool icons and configurable
+separators. When the container is narrow, inactive tabs are hidden around the active tab
+and the hidden counts are shown. The active agent receives prompts first, so normal
+send/prompt actions do not ask for a target again.
 
 Use `:Sidekick cli new [tool]` to start another agent and `:Sidekick cli switch` (or
 `<leader>bj`) for fuzzy tab selection when Snacks picker is configured. Tab status is

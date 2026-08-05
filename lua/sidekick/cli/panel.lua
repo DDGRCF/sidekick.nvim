@@ -111,37 +111,189 @@ local function escape(value)
   return tostring(value):gsub("%%", "%%%%")
 end
 
-local function title(t)
-  local value = t.title or t.tool.name
-  value = value:gsub("[%c\r\n]+", " ")
-  local max = Config.cli.win.tabs.max_name_length
-  if vim.api.nvim_strwidth(value) <= max then
-    return escape(value)
+local separator_styles = {
+  thin = { "▏", "▕" },
+  thick = { "▌", "▐" },
+  slant = { "", "" },
+  slope = { "", "" },
+  padded_slant = { " ", " " },
+  padded_slope = { " ", " " },
+}
+
+local function separators()
+  local style = Config.cli.win.tabs.separator_style
+  if type(style) == "table" then
+    return style.left or "▏", style.right or "▕"
+  end
+  local ret = separator_styles[style] or separator_styles.thin
+  return ret[1], ret[2]
+end
+
+---@param value string
+---@param max_width integer
+---@return string
+local function truncate_text(value, max_width)
+  if max_width <= 0 then
+    return ""
+  end
+  if vim.api.nvim_strwidth(value) <= max_width then
+    return value
+  end
+  local ellipsis = "…"
+  if vim.api.nvim_strwidth(ellipsis) > max_width then
+    return ""
   end
   local ret = ""
   for _, char in ipairs(Util.split_graphemes(value)) do
     local next = ret .. char
-    if vim.api.nvim_strwidth(next .. "…") > max then
+    if vim.api.nvim_strwidth(next .. ellipsis) > max_width then
       break
     end
     ret = next
   end
-  return escape(ret .. "…")
+  return ret .. ellipsis
+end
+
+---@param t sidekick.cli.Terminal
+---@param max_width? integer
+local function title_text(t, max_width)
+  local value = t.title or t.tool.name
+  value = value:gsub("[%c\r\n]+", " ")
+  return truncate_text(value, max_width or Config.cli.win.tabs.max_name_length)
+end
+
+---@param t sidekick.cli.Terminal
+---@param value? string
+local function title(t, value)
+  return escape(value or title_text(t))
+end
+
+local function agent_icon_text(t)
+  local icons = Config.cli.win.tabs.icons
+  return icons[t.tool.name] or icons.default or t.tool.name
 end
 
 local function agent_icon(t)
-  local icons = Config.cli.win.tabs.icons
-  return escape(icons[t.tool.name] or icons.default)
+  return escape(agent_icon_text(t))
+end
+
+local function status_icon_text(t)
+  return Config.cli.win.tabs.status[t.status or "idle"] or "○"
 end
 
 local function status_icon(t)
-  return escape(Config.cli.win.tabs.status[t.status or "idle"] or "○")
+  return escape(status_icon_text(t))
 end
 
 local function click(action, p, id)
   local token = #M.clicks + 1
   M.clicks[token] = { action = action, id = id, tab = p.tab }
   return ("%%%d@v:lua.SidekickCliTabClick@"):format(token)
+end
+
+local function truncation_marker(count)
+  return count > 0 and (" …%d "):format(count) or ""
+end
+
+---@param p sidekick.cli.Panel
+---@param t sidekick.cli.Terminal
+---@param left_separator string
+---@param right_separator string
+---@param title_value? string
+local function tab_width(p, t, left_separator, right_separator, title_value)
+  local text = " " .. agent_icon_text(t) .. status_icon_text(t) .. ": " .. (title_value or title_text(t))
+  if p.pinned[t.id] then
+    text = text .. " 󰐃"
+  end
+  text = text .. " "
+  if Config.cli.win.tabs.show_close then
+    text = text .. " "
+  end
+  return vim.api.nvim_strwidth(left_separator .. text .. right_separator)
+end
+
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer}[]
+---@param left integer
+---@param right integer
+---@param hidden_left integer
+---@param hidden_right integer
+local function range_width(items, left, right, hidden_left, hidden_right)
+  local width = vim.api.nvim_strwidth(truncation_marker(hidden_left))
+    + vim.api.nvim_strwidth(truncation_marker(hidden_right))
+  for i = left, right do
+    width = width + items[i].width
+  end
+  return width
+end
+
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer}[]
+---@param active integer
+---@param available integer
+---@return integer left, integer right, integer hidden_left, integer hidden_right
+local function visible_range(items, active, available)
+  local left, right = 1, #items
+  local hidden_left, hidden_right = 0, 0
+  while range_width(items, left, right, hidden_left, hidden_right) > available do
+    local can_left = left < active
+    local can_right = right > active
+    if not can_left and not can_right then
+      break
+    end
+
+    local left_width = can_left and range_width(items, left + 1, right, hidden_left + 1, hidden_right) or nil
+    local right_width = can_right and range_width(items, left, right - 1, hidden_left, hidden_right + 1) or nil
+    if left_width and right_width then
+      if left_width <= right_width then
+        left, hidden_left = left + 1, hidden_left + 1
+      else
+        right, hidden_right = right - 1, hidden_right + 1
+      end
+    elseif left_width then
+      left, hidden_left = left + 1, hidden_left + 1
+    else
+      right, hidden_right = right - 1, hidden_right + 1
+    end
+  end
+
+  -- Keep the active tab visible even when the markers themselves do not fit.
+  if range_width(items, left, right, hidden_left, hidden_right) > available then
+    return active, active, 0, 0
+  end
+  return left, right, hidden_left, hidden_right
+end
+
+---@param p sidekick.cli.Panel
+---@param t sidekick.cli.Terminal
+---@param left_separator string
+---@param right_separator string
+---@param title_value? string
+local function render_tab(p, t, left_separator, right_separator, title_value)
+  local parts = {} ---@type string[]
+  local selected = t.id == p.active
+  local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
+  local state = (t.status or "idle"):gsub("^%l", string.upper)
+  if selected then
+    parts[#parts + 1] = "%<"
+  end
+  parts[#parts + 1] = ("%%#SidekickCliTabSeparator#%s"):format(escape(left_separator))
+  parts[#parts + 1] = click("select", p, t.id)
+  parts[#parts + 1] = ("%%#%s# %s"):format(base, agent_icon(t))
+  parts[#parts + 1] = ("%%#SidekickCliStatus%s#%s"):format(state, status_icon(t))
+  parts[#parts + 1] = ("%%#%s#: %s%s "):format(base, title(t, title_value), p.pinned[t.id] and " 󰐃" or "")
+  parts[#parts + 1] = "%T"
+  if Config.cli.win.tabs.show_close then
+    parts[#parts + 1] = click("close", p, t.id)
+    parts[#parts + 1] = ("%%#%s# %%T"):format(base)
+  end
+  parts[#parts + 1] = ("%%#SidekickCliTabSeparator#%s"):format(escape(right_separator))
+  return table.concat(parts)
+end
+
+local function render_truncation(count)
+  if count == 0 then
+    return ""
+  end
+  return ("%%#SidekickCliTabSeparator#%s%%T"):format(escape(truncation_marker(count)))
 end
 
 ---@param p sidekick.cli.Panel
@@ -151,28 +303,44 @@ function M.render(p)
   end
   clean(p)
   local parts = {} ---@type string[]
+  local left_separator, right_separator = separators()
+  local items = {} ---@type {id:string,t:sidekick.cli.Terminal,width:integer}[]
   for _, id in ipairs(p.order) do
     local t = terminal(id)
     if t then
-      local selected = id == p.active
-      local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
-      local state = (t.status or "idle"):gsub("^%l", string.upper)
-      if selected then
-        parts[#parts + 1] = "%<"
-      end
-      parts[#parts + 1] = "%#SidekickCliTabSeparator#"
-      parts[#parts + 1] = click("select", p, id)
-      parts[#parts + 1] = ("%%#%s# %s"):format(base, agent_icon(t))
-      parts[#parts + 1] = ("%%#SidekickCliStatus%s#%s"):format(state, status_icon(t))
-      parts[#parts + 1] = ("%%#%s#: %s%s "):format(base, title(t), p.pinned[id] and " 󰐃" or "")
-      parts[#parts + 1] = "%T"
-      if Config.cli.win.tabs.show_close then
-        parts[#parts + 1] = click("close", p, id)
-        parts[#parts + 1] = ("%%#%s# %%T"):format(base)
-      end
-      parts[#parts + 1] = "%#SidekickCliTabSeparator#"
+      items[#items + 1] = {
+        id = id,
+        t = t,
+        width = tab_width(p, t, left_separator, right_separator),
+      }
     end
   end
+
+  local active = 1
+  for i, item in ipairs(items) do
+    if item.id == p.active then
+      active = i
+      break
+    end
+  end
+  local first, last, hidden_left, hidden_right = 1, 0, 0, 0
+  local available
+  local active_title
+  if #items > 0 then
+    available = math.max(1, vim.api.nvim_win_get_width(p.win) - vim.api.nvim_strwidth("+ "))
+    first, last, hidden_left, hidden_right = visible_range(items, active, available)
+    if first == active and last == active and items[active].width > available then
+      local t = items[active].t
+      local fixed_width = tab_width(p, t, left_separator, right_separator, "")
+      active_title = title_text(t, math.max(0, available - fixed_width))
+    end
+  end
+  parts[#parts + 1] = render_truncation(hidden_left)
+  for i = first, last do
+    local title_value = i == active and active_title or nil
+    parts[#parts + 1] = render_tab(p, items[i].t, left_separator, right_separator, title_value)
+  end
+  parts[#parts + 1] = render_truncation(hidden_right)
   parts[#parts + 1] = "%="
   parts[#parts + 1] = click("new", p)
   parts[#parts + 1] = "%#SidekickCliTab#+ %T"
@@ -548,6 +716,7 @@ function M.resize(opts)
     return Util.error("Failed to resize Sidekick panel: " .. tostring(err))
   end
   p.sizes[p.layout] = size
+  M.refresh()
 end
 
 ---@param dw integer

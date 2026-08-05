@@ -65,15 +65,10 @@ local defaults = {
         enabled = true,
         max_name_length = 28,
         show_close = true,
-        icons = { ---@type table<string, string>
-          default = "󰚩",
-          aider = "󰚩",
-          claude = "󰋦",
-          codex = "",
-          copilot = "",
-          gemini = "󰊭",
-          opencode = "󰨞",
-        },
+        ---@type "thin"|"thick"|"slant"|"slope"|"padded_slant"|"padded_slope"|{left:string,right:string}
+        separator_style = "thin",
+        --- Set per-tool icons here. Unconfigured tools use their name.
+        icons = {}, ---@type table<string, string>
         status = { ---@type table<sidekick.cli.ActivityStatus, string>
           idle = "○",
           starting = "◌",

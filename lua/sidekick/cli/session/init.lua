@@ -79,6 +79,7 @@ end
 
 ---@param state sidekick.cli.session.Opts
 function M.new(state)
+  M.setup()
   local tool = state.tool
   tool = type(tool) == "string" and Config.get_tool(tool) or tool --[[@as sidekick.cli.Tool]]
   local backend = state.backend or (Config.cli.mux.enabled and Config.cli.mux.backend or "terminal")
