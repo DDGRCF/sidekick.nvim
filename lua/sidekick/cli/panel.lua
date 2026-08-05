@@ -4,6 +4,9 @@ local Util = require("sidekick.util")
 
 local M = {}
 
+local layout_state_key = "cli-panel-layout"
+local layouts = { "left", "right", "top", "bottom", "float" }
+
 ---@class sidekick.cli.Panel
 ---@field tab integer
 ---@field win? integer
@@ -14,6 +17,7 @@ local M = {}
 ---@field layout string
 ---@field opts? sidekick.win.Opts
 ---@field sizes table<string, {width?:integer,height?:integer,row?:integer,col?:integer}>
+---@field has_remembered_layout boolean
 
 M.panels = {} ---@type table<integer, sidekick.cli.Panel>
 M.clicks = {} ---@type table<integer, {action:string,id?:string,tab?:integer}>
@@ -68,18 +72,32 @@ local function current_tab()
   return vim.api.nvim_get_current_tabpage()
 end
 
+---@param value any
+---@return boolean
+local function valid_layout(value)
+  return type(value) == "string" and vim.tbl_contains(layouts, value)
+end
+
+---@return string?
+local function remembered_layout()
+  local value = Util.get_state(layout_state_key)
+  return valid_layout(value) and value or nil
+end
+
 ---@param create? boolean
 ---@return sidekick.cli.Panel?
 local function panel(create)
   local tab = current_tab()
   local ret = M.panels[tab]
   if not ret and create then
+    local saved = remembered_layout()
     ret = {
       tab = tab,
       order = {},
       pinned = {},
-      layout = Config.cli.win.layout,
+      layout = saved or Config.cli.win.layout,
       sizes = {},
+      has_remembered_layout = saved ~= nil,
     }
     M.panels[tab] = ret
   end
@@ -442,7 +460,9 @@ function M.show(t, focus)
   clean(p)
   if #p.order == 0 and t.opts then
     p.opts = vim.deepcopy(t.opts)
-    p.layout = t.opts.layout
+    if not p.has_remembered_layout or t.opts.layout ~= Config.cli.win.layout then
+      p.layout = t.opts.layout
+    end
   end
   if not contains(p.order, t.id) then
     p.order[#p.order + 1] = t.id
@@ -676,7 +696,7 @@ end
 function M.move(value)
   local layout = type(value) == "table" and value.layout or value --[[@as string?]]
   layout = layout or Config.cli.win.layout
-  if not vim.tbl_contains({ "left", "right", "top", "bottom", "float" }, layout) then
+  if not valid_layout(layout) then
     return Util.error("Invalid Sidekick panel layout: " .. tostring(layout))
   end
   local p = panel(true)
@@ -684,13 +704,18 @@ function M.move(value)
     return
   end
   p.layout = layout
-  if p.active then
+  p.has_remembered_layout = true
+  Util.set_state(layout_state_key, layout)
+  clean(p)
+  local active = usable(p.active)
+  if active then
     local was_focused = valid(p.win) and vim.api.nvim_get_current_win() == p.win
     M.hide()
-    local t = terminal(p.active)
-    if t then
-      M.show(t, was_focused)
-    end
+    M.show(active, was_focused)
+  else
+    vim.schedule(function()
+      require("sidekick.cli").new()
+    end)
   end
 end
 

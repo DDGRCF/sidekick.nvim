@@ -11,6 +11,7 @@ local Util = require("sidekick.util")
 describe("cli agent panel", function()
   local ids = {} ---@type string[]
   local bufs = {} ---@type integer[]
+  local previous_layout
 
   local function fake(id, tool, title, status)
     local buf = vim.api.nvim_create_buf(false, true)
@@ -46,6 +47,10 @@ describe("cli agent panel", function()
     return ret
   end
 
+  before_each(function()
+    previous_layout = Util.get_state("cli-panel-layout")
+  end)
+
   after_each(function()
     Panel.hide()
     Panel.panels[vim.api.nvim_get_current_tabpage()] = nil
@@ -59,6 +64,12 @@ describe("cli agent panel", function()
       end
     end
     ids, bufs = {}, {}
+    if previous_layout == nil then
+      Util.del_state("cli-panel-layout")
+    else
+      Util.set_state("cli-panel-layout", previous_layout)
+    end
+    previous_layout = nil
   end)
 
   it("reuses one window for multiple agent buffers", function()
@@ -452,6 +463,39 @@ describe("cli agent panel", function()
     assert.are.equal(5, cfg.height)
     assert.are.equal(1, cfg.row)
     assert.are.equal(1, cfg.col)
+  end)
+
+  it("remembers the last panel layout", function()
+    local first = fake("remember-layout", "codex", "Remember layout")
+
+    Panel.show(first)
+    Panel.move("float")
+
+    assert.are.equal("float", Util.get_state("cli-panel-layout"))
+
+    Panel.hide()
+    Panel.panels[vim.api.nvim_get_current_tabpage()] = nil
+    local second = fake("remember-layout-next", "codex", "Remembered layout")
+    Panel.show(second)
+    assert.are.equal("float", Panel.layout())
+  end)
+
+  it("opens the new-agent picker when moving layout without an agent", function()
+    local old_cli = package.loaded["sidekick.cli"]
+    local calls = 0
+    package.loaded["sidekick.cli"] = {
+      new = function()
+        calls = calls + 1
+      end,
+    }
+
+    Panel.move("float")
+    vim.wait(100, function()
+      return calls > 0
+    end)
+
+    package.loaded["sidekick.cli"] = old_cli
+    assert.are.equal(1, calls)
   end)
 
   it("rejects invalid resize dimensions without changing the panel", function()
