@@ -2,6 +2,7 @@
 
 local Cli = require("sidekick.cli")
 local Config = require("sidekick.config")
+local History = require("sidekick.cli.history")
 local Prompt = require("sidekick.cli.ui.prompt")
 local Select = require("sidekick.cli.ui.select")
 local Session = require("sidekick.cli.session")
@@ -109,5 +110,104 @@ describe("cli routing", function()
     assert.matches("Implement the panel", first)
     assert.is_true(#long < 200)
     assert.matches("new", new)
+  end)
+
+  it("prioritizes recent tools for select and new", function()
+    local original_get = State.get
+    local original_tools = Config.tools
+    local original_select = vim.ui.select
+    local prefix = "history-" .. tostring(vim.uv.hrtime())
+    local names = { prefix .. "-one", prefix .. "-two", prefix .. "-three" }
+    local select_states = {
+      { tool = { name = names[1] }, installed = true },
+      { tool = { name = names[2] }, installed = true },
+      { tool = { name = names[3] }, installed = true },
+    }
+    local seen = {}
+    local select_calls = 0
+
+    State.get = function()
+      return vim.deepcopy(select_states)
+    end
+    local select_tools = function(items, _, cb)
+      select_calls = select_calls + 1
+      seen[#seen + 1] = vim.tbl_map(function(state)
+        return state.tool.name
+      end, items)
+      if select_calls <= 2 then
+        cb(items[1])
+      elseif select_calls == 3 then
+        cb(items[2])
+      end
+    end
+    vim.ui.select = select_tools
+    Select.select({ cb = function() end })
+    Select.select({ cb = function() end })
+    Select.select({ cb = function() end })
+    Select.select({ cb = function() end })
+
+    local new_tools = {
+      first = { name = names[1], cmd = { "true" } },
+      second = { name = names[2], cmd = { "true" } },
+      third = { name = names[3], cmd = { "true" } },
+    }
+    local new_seen = {}
+    local new_calls = 0
+    Config.tools = function()
+      return new_tools
+    end
+    vim.ui.select = function(items, _, cb)
+      new_calls = new_calls + 1
+      new_seen[#new_seen + 1] = vim.tbl_map(function(state)
+        return state.tool.name
+      end, items)
+      if new_calls == 1 then
+        cb(items[3])
+      end
+    end
+    Select.select({ new = true, cb = function() end })
+    Select.select({ new = true, cb = function() end })
+
+    vim.ui.select = select_tools
+    Select.select({ cb = function() end })
+
+    State.get = original_get
+    Config.tools = original_tools
+    vim.ui.select = original_select
+    local first = seen[1][1]
+    local second = seen[3][2]
+    local third = new_seen[1][3]
+    assert.are.equal(first, seen[2][1])
+    assert.are.equal(first, seen[3][1])
+    assert.are.equal(second, seen[4][1])
+    assert.are.equal(first, seen[4][2])
+    assert.are.equal(second, new_seen[1][1])
+    assert.are.equal(first, new_seen[1][2])
+    assert.are.equal(third, new_seen[2][1])
+    assert.are.equal(first, new_seen[2][2])
+    assert.are.equal(third, seen[5][1])
+  end)
+
+  it("records explicitly named new tools", function()
+    local original_tools = Config.tools
+    local original_attach = State.attach
+    local name = "history-direct-new-" .. tostring(vim.uv.hrtime())
+    local previous = History.get("tools", name)
+    local attached
+
+    Config.tools = function()
+      return { [name] = { name = name, cmd = { "true" } } }
+    end
+    State.attach = function(state)
+      attached = state
+    end
+
+    Cli.new({ name = name })
+
+    Config.tools = original_tools
+    State.attach = original_attach
+    local current = History.get("tools", name)
+    assert.are.equal(name, attached.tool.name)
+    assert.are.equal((previous and previous.count or 0) + 1, current.count)
   end)
 end)

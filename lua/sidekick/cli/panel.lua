@@ -1,4 +1,5 @@
 local Config = require("sidekick.config")
+local History = require("sidekick.cli.history")
 local Util = require("sidekick.util")
 
 local M = {}
@@ -449,6 +450,7 @@ function M.show(t, focus)
   local changed = p.active ~= t.id
   if changed then
     p.previous, p.active = p.active, t.id
+    History.record("agents", History.agent_key(t))
   end
   local buf = t.buf --[[@as integer]]
   open(p, buf)
@@ -639,10 +641,19 @@ function M.pick()
     return
   end
   clean(p)
-  local items = vim.tbl_map(function(id)
+  local items = {} ---@type {id:string,label:string,key:string}[]
+  for _, id in ipairs(p.order) do
     local t = terminal(id)
-    return { id = id, label = ("%s %s: %s"):format(agent_icon(t), status_icon(t), t.title or t.tool.name) }
-  end, p.order)
+    local key = History.agent_key(t)
+    items[#items + 1] = {
+      id = id,
+      label = ("%s %s: %s"):format(agent_icon(t), status_icon(t), t.title or t.tool.name),
+      key = key,
+    }
+  end
+  History.sort(items, "agents", function(item)
+    return item.key
+  end)
   local select = vim.ui.select
   local ok, Snacks = pcall(require, "snacks")
   if Config.cli.picker == "snacks" and ok and Snacks.picker and Snacks.picker.select then

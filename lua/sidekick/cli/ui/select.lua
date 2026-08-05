@@ -1,4 +1,5 @@
 local Config = require("sidekick.config")
+local History = require("sidekick.cli.history")
 local Util = require("sidekick.util")
 
 ---@class sidekick.cli.Select: sidekick.cli.With
@@ -42,12 +43,18 @@ function M.select(opts)
   else
     tools = require("sidekick.cli.state").get(opts.filter)
   end
+  History.sort(tools, "tools", function(state)
+    return state.tool.name
+  end)
 
   ---@param state? sidekick.cli.State
   local on_select = function(state)
     if state and not state.installed then
       M.on_missing(state.tool)
       state = nil
+    end
+    if state then
+      History.record("tools", state.tool.name)
     end
     opts.cb(state)
   end

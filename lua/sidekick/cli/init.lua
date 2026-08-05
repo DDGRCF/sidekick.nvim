@@ -1,5 +1,6 @@
 local Config = require("sidekick.config")
 local Context = require("sidekick.cli.context")
+local History = require("sidekick.cli.history")
 local State = require("sidekick.cli.state")
 local Util = require("sidekick.util")
 
@@ -102,6 +103,7 @@ function M.new(opts)
     if not state.installed then
       return require("sidekick.cli.ui.select").on_missing(tool)
     end
+    History.record("tools", tool.name)
     return start(state)
   end
   require("sidekick.cli.ui.select").select({ new = true, cb = start })

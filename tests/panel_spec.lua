@@ -6,6 +6,7 @@ local Scrollback = require("sidekick.cli.scrollback")
 local Session = require("sidekick.cli.session")
 local State = require("sidekick.cli.state")
 local Terminal = require("sidekick.cli.terminal")
+local Util = require("sidekick.util")
 
 describe("cli agent panel", function()
   local ids = {} ---@type string[]
@@ -212,6 +213,47 @@ describe("cli agent panel", function()
     assert.are.equal(first, Panel.active())
     Panel.previous()
     assert.are.equal(second, Panel.active())
+  end)
+
+  it("puts the most recently selected agent first in the picker", function()
+    local old_picker = Config.cli.picker
+    local old_select = vim.ui.select
+    Config.cli.picker = "telescope"
+
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "claude", "Two")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.select(first.id)
+
+    local order
+    vim.ui.select = function(items)
+      order = vim.tbl_map(function(item)
+        return item.id
+      end, items)
+    end
+    Panel.pick()
+
+    Config.cli.picker = old_picker
+    vim.ui.select = old_select
+    assert.are.same({ first.id, second.id }, order)
+  end)
+
+  it("persists agent selection frequency", function()
+    local first = fake("persist-one", "codex", "Persisted")
+    local saved = Util.get_state("cli-agent-selection")
+    local agents = type(saved) == "table" and saved.agents or {}
+    local previous = type(agents) == "table" and agents[first.id] or nil
+    local previous_count = type(previous) == "table" and tonumber(previous.count) or 0
+
+    Panel.show(first)
+
+    saved = Util.get_state("cli-agent-selection")
+    assert.is_true(type(saved) == "table")
+    assert.is_true(type(saved.sequence) == "number")
+    assert.is_true(type(saved.agents) == "table")
+    assert.are.equal(previous_count + 1, tonumber(saved.agents[first.id].count))
+    assert.is_true(saved.agents[first.id].last <= saved.sequence)
   end)
 
   it("updates window metadata when the active agent is removed", function()
