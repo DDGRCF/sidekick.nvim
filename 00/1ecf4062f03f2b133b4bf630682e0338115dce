@@ -1,0 +1,42 @@
+lua/sidekick/config.lua
+  s_fc36447e97e6ba::t_24919b137238c4 68-71
+tests/panel_spec.lua
+  s_fc36447e97e6ba::t_6b42b8c8ae9656 142
+  s_fc36447e97e6ba::t_24919b137238c4 77,84,86-130
+  s_fc36447e97e6ba::t_93dd8cb4980895 166,171-172,175
+  s_fc36447e97e6ba::t_237ba7017956c2 154-165,167-170,173-174,176-177
+  s_fc36447e97e6ba::t_da51c377cfd112 133-141,143-153
+README.md
+  s_fc36447e97e6ba::t_cda6b0f429ea36 541
+  s_fc36447e97e6ba::t_fb37ad22fe2b77 303-306
+  s_fc36447e97e6ba::t_a0ed0e007bda54 542
+  s_fc36447e97e6ba::t_788a11a045776b 543-545
+lua/sidekick/cli/session/init.lua
+  s_fc36447e97e6ba::t_24919b137238c4 82
+tests/session_spec.lua
+  s_fc36447e97e6ba::t_237ba7017956c2 3,14,17,19,23
+  s_fc36447e97e6ba::t_24919b137238c4 11-13,15-16,18,20-22,24-29
+lua/sidekick/cli/panel.lua
+  s_fc36447e97e6ba::t_237ba7017956c2 719
+  s_fc36447e97e6ba::t_24919b137238c4 114-131,306
+  s_fc36447e97e6ba::t_aca5d5b1d6d3b6 140,326,329,331,337
+  s_fc36447e97e6ba::t_7011f0344d4ea3 169-171,173-181,185,194-201,205,207,209,211,213-217,223-233,239-242,248,250,253,255-257,263-268,271-281,283-296,307,311-315,318-325,338-339,343
+  s_fc36447e97e6ba::t_d7d2943587c71e 132-139,142-144,149,154,157-168,202-204,206,208,210,212,218-222,234-238,243-247,249,251-252,254,258-262,269-270,282
+  s_fc36447e97e6ba::t_bc1f6e25350685 327-328,330,332-336,340-341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "001ecf4062f03f2b133b4bf630682e0338115dce",
+  "prompts": {},
+  "sessions": {
+    "s_fc36447e97e6ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fcfb1-9e87-7b03-8629-fe3d0b2f8f00",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Chaofan Rao <raochaofan@insta360.com>"
+    }
+  }
+}
