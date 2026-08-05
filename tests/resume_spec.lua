@@ -61,6 +61,23 @@ describe("cli conversation resume", function()
     assert.are.equal("exact", mode)
   end)
 
+  it("uses exact native ids for Grok and OpenCode", function()
+    for _, case in ipairs({
+      { name = "grok", id = "a1b2c3d4e5f6", file = "sk/cli/grok.lua" },
+      { name = "opencode", id = "ses_1234567890abcdefghijklmnop", file = "sk/cli/opencode.lua" },
+    }) do
+      local config = assert(loadfile(case.file))()
+      local cmd, mode = Resume.command({ name = case.name, cmd = config.cmd, config = config }, {
+        conversation = { id = case.id, provider = case.name, resumable = true },
+      })
+
+      local expected = vim.deepcopy(config.cmd)
+      vim.list_extend(expected, { "--session", case.id })
+      assert.are.same(expected, cmd)
+      assert.are.equal("exact", mode)
+    end
+  end)
+
   it("rejects mismatched and explicitly non-resumable conversations", function()
     local t = tool({ resume = { "resume" } })
     assert.is_nil(Resume.command(t, {

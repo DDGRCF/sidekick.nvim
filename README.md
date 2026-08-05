@@ -570,8 +570,9 @@ tmux/zellij session; if the process is gone, it starts the tool's native resume 
 in a new terminal. A failed or unsupported resume is reported and never replaced with a
 metadata-only tab. Use `:Sidekick cli workspace save|restore|status|clear` to manage the
 snapshot explicitly. Exact provider conversation IDs can be supplied by a tool's
-`resume` adapter. If no stable ID is available, Sidekick reports that agent as failed
-instead of substituting a latest session or interactive browser.
+`resume` adapter; Antigravity, Claude, Codex, Grok, and OpenCode include exact adapters.
+If no stable ID is available, Sidekick reports that agent as failed instead of
+substituting a latest session or interactive browser.
 
 The agent switcher uses Snacks when available, with terminal-output preview and actions
 for pin (`<C-p>`), rename (`<C-r>`), close (`<C-x>`), and completed-agent cleanup
@@ -897,7 +898,7 @@ Sidekick preconfigures popular AI CLIs. Run `:checkhealth sidekick` to see which
 | [`crush`](https://github.com/charmbracelet/crush)           | Charm's AI assistant | See [installation](https://github.com/charmbracelet/crush)                                                             |
 | [`cursor`](https://cursor.com/cli)                          | Cursor CLI agent     | See [Cursor docs](https://cursor.com/cli)                                                                              |
 | [`grok`](https://github.com/superagent-ai/grok-cli)         | xAI Grok CLI         | See [repo](https://github.com/superagent-ai/grok-cli)                                                                  |
-| [`opencode`](https://github.com/sst/opencode)               | OpenCode CLI         | `npm install -g opencode`                                                                                              |
+| [`opencode`](https://github.com/anomalyco/opencode)        | OpenCode CLI         | `npm install -g opencode`                                                                                              |
 | [`qwen`](https://github.com/QwenLM/qwen-code)               | Alibaba Qwen Code    | See [repo](https://github.com/QwenLM/qwen-code)                                                                        |
 
 > [!TIP]

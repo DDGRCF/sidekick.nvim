@@ -21,7 +21,10 @@ function M.capture(session)
   session = logical(attached)
   local adapter = session.tool.config.resume
   if type(adapter) == "table" and not vim.islist(adapter) and type(adapter.capture) == "function" then
-    local capture_session = setmetatable({ pids = {} }, { __index = session })
+    local capture_session = setmetatable({
+      pids = {},
+      buf = attached.buf or session.buf,
+    }, { __index = session })
     vim.list_extend(capture_session.pids, session.pids or {})
     if attached ~= session then
       vim.list_extend(capture_session.pids, attached.pids or {})

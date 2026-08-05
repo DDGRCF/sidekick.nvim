@@ -3,6 +3,19 @@
 local Provider = require("sidekick.cli.provider_sessions")
 
 describe("cli provider sessions", function()
+  local function sqlite(path, marker, ids)
+    local file = assert(io.open(path, "wb"))
+    file:write("SQLite format 3\0", string.rep("\0", 84), "CREATE TABLE ", marker, " ", table.concat(ids, " "))
+    file:flush()
+    return file
+  end
+
+  local function buffer(lines)
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    return buf
+  end
+
   it("captures and verifies an open Codex session file by process identity", function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")
@@ -53,6 +66,122 @@ describe("cli provider sessions", function()
 
     file:close()
     Provider.roots.antigravity = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("captures and verifies the Grok session id rendered by its process", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local id = "a1b2c3d4e5f6"
+    local path = root .. "/grok.db"
+    local file = sqlite(path, "sessions", { id })
+    local buf = buffer({ "Grok Code", id })
+    local old_root = Provider.roots.grok
+    Provider.roots.grok = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("grok", {
+      pids = { vim.fn.getpid() },
+      buf = buf,
+      tool = { cmd = { "grok" } },
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("grok", conversation.provider)
+    assert.is_true(Provider.verify("grok", conversation))
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+    file:close()
+    Provider.roots.grok = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("captures and structurally verifies an OpenCode session id", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local id = "ses_abcdef1234567890ABCDEFGHIJ"
+    local path = root .. "/opencode.db"
+    local file = sqlite(path, "session", { id })
+    local cli = assert(io.open(root .. "/opencode", "wb"))
+    cli:write("#!/bin/sh\nprintf '%s\\n' '[{\"id\":\"", id, "\"}]'\n")
+    cli:close()
+    vim.fn.setfperm(root .. "/opencode", "rwx------")
+    local old_path = vim.env.PATH
+    vim.env.PATH = root .. ":" .. old_path
+    local old_root = Provider.roots.opencode
+    Provider.roots.opencode = vim.fs.normalize(root)
+    local session = {
+      pids = { vim.fn.getpid() },
+      buf = buffer({ id }),
+      tool = { cmd = { "opencode" } },
+    }
+
+    local conversation = Provider.capture("opencode", session)
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("opencode", conversation.provider)
+    assert.is_true(Provider.verify("opencode", conversation))
+
+    vim.api.nvim_buf_delete(session.buf, { force = true })
+    file:close()
+    vim.env.PATH = old_path
+    Provider.roots.opencode = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("binds an active OpenCode id to that process server", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local id = "ses_abcdef1234567890ABCDEFGHIJ"
+    local curl = assert(io.open(root .. "/curl", "wb"))
+    curl:write("#!/bin/sh\nprintf '%s\\n' '{\"", id, '":{"type":"busy"}}\'\n')
+    curl:close()
+    vim.fn.setfperm(root .. "/curl", "rwx------")
+    local old_path = vim.env.PATH
+    vim.env.PATH = root .. ":" .. old_path
+    local Session = require("sidekick.cli.session")
+    local old_backend = Session.backends.opencode
+    Session.backends.opencode = {
+      sessions = function()
+        return {
+          {
+            pid = vim.fn.getpid(),
+            pids = { vim.fn.getpid() },
+            base_url = "http://127.0.0.1:12345",
+          },
+        }
+      end,
+    }
+
+    local conversation = Provider.capture("opencode", { pids = { vim.fn.getpid() } })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("opencode", conversation.provider)
+    Session.backends.opencode = old_backend
+    vim.env.PATH = old_path
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("rejects ambiguous OpenCode ids instead of guessing", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local first = "ses_1234567890abcdefghijklmnop"
+    local second = "ses_abcdef1234567890ABCDEFGHIJ"
+    local path = root .. "/opencode-beta.db"
+    local file = sqlite(path, "session", { first, second })
+    local buf = buffer({ first, second })
+    local old_root = Provider.roots.opencode
+    Provider.roots.opencode = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("opencode", {
+      pids = { vim.fn.getpid() },
+      buf = buf,
+      tool = { cmd = { "opencode" } },
+    })
+
+    assert.is_nil(conversation)
+    vim.api.nvim_buf_delete(buf, { force = true })
+    file:close()
+    Provider.roots.opencode = old_root
     vim.fn.delete(root, "rf")
   end)
 end)

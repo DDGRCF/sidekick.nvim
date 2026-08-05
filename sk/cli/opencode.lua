@@ -79,7 +79,7 @@ end
 
 ---@type sidekick.cli.Config
 return {
-  cmd = { "opencode" },
+  cmd = { "opencode", "--port", "0" },
   env = {
     -- HACK: https://github.com/sst/opencode/issues/445
     OPENCODE_THEME = "system",
@@ -88,7 +88,8 @@ return {
     prompt = { "<a-p>", "prompt" },
   },
   is_proc = "\\<opencode\\>",
-  url = "https://github.com/sst/opencode",
+  url = "https://github.com/anomalyco/opencode",
   continue = { "--continue" },
+  resume = require("sidekick.cli.provider_sessions").adapter("opencode", { "--session" }),
   native_scroll = true,
 }
