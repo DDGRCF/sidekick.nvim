@@ -83,4 +83,37 @@ describe("cli sessions", function()
     parent:close()
     Util.del_state(parent.mux_session)
   end)
+
+  it("persists native conversation metadata through terminal wrappers", function()
+    local Util = require("sidekick.util")
+    local parent = Session.new({ tool = "codex", backend = "terminal", id = "conversation-parent" })
+    parent.backend = "zellij"
+    parent.mux_session = "conversation-zellij"
+    local child = Session.new({ tool = "codex", backend = "terminal", id = "conversation-child", parent = parent })
+    child.conversation = { provider = "codex", id = "chat-42", resumable = true }
+
+    Session.persist(child)
+
+    assert.are.same(child.conversation, parent.conversation)
+    assert.are.same(child.conversation, Util.get_state(parent.sid).conversation)
+    assert.are.same(child.conversation, Util.get_state(parent.mux_session).conversation)
+
+    child:close()
+    parent:close()
+    Util.del_state(parent.mux_session)
+  end)
+
+  it("rolls back a hidden terminal when its cwd no longer exists", function()
+    local Terminal = require("sidekick.cli.terminal")
+    local cwd = vim.fn.tempname() .. "/missing"
+    local session = Session.new({ tool = "codex", backend = "terminal", cwd = cwd, hidden = true })
+
+    local ok = pcall(function()
+      session:start()
+    end)
+
+    assert.is_true(ok)
+    assert.is_true(session.closed)
+    assert.is_nil(Terminal.terminals[session.id])
+  end)
 end)

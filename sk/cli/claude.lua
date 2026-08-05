@@ -3,7 +3,7 @@ return {
   cmd = { "claude" },
   is_proc = "\\<claude\\>",
   url = "https://github.com/anthropics/claude-code",
-  resume = { "--resume" },
+  resume = require("sidekick.cli.provider_sessions").adapter("claude", { "--resume" }),
   continue = { "--continue" },
   format = function(text)
     local Text = require("sidekick.text")

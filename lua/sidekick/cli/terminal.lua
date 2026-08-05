@@ -161,7 +161,9 @@ function M:start()
   vim.b[self.buf].sidekick_session_id = self.id
 
   self:keys()
-  self:open_win()
+  if not self.hidden then
+    self:open_win()
+  end
 
   vim.api.nvim_buf_attach(self.buf, false, {
     on_lines = function(_, buf, _, first, _, last)
@@ -297,8 +299,7 @@ function M:start()
 
   self.timer = vim.uv.new_timer()
 
-  local job_win = assert(self:window(), "Sidekick panel is not open")
-  vim.api.nvim_win_call(job_win, function()
+  local function start_job()
     ---@type table<string, string|false>
     local env = vim.tbl_extend("force", {}, vim.uv.os_environ(), self.tool.config.env or {}, self.tool.env or {}, {
       NVIM = vim.v.servername,
@@ -320,7 +321,14 @@ function M:start()
       clear_env = true,
       env = not vim.tbl_isempty(env) and env or nil,
     })
-  end)
+  end
+  local job_win = self:window()
+  local ok, err = pcall(job_win and vim.api.nvim_win_call or vim.api.nvim_buf_call, job_win or self.buf, start_job)
+  if not ok then
+    Util.error(("Failed to run `%s`: %s"):format(table.concat(self.tool.cmd, " "), tostring(err)))
+    self:close()
+    return
+  end
 
   if self.job <= 0 then
     if vim.fn.executable(self.tool.cmd[1]) == 0 then

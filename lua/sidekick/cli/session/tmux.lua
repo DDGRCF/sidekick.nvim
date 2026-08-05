@@ -157,6 +157,7 @@ function M.sessions()
             pids = pids,
             instance_id = meta.instance_id or suffix,
             title = meta.title,
+            conversation = meta.conversation,
           }
           return true
         end

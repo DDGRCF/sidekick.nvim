@@ -24,6 +24,15 @@ local M = {}
 ---@field format? fun(text:sidekick.Text[], str:string):string?
 ---@field native_scroll? boolean whether the tool handles scrolling natively
 ---@field status? fun(self:sidekick.cli.Tool,event:sidekick.cli.ActivityEvent):sidekick.cli.ActivityStatus? exact activity status adapter
+---@field resume? string[]|sidekick.cli.ResumeAdapter|fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
+---@field continue? string[] native CLI arguments for resuming the most recent conversation
+
+---@class sidekick.cli.ResumeAdapter
+---@field args? string[]
+---@field capture? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):sidekick.cli.Conversation|string?
+---@field command? fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
+---@field preflight? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean
+---@field verify? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean?
 
 ---@class sidekick.cli.Show
 ---@field name? string
@@ -112,6 +121,20 @@ end
 --- Fuzzy-select an agent tab in the current Sidekick container.
 function M.switch()
   require("sidekick.cli.panel").pick()
+end
+
+--- Save or restore persistent agent conversations and panel layout.
+---
+--- ```vim
+--- :Sidekick cli workspace save
+--- :Sidekick cli workspace restore
+--- :Sidekick cli workspace status
+--- :Sidekick cli workspace clear
+--- ```
+---@param action "save"|"restore"|"status"|"clear"
+function M.workspace(action)
+  local Workspace = require("sidekick.cli.workspace")
+  return assert(Workspace[action], "Unknown workspace action: " .. tostring(action))()
 end
 
 --- Select the next agent tab.

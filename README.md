@@ -17,7 +17,7 @@ without leaving your editor.
 
 - **💬 Integrated AI CLI Terminal**
   - 🚀 **Direct Access to AI CLIs**: Interact with your favorite AI command-line tools without leaving Neovim.
-  - 📦 **Pre-configured for Popular Tools**: Out-of-the-box support for Claude, Gemini, Grok, Codex, Copilot CLI, and more.
+  - 📦 **Pre-configured for Popular Tools**: Out-of-the-box support for Antigravity, Claude, Grok, Codex, Copilot CLI, and more.
   - ✨ **Context-Aware Prompts**: Automatically include file content, cursor position, and diagnostics in your prompts.
   - 📝 **Prompt Library**: A library of pre-defined prompts for common tasks like explaining code, fixing issues, or writing tests.
   - 🔄 **Session Persistence**: Keep your CLI sessions alive with `tmux` and `zellij` integration.
@@ -41,7 +41,7 @@ without leaving your editor.
   - **TIP:** Included in [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
 - [snacks.nvim](https://github.com/folke/snacks.nvim) for better prompt/tool selection **_(optional)_**
 - [nvim-treesitter-textobjects](https://github.com/nvim-treesitter/nvim-treesitter-textobjects) **_(`main` branch)_** for `{function}` and `{class}` context variables **_(optional)_**
-- AI cli tools, such as Codex, Claude, Copilot, Gemini, … **_(optional)_**
+- AI cli tools, such as Antigravity, Codex, Claude, Copilot, … **_(optional)_**
   see the [🤖 AI CLI Integration](#-ai-cli-integration) section for details.
 - [lsof](https://man7.org/linux/man-pages/man8/lsof.8.html) and [ps](https://man7.org/linux/man-pages/man1/ps.1.html) are used
   on Unix-like systems to detect running AI CLI tool sessions. **_(optional, but recommended)_**
@@ -273,6 +273,19 @@ local defaults = {
       -- delay marks a working agent as done.
       quiet_ms = 2000,
     },
+    workspace = {
+      enabled = true,
+      autosave = true,
+      autorestore = true,
+      restore_tabpages = true,
+      resume_timeout_ms = 15000,
+    },
+    agent_picker = {
+      provider = "auto", ---@type "auto"|"snacks"|"native"
+      preview_lines = 80,
+      preview_bytes = 64 * 1024,
+      preserve_pinned = true,
+    },
     ---@class sidekick.win.Opts
     win = {
       --- This is run when a new terminal is created, before starting it.
@@ -384,18 +397,18 @@ local defaults = {
     --- For default configs, see https://github.com/folke/sidekick.nvim/tree/main/sk/cli
     ---@type table<string, sidekick.cli.Config|{}>
     tools = {
-      aider    = {},
-      amazon_q = {},
-      claude   = {},
-      codex    = {},
-      copilot  = {},
-      crush    = {},
-      cursor   = {},
-      gemini   = {},
-      grok     = {},
-      opencode = {},
-      pi       = {},
-      qwen     = {},
+      aider       = {},
+      amazon_q    = {},
+      antigravity = {},
+      claude      = {},
+      codex       = {},
+      copilot     = {},
+      crush       = {},
+      cursor      = {},
+      grok        = {},
+      opencode    = {},
+      pi          = {},
+      qwen        = {},
     },
     --- Add custom context. See `lua/sidekick/context/init.lua`
     ---@type table<string, sidekick.context.Fn>
@@ -551,6 +564,21 @@ Use `:Sidekick cli new [tool]` to start another agent and `:Sidekick cli switch`
 `○` idle, `◌` starting, `●` working/done/error (colored by state), and `◐` waiting;
 completed background agents turn green until selected. The container can move between
 left, right, top, bottom, and float layouts and can be resized at runtime.
+
+Agent workspaces are saved automatically. On restart, Sidekick first reattaches a live
+tmux/zellij session; if the process is gone, it starts the tool's native resume command
+in a new terminal. A failed or unsupported resume is reported and never replaced with a
+metadata-only tab. Use `:Sidekick cli workspace save|restore|status|clear` to manage the
+snapshot explicitly. Exact provider conversation IDs can be supplied by a tool's
+`resume` adapter. If no stable ID is available, Sidekick reports that agent as failed
+instead of substituting a latest session or interactive browser.
+
+The agent switcher uses Snacks when available, with terminal-output preview and actions
+for pin (`<C-p>`), rename (`<C-r>`), close (`<C-x>`), and completed-agent cleanup
+(`<C-d>`). Search also indexes `@tool`, `#status`, `%project`, worktree branch, and known
+changed files when that metadata is available. If Snacks is unavailable or
+`cli.agent_picker.provider = "native"`, it falls back to a two-step `vim.ui.select`
+agent/action menu.
 
 <!-- api_cli:start -->
 
@@ -712,6 +740,22 @@ require("sidekick.cli").toggle(opts)
 ```
 
 </td></tr>
+<tr><td><code>:Sidekick cli workspace</code> Save or restore persistent agent conversations and panel layout.
+
+```vim
+:Sidekick cli workspace save
+:Sidekick cli workspace restore
+:Sidekick cli workspace status
+:Sidekick cli workspace clear
+```</td><td>
+
+
+```lua
+---@param action "save"|"restore"|"status"|"clear"
+require("sidekick.cli").workspace(action)
+```
+
+</td></tr>
 </table>
 
 <!-- api_cli:end -->
@@ -846,12 +890,12 @@ Sidekick preconfigures popular AI CLIs. Run `:checkhealth sidekick` to see which
 | ----------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | [`aider`](https://github.com/Aider-AI/aider)                | AI pair programmer   | `pip install aider-chat` or `pipx install aider-chat`                                                                  |
 | [`amazon_q`](https://github.com/aws/amazon-q-developer-cli) | Amazon Q Developer   | [Install guide](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-getting-started-installing.html) |
+| [`antigravity`](https://antigravity.google/download#antigravity-cli) | Google Antigravity CLI | `curl -fsSL https://antigravity.google/cli/install.sh \| bash`                                              |
 | [`claude`](https://github.com/anthropics/claude-code)       | Claude Code CLI      | [See Claude Code docs](https://code.claude.com/docs/en/overview#get-started)
 | [`codex`](https://github.com/openai/codex)                  | OpenAI Codex CLI     | See [OpenAI docs](https://github.com/openai/codex)                                                                     |
 | [`copilot`](https://github.com/github/copilot-cli)          | GitHub Copilot CLI   | `npm install -g @githubnext/github-copilot-cli`                                                                        |
 | [`crush`](https://github.com/charmbracelet/crush)           | Charm's AI assistant | See [installation](https://github.com/charmbracelet/crush)                                                             |
 | [`cursor`](https://cursor.com/cli)                          | Cursor CLI agent     | See [Cursor docs](https://cursor.com/cli)                                                                              |
-| [`gemini`](https://github.com/google-gemini/gemini-cli)     | Google Gemini CLI    | See [repo](https://github.com/google-gemini/gemini-cli)                                                                |
 | [`grok`](https://github.com/superagent-ai/grok-cli)         | xAI Grok CLI         | See [repo](https://github.com/superagent-ai/grok-cli)                                                                  |
 | [`opencode`](https://github.com/sst/opencode)               | OpenCode CLI         | `npm install -g opencode`                                                                                              |
 | [`qwen`](https://github.com/QwenLM/qwen-code)               | Alibaba Qwen Code    | See [repo](https://github.com/QwenLM/qwen-code)                                                                        |
@@ -1031,7 +1075,7 @@ You'll want both for the best experience.
 `copilot.lua` and `copilot.vim` provide **inline completions** (suggestions as you type). `sidekick.nvim` adds:
 
 - **Next Edit Suggestions (NES)**: Multi-line refactorings and context-aware edits across your file
-- **AI CLI Integration**: Built-in terminal for Claude, Gemini, and other AI tools
+- **AI CLI Integration**: Built-in terminal for Claude, Codex, and other AI tools
 
 Use them together for the complete experience!
 
@@ -1066,7 +1110,7 @@ opts = {
 
 ### Do I need a GitHub Copilot subscription?
 
-Yes, but only for the **NES feature** (Next Edit Suggestions). The **AI CLI integration** works independently with any CLI tool (Claude, Gemini, etc.) and doesn't require Copilot.
+Yes, but only for the **NES feature** (Next Edit Suggestions). The **AI CLI integration** works independently with any configured CLI tool and doesn't require Copilot.
 
 ### Can I use this without NES, just for CLI tools?
 

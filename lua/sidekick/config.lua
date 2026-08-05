@@ -38,6 +38,19 @@ local defaults = {
       -- delay marks a working agent as done.
       quiet_ms = 2000,
     },
+    workspace = {
+      enabled = true,
+      autosave = true,
+      autorestore = true,
+      restore_tabpages = true,
+      resume_timeout_ms = 15000,
+    },
+    agent_picker = {
+      provider = "auto", ---@type "auto"|"snacks"|"native"
+      preview_lines = 80,
+      preview_bytes = 64 * 1024,
+      preserve_pinned = true,
+    },
     ---@class sidekick.win.Opts
     win = {
       --- This is run when a new terminal is created, before starting it.
@@ -151,18 +164,18 @@ local defaults = {
     -- stylua: ignore
     ---@type table<string, sidekick.cli.Config|{}>
     tools = {
-      aider    = {},
-      amazon_q = {},
-      claude   = {},
-      codex    = {},
-      copilot  = {},
-      crush    = {},
-      cursor   = {},
-      gemini   = {},
-      grok     = {},
-      opencode = {},
-      pi       = {},
-      qwen     = {},
+      aider       = {},
+      amazon_q    = {},
+      antigravity = {},
+      claude      = {},
+      codex       = {},
+      copilot     = {},
+      crush       = {},
+      cursor      = {},
+      grok        = {},
+      opencode    = {},
+      pi          = {},
+      qwen        = {},
     },
     --- Add custom context. See `lua/sidekick/context/init.lua`
     ---@type table<string, sidekick.context.Fn>
@@ -270,9 +283,15 @@ function M.setup(opts)
 
     M.validate("cli.win.layout", { "float", "left", "bottom", "top", "right" })
     M.validate("cli.status.quiet_ms", "number")
+    M.validate("cli.agent_picker.provider", { "auto", "snacks", "native" })
+    M.validate("cli.agent_picker.preview_lines", "number")
+    M.validate("cli.agent_picker.preview_bytes", "number")
+    M.validate("cli.workspace.resume_timeout_ms", "number")
     M.validate("cli.mux.backend", { "tmux", "zellij" })
     M.validate("cli.mux.create", { "terminal", "window", "split" })
     M.validate("nes.diff.show", { "always", "cursor" })
+
+    require("sidekick.cli.workspace").setup()
   end)
 end
 

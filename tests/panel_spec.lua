@@ -295,11 +295,13 @@ describe("cli agent panel", function()
   it("omits the status spacer from picker labels when status is hidden", function()
     local old_status = Config.cli.win.tabs.show_status
     local old_picker = Config.cli.picker
+    local old_agent_picker = Config.cli.agent_picker.provider
     local old_select = vim.ui.select
     local first = fake("picker-status", "codex", "Picker status")
     local seen_items
     Config.cli.win.tabs.show_status = false
     Config.cli.picker = "telescope"
+    Config.cli.agent_picker.provider = "native"
     vim.ui.select = function(items)
       seen_items = items
     end
@@ -309,6 +311,7 @@ describe("cli agent panel", function()
 
     Config.cli.win.tabs.show_status = old_status
     Config.cli.picker = old_picker
+    Config.cli.agent_picker.provider = old_agent_picker
     vim.ui.select = old_select
 
     assert.are.equal("codex: Picker status", seen_items[1].label)
@@ -379,8 +382,10 @@ describe("cli agent panel", function()
 
   it("puts the most recently selected agent first in the picker", function()
     local old_picker = Config.cli.picker
+    local old_agent_picker = Config.cli.agent_picker.provider
     local old_select = vim.ui.select
     Config.cli.picker = "telescope"
+    Config.cli.agent_picker.provider = "native"
 
     local first = fake("one", "codex", "One")
     local second = fake("two", "claude", "Two")
@@ -397,6 +402,7 @@ describe("cli agent panel", function()
     Panel.pick()
 
     Config.cli.picker = old_picker
+    Config.cli.agent_picker.provider = old_agent_picker
     vim.ui.select = old_select
     assert.are.same({ first.id, second.id }, order)
   end)
@@ -636,9 +642,12 @@ describe("cli agent panel", function()
 
     Config.cli.picker = old_picker
     vim.ui.select = old_select
-    assert.are.same({ "left", "right", "top", "bottom", "float" }, vim.tbl_map(function(item)
-      return item.value
-    end, seen_items))
+    assert.are.same(
+      { "left", "right", "top", "bottom", "float" },
+      vim.tbl_map(function(item)
+        return item.value
+      end, seen_items)
+    )
     assert.matches("^← Left$", seen_opts.format_item(seen_items[1]))
     assert.matches("^□ Float$", seen_opts.format_item(seen_items[5]))
     assert.are.equal("float", Panel.layout())

@@ -162,6 +162,12 @@ local function agent_key(t)
   return History.agent_key(t)
 end
 
+---@param t sidekick.cli.Terminal
+---@return string
+function M.workspace_key(t)
+  return t.sid or table.concat({ t.tool.name, t.cwd or "", t.instance_id or t.id }, "\31")
+end
+
 ---@param p sidekick.cli.Panel
 local function persist_tabs(p)
   local saved = remembered_tabs()
@@ -766,15 +772,19 @@ function M.reorder(step)
     table.insert(p.order, to, id)
     persist_tabs(p)
     M.refresh()
+    Util.emit("SidekickCliPanel", { tab = p.tab, order = vim.deepcopy(p.order) })
   end
 end
 
-function M.pin()
+---@param id? string
+function M.pin(id)
   local p = panel()
-  if p and p.active then
-    p.pinned[p.active] = not p.pinned[p.active] or nil
+  id = id or (p and p.active)
+  if p and id and contains(p.order, id) then
+    p.pinned[id] = not p.pinned[id] or nil
     persist_tabs(p)
     M.refresh()
+    Util.emit("SidekickCliPanel", { tab = p.tab, pinned = vim.deepcopy(p.pinned) })
   end
 end
 
@@ -850,10 +860,11 @@ function M.close_panel()
   M.hide()
 end
 
-function M.pick()
+---@return {id:string,label:string,key:string,terminal:sidekick.cli.Terminal}[]
+function M.picker_items()
   local p = panel()
   if not p then
-    return
+    return {}
   end
   clean(p)
   local items = {} ---@type {id:string,label:string,key:string}[]
@@ -873,27 +884,17 @@ function M.pick()
       id = item.id,
       label = ("%s: %s"):format(prefix, title_text(t, nil, suffixes[item.id])),
       key = agent_key(t),
+      terminal = t,
     }
   end
   History.sort(items, "agents", function(item)
     return item.key
   end)
-  local select = vim.ui.select
-  local ok, Snacks = pcall(require, "snacks")
-  if Config.cli.picker == "snacks" and ok and Snacks.picker and Snacks.picker.select then
-    select = Snacks.picker.select
-  end
-  select(items, {
-    prompt = "Select agent:",
-    kind = "sidekick_agent",
-    format_item = function(item)
-      return item.label
-    end,
-  }, function(item)
-    if item then
-      M.select(item.id)
-    end
-  end)
+  return items
+end
+
+function M.pick()
+  require("sidekick.cli.agent_picker").open(M.picker_items())
 end
 
 local function pick_layout()
@@ -931,6 +932,7 @@ function M.move(value)
   p.layout = layout
   p.has_remembered_layout = true
   Util.set_state(layout_state_key, layout)
+  Util.emit("SidekickCliPanel", { tab = p.tab, layout = layout })
   clean(p)
   local active = usable(p.active)
   if active then
@@ -978,6 +980,7 @@ function M.resize(opts)
   end
   p.sizes[p.layout] = size
   M.refresh()
+  Util.emit("SidekickCliPanel", { tab = p.tab, layout = p.layout, size = size })
 end
 
 ---@param dw integer
@@ -1000,8 +1003,8 @@ function M.adjust(dw, dh)
 end
 
 ---@param value? string|{title?:string}
-function M.rename(value)
-  local t = M.active()
+function M.rename(value, id)
+  local t = id and terminal(id) or M.active()
   if not t then
     return
   end
@@ -1044,6 +1047,102 @@ local bufferline_desc = {
   ["delete buffers to the left"] = "close_left",
   ["delete buffers to the right"] = "close_right",
 }
+
+local function remember_live_size(p)
+  if not valid(p.win) then
+    return
+  end
+  local size = vim.deepcopy(p.sizes[p.layout] or {})
+  if p.layout == "float" then
+    local cfg = vim.api.nvim_win_get_config(p.win)
+    size.width, size.height = cfg.width, cfg.height
+    size.row, size.col = tonumber(cfg.row) or 0, tonumber(cfg.col) or 0
+  elseif p.layout == "left" or p.layout == "right" then
+    size.width = vim.api.nvim_win_get_width(p.win)
+  else
+    size.height = vim.api.nvim_win_get_height(p.win)
+  end
+  p.sizes[p.layout] = size
+end
+
+---@class sidekick.cli.WorkspacePanel
+---@field tab {id:string,index:integer,cwd:string}
+---@field order string[]
+---@field active? string
+---@field pinned table<string,boolean>
+---@field layout string
+---@field sizes table
+
+---@return sidekick.cli.WorkspacePanel[]
+function M.snapshot()
+  local ret = {}
+  local tabs = vim.api.nvim_list_tabpages()
+  local tab_index = {}
+  for index, tab in ipairs(tabs) do
+    tab_index[tab] = index
+  end
+  for tab, p in pairs(M.panels) do
+    if vim.api.nvim_tabpage_is_valid(tab) then
+      clean(p)
+      remember_live_size(p)
+      local id = vim.t[tab].sidekick_workspace_id
+      if type(id) ~= "string" or id == "" then
+        id = require("sidekick.cli.session").instance(tostring(vim.uv.hrtime()))
+        vim.t[tab].sidekick_workspace_id = id
+      end
+      local win = vim.api.nvim_tabpage_list_wins(tab)[1]
+      local cwd = win and vim.api.nvim_win_call(win, vim.fn.getcwd) or vim.fn.getcwd()
+      local order, pinned = {}, {}
+      for _, terminal_id in ipairs(p.order) do
+        local t = terminal(terminal_id)
+        if t then
+          local key = M.workspace_key(t)
+          order[#order + 1] = key
+          pinned[key] = p.pinned[terminal_id] == true or nil
+        end
+      end
+      local active = terminal(p.active)
+      ret[#ret + 1] = {
+        tab = { id = id, index = tab_index[tab] or 1, cwd = cwd },
+        order = order,
+        active = active and M.workspace_key(active) or nil,
+        pinned = pinned,
+        layout = p.layout,
+        sizes = vim.deepcopy(p.sizes),
+      }
+    end
+  end
+  table.sort(ret, function(a, b)
+    return a.tab.index < b.tab.index
+  end)
+  return ret
+end
+
+---@param saved sidekick.cli.WorkspacePanel
+---@param agents table<string,sidekick.cli.Terminal>
+function M.restore(saved, agents)
+  local p = panel(true) --[[@as sidekick.cli.Panel]]
+  p.layout = valid_layout(saved.layout) and saved.layout or Config.cli.win.layout
+  p.sizes = type(saved.sizes) == "table" and vim.deepcopy(saved.sizes) or {}
+  p.has_remembered_layout = true
+  local order = {}
+  for _, key in ipairs(saved.order or {}) do
+    local t = agents[key]
+    if t and not t.closed then
+      M.show(t, false)
+      order[#order + 1] = t.id
+      p.pinned[t.id] = saved.pinned and saved.pinned[key] == true or nil
+    end
+  end
+  p.order = order
+  local active = saved.active and agents[saved.active] or nil
+  p.active = active and active.id or order[1]
+  if p.active then
+    M.select(p.active)
+  end
+  persist_tabs(p)
+  M.refresh()
+end
 
 ---@param buf integer
 function M.keys(buf)

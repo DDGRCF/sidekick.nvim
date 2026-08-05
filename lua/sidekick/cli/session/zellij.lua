@@ -23,7 +23,8 @@ session_serialization false
 ]]
 
 ---@return sidekick.cli.terminal.Cmd?
-function M:terminal()
+---@param create boolean
+function M:terminal(create)
   local layout = M.tpl
   layout = layout:gsub("{cmd}", self.tool.cmd[1])
   layout = layout:gsub("{name}", self.tool.name)
@@ -48,10 +49,16 @@ function M:terminal()
     cwd = self.cwd,
     instance_id = self.instance_id,
     title = self.title,
+    conversation = self.conversation,
   })
 
+  local cmd = { "zellij", "--layout", layout_file, "attach" }
+  if create then
+    cmd[#cmd + 1] = "--create"
+  end
+  cmd[#cmd + 1] = session
   return {
-    cmd = { "zellij", "--layout", layout_file, "attach", "--create", session },
+    cmd = cmd,
     env = {
       ZELLIJ = false,
       ZELLIJ_SESSION_NAME = false,
@@ -71,46 +78,64 @@ function M:start()
   end
   -- Zellij's scripting API is too limited, so
   -- always run embedded sessions
-  return self:terminal()
+  return self:terminal(true)
 end
 
 ---@return sidekick.cli.terminal.Cmd?
 function M:attach()
   -- Zellij's scripting API is too limited, so
   -- always run embedded sessions
-  return self:terminal()
+  return self:terminal(false)
 end
 
 function M.sessions()
   local sessions = Util.exec({ "zellij", "list-sessions", "-ns" }, { notify = false }) or {}
   local ret = {} ---@type sidekick.cli.session.State[]
-  local Terminal = require("sidekick.cli.terminal")
+  local Procs = require("sidekick.cli.procs")
+  local procs = Procs.new()
+  local pid_cache = {}
 
-  -- Find the terminal instance attached to this zellij session.
-  -- We need this to get the PIDs for deduplication, since zellij's
-  -- API doesn't provide process information.
-  local function find_pids(sid)
-    local pids = {} ---@type integer[]
-    for _, t in pairs(Terminal.terminals) do
-      if t.mux_backend == "zellij" and t.mux_session == sid then
-        vim.list_extend(pids, t.pids or {})
+  local function find_pids(state, session_name)
+    local cwd = require("sidekick.cli.session").cwd({ cwd = state.cwd })
+    local key = table.concat({ state.tool, cwd, session_name }, "\31")
+    if not pid_cache[key] then
+      local tool = Config.tools()[state.tool]
+      pid_cache[key] = {}
+      if tool then
+        for _, proc in ipairs(procs:list()) do
+          local env = proc.env or {}
+          if
+            tool:is_proc(proc)
+            and proc.cwd
+            and require("sidekick.cli.session").cwd({ cwd = proc.cwd }) == cwd
+            and env.ZELLIJ_SESSION_NAME == session_name
+          then
+            pid_cache[key][#pid_cache[key] + 1] = proc.pid
+          end
+        end
       end
     end
-    return pids
+    return pid_cache[key]
   end
 
   for _, s in ipairs(sessions) do
     local state = Util.get_state(s)
     if state then
-      ret[#ret + 1] = {
-        id = "zellij: " .. s,
-        cwd = state.cwd,
-        tool = state.tool,
-        mux_session = s,
-        pids = find_pids(s),
-        instance_id = state.instance_id,
-        title = state.title,
-      }
+      local pids = find_pids(state, s)
+      -- A surviving Zellij session is not sufficient: the agent pane may
+      -- already have exited while another pane keeps the session alive.
+      if #pids > 0 then
+        ret[#ret + 1] = {
+          id = "zellij: " .. s,
+          cwd = state.cwd,
+          tool = state.tool,
+          mux_session = s,
+          pids = pids,
+          instance_id = state.instance_id,
+          title = state.title,
+          conversation = state.conversation,
+        }
+      end
     end
   end
 

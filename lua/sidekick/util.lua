@@ -238,13 +238,30 @@ function M.set_state(key, value)
   vim.fn.mkdir(state_dir, "p")
   local path = state_dir .. "/" .. key .. ".json"
   local ok, data = pcall(vim.json.encode, value)
-  if ok then
-    local f = io.open(path, "w")
-    if f then
-      f:write(data)
-      f:close()
-    end
+  if not ok then
+    return false, "failed to encode state: " .. tostring(data)
   end
+  local tmp = ("%s.tmp.%d.%s"):format(path, vim.fn.getpid(), tostring(vim.uv.hrtime()))
+  local f, err = io.open(tmp, "wb")
+  if not f then
+    return false, "failed to open temporary state: " .. tostring(err)
+  end
+  local wrote, write_err = f:write(data)
+  local flushed, flush_err = f:flush()
+  f:close()
+  if not wrote or not flushed then
+    vim.fn.delete(tmp)
+    return false, "failed to write state: " .. tostring(write_err or flush_err)
+  end
+  if vim.uv.fs_stat(path) then
+    pcall(vim.uv.fs_copyfile, path, path .. ".bak")
+  end
+  local renamed, rename_err = vim.uv.fs_rename(tmp, path)
+  if not renamed then
+    vim.fn.delete(tmp)
+    return false, "failed to replace state: " .. tostring(rename_err)
+  end
+  return true
 end
 
 ---@param key string

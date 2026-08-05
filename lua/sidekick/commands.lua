@@ -80,6 +80,20 @@ M.commands = {
     prompt = function()
       require("sidekick.cli").prompt()
     end,
+    workspace = {
+      save = function()
+        require("sidekick.cli").workspace("save")
+      end,
+      restore = function()
+        require("sidekick.cli").workspace("restore")
+      end,
+      status = function()
+        require("sidekick.cli").workspace("status")
+      end,
+      clear = function()
+        require("sidekick.cli").workspace("clear")
+      end,
+    },
   },
   debug = {
     nes = {

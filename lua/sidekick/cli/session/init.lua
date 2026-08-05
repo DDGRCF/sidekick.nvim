@@ -20,6 +20,14 @@ M._attached = {} ---@type table<string,sidekick.cli.Session>
 ---@field mux_backend? string
 ---@field instance_id? string unique agent instance id
 ---@field title? string user-facing agent title
+---@field conversation? sidekick.cli.Conversation native CLI conversation metadata
+---@field hidden? boolean start without adding the terminal to a panel
+
+---@class sidekick.cli.Conversation
+---@field id? string stable provider conversation id
+---@field provider? string
+---@field resumable? boolean
+---@field data? table<string,any> provider-owned serializable metadata
 
 ---@alias sidekick.cli.session.Opts sidekick.cli.session.State|{cwd?:string,id?:string}
 
@@ -94,6 +102,7 @@ function M.new(state)
   if saved and saved.tool == tool.name and M.cwd({ cwd = saved.cwd }) == self.cwd then
     self.instance_id = self.instance_id or saved.instance_id
     self.title = self.title or saved.title
+    self.conversation = self.conversation or saved.conversation
   end
   self.instance_id = self.instance_id or M.instance(self.id)
   self.sid = M.sid({ tool = tool.name, cwd = self.cwd, instance_id = self.instance_id })
@@ -127,8 +136,9 @@ end
 
 ---@param session sidekick.cli.Session
 function M.persist(session)
-  if session.parent and session.title ~= nil then
-    session.parent.title = session.title
+  if session.parent and (session.title ~= nil or session.conversation ~= nil) then
+    session.parent.title = session.title or session.parent.title
+    session.parent.conversation = session.conversation or session.parent.conversation
     M.persist(session.parent)
   end
   local data = {
@@ -136,6 +146,7 @@ function M.persist(session)
     cwd = session.cwd,
     instance_id = session.instance_id,
     title = session.title,
+    conversation = session.conversation,
   }
   Util.set_state(session.sid, data)
   if session.id and session.id ~= session.sid then
@@ -144,6 +155,18 @@ function M.persist(session)
   if session.backend == "zellij" and session.mux_session then
     Util.set_state(session.mux_session, data)
   end
+end
+
+--- Record the native provider conversation id as soon as an adapter discovers it.
+---@param session sidekick.cli.Session
+---@param conversation sidekick.cli.Conversation|string
+function M.set_conversation(session, conversation)
+  conversation = type(conversation) == "string" and { id = conversation } or vim.deepcopy(conversation)
+  conversation.provider = conversation.provider or session.tool.name
+  conversation.resumable = conversation.resumable ~= false
+  session.conversation = conversation
+  M.persist(session)
+  return conversation
 end
 
 ---@param name string
@@ -228,6 +251,8 @@ function M.attach(session)
       parent = session,
       instance_id = session.instance_id,
       title = session.title,
+      conversation = session.conversation,
+      hidden = session.hidden,
     })
     session:start()
   end
