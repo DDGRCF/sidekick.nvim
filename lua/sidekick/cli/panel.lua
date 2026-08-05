@@ -880,17 +880,22 @@ function M.setup()
       require("sidekick.cli").new()
     end
   end
+  local function refresh_activation()
+    M.refresh()
+    local active = M.active()
+    local p = panel()
+    if active and p and valid(p.win) then
+      active.win = p.win
+    end
+    Util.emit("SidekickCliActivate", { id = active and active.id or nil, tab = current_tab() })
+  end
   vim.api.nvim_create_autocmd({ "VimResized", "TabEnter" }, {
     group = Config.augroup,
-    callback = function()
-      M.refresh()
-      local active = M.active()
-      local p = panel()
-      if active and p and valid(p.win) then
-        active.win = p.win
-      end
-      Util.emit("SidekickCliActivate", { id = active and active.id or nil, tab = current_tab() })
-    end,
+    callback = refresh_activation,
+  })
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = Config.augroup,
+    callback = M.refresh,
   })
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = Config.augroup,

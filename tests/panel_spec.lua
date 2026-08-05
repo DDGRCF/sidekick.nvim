@@ -163,6 +163,26 @@ describe("cli agent panel", function()
     assert.are.equal(fourth, Panel.active())
   end)
 
+  it("shows hidden tabs after widening the panel window", function()
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "codex", "Two")
+    local third = fake("three", "codex", "Three")
+    local fourth = fake("four", "codex", "Four")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.show(third)
+    Panel.show(fourth)
+    local win = Panel.win(fourth)
+
+    Panel.resize({ width = 50 })
+    assert.is_nil(vim.wo[win].winbar:find("One", 1, true))
+
+    vim.api.nvim_win_set_width(win, vim.o.columns - 2)
+    vim.api.nvim_exec_autocmds("WinResized", {})
+
+    assert.is_not_nil(vim.wo[win].winbar:find("One", 1, true))
+  end)
+
   it("keeps a middle active tab visible while truncating both sides", function()
     local first = fake("one", "codex", "One")
     local second = fake("two", "codex", "Two")
