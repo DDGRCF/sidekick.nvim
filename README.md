@@ -300,6 +300,8 @@ local defaults = {
         enabled = true,
         max_name_length = 28,
         show_close = true,
+        show_status = true, -- show the agent activity icon
+        show_cwd = false, -- include the agent working directory in the title
         ---@type "thin"|"thick"|"slant"|"slope"|"padded_slant"|"padded_slope"|{left:string,right:string}
         separator_style = "thin",
         --- Set per-tool icons here. Unconfigured tools use their name.

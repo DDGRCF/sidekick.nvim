@@ -12,6 +12,7 @@ describe("cli agent panel", function()
   local ids = {} ---@type string[]
   local bufs = {} ---@type integer[]
   local previous_layout
+  local previous_tabs
 
   local function fake(id, tool, title, status)
     local buf = vim.api.nvim_create_buf(false, true)
@@ -49,6 +50,7 @@ describe("cli agent panel", function()
 
   before_each(function()
     previous_layout = Util.get_state("cli-panel-layout")
+    previous_tabs = Util.get_state("cli-panel-tabs")
   end)
 
   after_each(function()
@@ -69,7 +71,13 @@ describe("cli agent panel", function()
     else
       Util.set_state("cli-panel-layout", previous_layout)
     end
+    if previous_tabs == nil then
+      Util.del_state("cli-panel-tabs")
+    else
+      Util.set_state("cli-panel-tabs", previous_tabs)
+    end
     previous_layout = nil
+    previous_tabs = nil
   end)
 
   it("reuses one window for multiple agent buffers", function()
@@ -181,6 +189,104 @@ describe("cli agent panel", function()
     vim.api.nvim_exec_autocmds("WinResized", {})
 
     assert.is_not_nil(vim.wo[win].winbar:find("One", 1, true))
+  end)
+
+  it("opens the agent picker from a hidden-tab marker", function()
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "codex", "Two")
+    local third = fake("three", "codex", "Three")
+    local fourth = fake("four", "codex", "Four")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.show(third)
+    Panel.show(fourth)
+    Panel.resize({ width = 50 })
+    Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    local token
+    for id, item in pairs(Panel.clicks) do
+      if item.action == "pick" then
+        token = id
+        break
+      end
+    end
+    assert.is_not_nil(token)
+
+    local original_pick = Panel.pick
+    local calls = 0
+    Panel.pick = function()
+      calls = calls + 1
+    end
+    _G.SidekickCliTabClick(token)
+    Panel.pick = original_pick
+
+    assert.are.equal(1, calls)
+  end)
+
+  it("disambiguates duplicate tab titles", function()
+    local first = fake("one", "codex", "Same title")
+    local second = fake("two", "codex", "Same title")
+    Panel.show(first)
+    Panel.show(second)
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    assert.matches("Same title · #one", line)
+    assert.matches("Same title · #two", line)
+  end)
+
+  it("keeps duplicate title identifiers visible when titles are truncated", function()
+    local old_max_name_length = Config.cli.win.tabs.max_name_length
+    Config.cli.win.tabs.max_name_length = 5
+    local first = fake("one", "codex", "Same title")
+    local second = fake("two", "codex", "Same title")
+    Panel.show(first)
+    Panel.show(second)
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    Config.cli.win.tabs.max_name_length = old_max_name_length
+
+    assert.matches("#one", line)
+    assert.matches("#two", line)
+  end)
+
+  it("optionally includes cwd and status metadata in tabs", function()
+    local old_cwd = Config.cli.win.tabs.show_cwd
+    local old_status = Config.cli.win.tabs.show_status
+    local first = fake("metadata", "codex", "Metadata", "working")
+    first.cwd = "/tmp/sidekick"
+    Config.cli.win.tabs.show_cwd = true
+    Config.cli.win.tabs.show_status = false
+    Panel.show(first)
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    Config.cli.win.tabs.show_cwd = old_cwd
+    Config.cli.win.tabs.show_status = old_status
+
+    assert.matches("/tmp/sidekick", line)
+    assert.is_nil(line:find(Config.cli.win.tabs.status.working, 1, true))
+  end)
+
+  it("omits the status spacer from picker labels when status is hidden", function()
+    local old_status = Config.cli.win.tabs.show_status
+    local old_picker = Config.cli.picker
+    local old_select = vim.ui.select
+    local first = fake("picker-status", "codex", "Picker status")
+    local seen_items
+    Config.cli.win.tabs.show_status = false
+    Config.cli.picker = "telescope"
+    vim.ui.select = function(items)
+      seen_items = items
+    end
+
+    Panel.show(first)
+    Panel.pick()
+
+    Config.cli.win.tabs.show_status = old_status
+    Config.cli.picker = old_picker
+    vim.ui.select = old_select
+
+    assert.are.equal("codex: Picker status", seen_items[1].label)
   end)
 
   it("keeps a middle active tab visible while truncating both sides", function()
@@ -483,6 +589,66 @@ describe("cli agent panel", function()
     assert.are.equal(5, cfg.height)
     assert.are.equal(1, cfg.row)
     assert.are.equal(1, cfg.col)
+  end)
+
+  it("shows icons in the panel layout picker", function()
+    local old_picker = Config.cli.picker
+    local old_select = vim.ui.select
+    local seen_items
+    local seen_opts
+    Config.cli.picker = "telescope"
+    local select_callback
+    vim.ui.select = function(items, opts, cb)
+      seen_items = items
+      seen_opts = opts
+      select_callback = cb
+    end
+
+    local first = fake("layout-picker", "codex", "Layout picker")
+    Panel.show(first)
+    Panel.move()
+    select_callback(seen_items[5])
+
+    Config.cli.picker = old_picker
+    vim.ui.select = old_select
+    assert.are.same({ "left", "right", "top", "bottom", "float" }, vim.tbl_map(function(item)
+      return item.value
+    end, seen_items))
+    assert.matches("^← Left$", seen_opts.format_item(seen_items[1]))
+    assert.matches("^□ Float$", seen_opts.format_item(seen_items[5]))
+    assert.are.equal("float", Panel.layout())
+  end)
+
+  it("restores tab order and pin state", function()
+    local first = fake("order-one", "codex", "One")
+    local second = fake("order-two", "codex", "Two")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.reorder(-1)
+    Panel.pin()
+
+    Panel.hide()
+    Panel.panels[vim.api.nvim_get_current_tabpage()] = nil
+    Panel.show(first)
+    Panel.show(second)
+
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    assert.are.same({ second.id, first.id }, p.order)
+    assert.is_true(p.pinned[second.id])
+  end)
+
+  it("places a remembered tab before a new tab during restore", function()
+    local first = fake("remembered", "codex", "Remembered")
+    local second = fake("new", "codex", "New")
+    Panel.show(first)
+    Panel.hide()
+    Panel.panels[vim.api.nvim_get_current_tabpage()] = nil
+
+    Panel.show(second)
+    Panel.show(first)
+
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    assert.are.same({ first.id, second.id }, p.order)
   end)
 
   it("remembers the last panel layout", function()

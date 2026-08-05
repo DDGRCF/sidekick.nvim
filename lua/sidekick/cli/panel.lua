@@ -5,7 +5,16 @@ local Util = require("sidekick.util")
 local M = {}
 
 local layout_state_key = "cli-panel-layout"
+local tabs_state_key = "cli-panel-tabs"
+local max_tab_history = 100
 local layouts = { "left", "right", "top", "bottom", "float" }
+local layout_options = {
+  { value = "left", label = "Left", icon = "←" },
+  { value = "right", label = "Right", icon = "→" },
+  { value = "top", label = "Top", icon = "↑" },
+  { value = "bottom", label = "Bottom", icon = "↓" },
+  { value = "float", label = "Float", icon = "□" },
+}
 
 ---@class sidekick.cli.Panel
 ---@field tab integer
@@ -84,6 +93,31 @@ local function remembered_layout()
   return valid_layout(value) and value or nil
 end
 
+---@return {order:string[],pinned:table<string,boolean>}
+local function remembered_tabs()
+  local value = Util.get_state(tabs_state_key)
+  local order = {}
+  local pinned = {}
+  if type(value) ~= "table" then
+    return { order = order, pinned = pinned }
+  end
+  if type(value.order) == "table" then
+    for _, key in ipairs(value.order) do
+      if type(key) == "string" and key ~= "" and not vim.list_contains(order, key) then
+        order[#order + 1] = key
+      end
+    end
+  end
+  if type(value.pinned) == "table" then
+    for key, is_pinned in pairs(value.pinned) do
+      if type(key) == "string" and is_pinned == true then
+        pinned[key] = true
+      end
+    end
+  end
+  return { order = order, pinned = pinned }
+end
+
 ---@param create? boolean
 ---@return sidekick.cli.Panel?
 local function panel(create)
@@ -120,6 +154,107 @@ local function clean(p)
   if p.active and not vim.list_contains(p.order, p.active) then
     p.active = p.order[1]
   end
+end
+
+---@param t sidekick.cli.Terminal
+---@return string
+local function agent_key(t)
+  return History.agent_key(t)
+end
+
+---@param p sidekick.cli.Panel
+local function persist_tabs(p)
+  local saved = remembered_tabs()
+  local current = {} ---@type string[]
+  local current_set = {} ---@type table<string,boolean>
+  local pinned = saved.pinned
+
+  for _, id in ipairs(p.order) do
+    local t = terminal(id)
+    local key = t and agent_key(t) or nil
+    if key and key ~= "" and not current_set[key] then
+      current_set[key] = true
+      current[#current + 1] = key
+      pinned[key] = p.pinned[id] == true or nil
+    end
+  end
+
+  local retained = {} ---@type string[]
+  local first_saved_index
+  for _, key in ipairs(saved.order) do
+    if current_set[key] then
+      if not first_saved_index then
+        first_saved_index = #retained + 1
+      end
+    else
+      retained[#retained + 1] = key
+    end
+  end
+  local insert_at = #retained + 1
+  if first_saved_index then
+    insert_at = first_saved_index
+  end
+  local order = {} ---@type string[]
+  for index, key in ipairs(retained) do
+    if index == insert_at then
+      vim.list_extend(order, current)
+    end
+    order[#order + 1] = key
+  end
+  if insert_at > #retained then
+    vim.list_extend(order, current)
+  end
+  if #order > max_tab_history then
+    local dropped = #order - max_tab_history
+    local trimmed = {} ---@type string[]
+    for _, key in ipairs(order) do
+      if dropped > 0 and not current_set[key] then
+        dropped = dropped - 1
+      else
+        trimmed[#trimmed + 1] = key
+      end
+    end
+    while #trimmed > max_tab_history do
+      table.remove(trimmed, 1)
+    end
+    order = trimmed
+  end
+  local active = {} ---@type table<string,boolean>
+  for _, key in ipairs(order) do
+    active[key] = true
+  end
+  for key in pairs(pinned) do
+    if not active[key] then
+      pinned[key] = nil
+    end
+  end
+  Util.set_state(tabs_state_key, { order = order, pinned = pinned })
+end
+
+---@param p sidekick.cli.Panel
+---@param t sidekick.cli.Terminal
+local function add_ordered(p, t)
+  local saved = remembered_tabs()
+  local ranks = {} ---@type table<string,integer>
+  for index, key in ipairs(saved.order) do
+    ranks[key] = index
+  end
+
+  local key = agent_key(t)
+  local target = ranks[key]
+  local index = #p.order + 1
+  if target then
+    for i, id in ipairs(p.order) do
+      local current = terminal(id)
+      local rank = current and ranks[agent_key(current)] or nil
+      if not rank or rank > target then
+        index = i
+        break
+      end
+    end
+  end
+  table.insert(p.order, index, t.id)
+  p.pinned[t.id] = saved.pinned[key] == true or nil
 end
 
 local function contains(list, value)
@@ -174,11 +309,56 @@ local function truncate_text(value, max_width)
 end
 
 ---@param t sidekick.cli.Terminal
----@param max_width? integer
-local function title_text(t, max_width)
+---@return string
+local function raw_title(t)
   local value = t.title or t.tool.name
-  value = value:gsub("[%c\r\n]+", " ")
-  return truncate_text(value, max_width or Config.cli.win.tabs.max_name_length)
+  return tostring(value):gsub("[%c\r\n]+", " ")
+end
+
+---@param t sidekick.cli.Terminal
+---@return string
+local function cwd_text(t)
+  if Config.cli.win.tabs.show_cwd ~= true or type(t.cwd) ~= "string" or t.cwd == "" then
+    return ""
+  end
+  local cwd = vim.fn.fnamemodify(t.cwd, ":~")
+  return cwd ~= "" and (" · " .. cwd) or ""
+end
+
+---@param t sidekick.cli.Terminal
+---@param max_width? integer
+---@param suffix? string
+local function title_text(t, max_width, suffix)
+  local value = raw_title(t)
+  local suffix_text = suffix and suffix ~= "" and (" · " .. suffix) or ""
+  local width = max_width or Config.cli.win.tabs.max_name_length
+  if suffix_text ~= "" then
+    local suffix_width = vim.api.nvim_strwidth(suffix_text)
+    if suffix_width >= width then
+      return truncate_text(suffix, width)
+    end
+    return truncate_text(value .. cwd_text(t), width - suffix_width) .. suffix_text
+  end
+  return truncate_text(value .. cwd_text(t), width)
+end
+
+---@param items {id:string,t:sidekick.cli.Terminal}[]
+---@return table<string,string>
+local function duplicate_suffixes(items)
+  local counts = {} ---@type table<string,integer>
+  for _, item in ipairs(items) do
+    local key = raw_title(item.t)
+    counts[key] = (counts[key] or 0) + 1
+  end
+  local ret = {} ---@type table<string,string>
+  for _, item in ipairs(items) do
+    local key = raw_title(item.t)
+    if counts[key] > 1 then
+      local id = tostring(item.t.instance_id or item.t.sid or item.t.id or "")
+      ret[item.id] = "#" .. id:sub(-8)
+    end
+  end
+  return ret
 end
 
 ---@param t sidekick.cli.Terminal
@@ -197,6 +377,9 @@ local function agent_icon(t)
 end
 
 local function status_icon_text(t)
+  if Config.cli.win.tabs.show_status == false then
+    return ""
+  end
   return Config.cli.win.tabs.status[t.status or "idle"] or "○"
 end
 
@@ -308,11 +491,13 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
   return table.concat(parts)
 end
 
-local function render_truncation(count)
+---@param count integer
+---@param p sidekick.cli.Panel
+local function render_truncation(count, p)
   if count == 0 then
     return ""
   end
-  return ("%%#SidekickCliTabSeparator#%s%%T"):format(escape(truncation_marker(count)))
+  return click("pick", p) .. ("%%#SidekickCliTabSeparator#%s%%T"):format(escape(truncation_marker(count)))
 end
 
 ---@param p sidekick.cli.Panel
@@ -330,9 +515,15 @@ function M.render(p)
       items[#items + 1] = {
         id = id,
         t = t,
-        width = tab_width(p, t, left_separator, right_separator),
+        width = 0,
       }
     end
+  end
+  local suffixes = duplicate_suffixes(items)
+  local titles = {} ---@type table<string,string>
+  for _, item in ipairs(items) do
+    titles[item.id] = title_text(item.t, nil, suffixes[item.id])
+    item.width = tab_width(p, item.t, left_separator, right_separator, titles[item.id])
   end
 
   local active = 1
@@ -351,15 +542,15 @@ function M.render(p)
     if first == active and last == active and items[active].width > available then
       local t = items[active].t
       local fixed_width = tab_width(p, t, left_separator, right_separator, "")
-      active_title = title_text(t, math.max(0, available - fixed_width))
+      active_title = title_text(t, math.max(0, available - fixed_width), suffixes[items[active].id])
     end
   end
-  parts[#parts + 1] = render_truncation(hidden_left)
+  parts[#parts + 1] = render_truncation(hidden_left, p)
   for i = first, last do
-    local title_value = i == active and active_title or nil
+    local title_value = i == active and (active_title or titles[items[i].id]) or titles[items[i].id]
     parts[#parts + 1] = render_tab(p, items[i].t, left_separator, right_separator, title_value)
   end
-  parts[#parts + 1] = render_truncation(hidden_right)
+  parts[#parts + 1] = render_truncation(hidden_right, p)
   parts[#parts + 1] = "%="
   parts[#parts + 1] = click("new", p)
   parts[#parts + 1] = "%#SidekickCliTab#+ %T"
@@ -465,7 +656,8 @@ function M.show(t, focus)
     end
   end
   if not contains(p.order, t.id) then
-    p.order[#p.order + 1] = t.id
+    add_ordered(p, t)
+    persist_tabs(p)
   end
   local changed = p.active ~= t.id
   if changed then
@@ -572,6 +764,7 @@ function M.reorder(step)
   if idx > 0 and idx ~= to then
     local id = table.remove(p.order, idx)
     table.insert(p.order, to, id)
+    persist_tabs(p)
     M.refresh()
   end
 end
@@ -580,6 +773,7 @@ function M.pin()
   local p = panel()
   if p and p.active then
     p.pinned[p.active] = not p.pinned[p.active] or nil
+    persist_tabs(p)
     M.refresh()
   end
 end
@@ -615,6 +809,7 @@ function M.remove(id)
           close_window(p)
         end
       end
+      persist_tabs(p)
     end
   end
   M.refresh()
@@ -662,13 +857,22 @@ function M.pick()
   end
   clean(p)
   local items = {} ---@type {id:string,label:string,key:string}[]
+  local tab_items = {} ---@type {id:string,t:sidekick.cli.Terminal}[]
   for _, id in ipairs(p.order) do
     local t = terminal(id)
-    local key = History.agent_key(t)
+    if t then
+      tab_items[#tab_items + 1] = { id = id, t = t }
+    end
+  end
+  local suffixes = duplicate_suffixes(tab_items)
+  for _, item in ipairs(tab_items) do
+    local t = item.t
+    local status = status_icon(t)
+    local prefix = agent_icon(t) .. (status ~= "" and (" " .. status) or "")
     items[#items + 1] = {
-      id = id,
-      label = ("%s %s: %s"):format(agent_icon(t), status_icon(t), t.title or t.tool.name),
-      key = key,
+      id = item.id,
+      label = ("%s: %s"):format(prefix, title_text(t, nil, suffixes[item.id])),
+      key = agent_key(t),
     }
   end
   History.sort(items, "agents", function(item)
@@ -692,10 +896,31 @@ function M.pick()
   end)
 end
 
----@param value string|{layout?:string}
+local function pick_layout()
+  local select = vim.ui.select
+  local ok, Snacks = pcall(require, "snacks")
+  if Config.cli.picker == "snacks" and ok and Snacks.picker and Snacks.picker.select then
+    select = Snacks.picker.select
+  end
+  select(layout_options, {
+    prompt = "Select panel layout:",
+    kind = "sidekick_cli_layout",
+    format_item = function(item)
+      return ("%s %s"):format(item.icon, item.label)
+    end,
+  }, function(item)
+    if item then
+      M.move(item.value)
+    end
+  end)
+end
+
+---@param value? string|{layout?:string}
 function M.move(value)
   local layout = type(value) == "table" and value.layout or value --[[@as string?]]
-  layout = layout or Config.cli.win.layout
+  if not layout then
+    return pick_layout()
+  end
   if not valid_layout(layout) then
     return Util.error("Invalid Sidekick panel layout: " .. tostring(layout))
   end
@@ -876,6 +1101,8 @@ function M.setup()
       M.select(item.id)
     elseif item.action == "close" then
       M.close(item.id)
+    elseif item.action == "pick" then
+      M.pick()
     elseif item.action == "new" then
       require("sidekick.cli").new()
     end
