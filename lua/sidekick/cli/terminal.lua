@@ -1,4 +1,6 @@
+local Activity = require("sidekick.cli.activity")
 local Config = require("sidekick.config")
+local Panel = require("sidekick.cli.panel")
 local Session = require("sidekick.cli.session")
 local Util = require("sidekick.util")
 
@@ -20,6 +22,10 @@ local Util = require("sidekick.util")
 ---@field win? integer
 ---@field scrollback? sidekick.cli.Scrollback
 ---@field normal_mode? boolean
+---@field status? sidekick.cli.ActivityStatus
+---@field last_activity? integer
+---@field activity_timer? uv.uv_timer_t
+---@field _sidekick_working? boolean
 local M = {}
 M.__index = M
 M.priority = 100
@@ -57,7 +63,6 @@ local wo = {
   signcolumn = "no", -- left padding interferes with terminal reflow, so disable
   statuscolumn = "", -- left padding interferes with terminal reflow, so disable
   spell = false,
-  winbar = "",
   wrap = false,
 }
 
@@ -65,24 +70,6 @@ local wo = {
 local bo = {
   swapfile = false,
   filetype = "sidekick_terminal",
-}
-
-local win_opts = {
-  ---@type vim.api.keyset.win_config
-  float = {
-    focusable = true,
-    relative = "editor",
-    style = "minimal",
-    row = 0.5,
-    col = 0.5,
-    title = " Sidekick ",
-    title_pos = "center",
-  },
-  ---@type vim.api.keyset.win_config
-  split = {
-    win = -1,
-    style = "minimal",
-  },
 }
 
 ---@param session_id string
@@ -106,6 +93,7 @@ function M:init()
   self.ctime = vim.uv.hrtime()
   self.atime = self.ctime
   self.send_queue = {}
+  self.status = self.status or "idle"
   self.group = vim.api.nvim_create_augroup("sidekick_cli_" .. self.id, { clear = true })
   M.terminals[self.id] = self
   if Config.cli.win.config then
@@ -126,7 +114,20 @@ function M:buf_valid()
 end
 
 function M:win_valid()
-  return self.win and vim.api.nvim_win_is_valid(self.win)
+  return self:window() ~= nil
+end
+
+function M:window()
+  local win = Panel.win(self)
+  if win then
+    self.win = win
+    return win
+  end
+  if self:buf_valid() then
+    return vim.tbl_filter(function(w)
+      return vim.api.nvim_win_get_buf(w) == self.buf
+    end, vim.api.nvim_list_wins())[1] or nil
+  end
 end
 
 ---@param buf? integer
@@ -139,8 +140,12 @@ end
 
 ---@param opts? vim.wo
 function M:wo(opts)
+  local win = self:window()
+  if not win then
+    return
+  end
   for k, v in pairs(merge(vim.deepcopy(wo), vim.deepcopy(self.opts.wo), opts or {})) do
-    vim.api.nvim_set_option_value(k, v, { win = self.win, scope = "local" })
+    vim.api.nvim_set_option_value(k, v, { win = win, scope = "local" })
   end
 end
 
@@ -150,11 +155,24 @@ function M:start()
   end
 
   self.buf = vim.api.nvim_create_buf(false, true)
+  Activity.starting(self)
   self:bo()
   vim.b[self.buf].sidekick_cli = self.tool
+  vim.b[self.buf].sidekick_session_id = self.id
 
   self:keys()
   self:open_win()
+
+  vim.api.nvim_buf_attach(self.buf, false, {
+    on_lines = function(_, buf, _, first, _, last)
+      local output = table.concat(vim.api.nvim_buf_get_lines(buf, first, last, false), "\n")
+      vim.schedule(function()
+        if self:buf_valid() then
+          Activity.output(self, output)
+        end
+      end)
+    end,
+  })
 
   -- track if we are in normal mode or terminal mode
   vim.api.nvim_create_autocmd({ "TermLeave", "TermEnter" }, {
@@ -190,6 +208,7 @@ function M:start()
     group = self.group,
     buffer = self.buf,
     callback = function()
+      Activity.exit(self, vim.v.event.status)
       local ms = (vim.uv.hrtime() - self.atime) / 1e6
       if ms < TERM_CLOSE_DELAY then
         -- don't close if the terminal closed too quickly
@@ -260,7 +279,8 @@ function M:start()
       while #lines > 0 and lines[#lines] == "" do
         table.remove(lines)
       end
-      local cursor = vim.api.nvim_win_get_cursor(self.win)
+      local win = self:window()
+      local cursor = win and vim.api.nvim_win_get_cursor(win) or { 1, 0 }
       if #lines > READY_INIT_LINES and cursor[1] > 3 then
         ready_init = ready_init or vim.uv.hrtime()
         if #lines ~= ready_lines then
@@ -277,7 +297,8 @@ function M:start()
 
   self.timer = vim.uv.new_timer()
 
-  vim.api.nvim_win_call(self.win, function()
+  local job_win = assert(self:window(), "Sidekick panel is not open")
+  vim.api.nvim_win_call(job_win, function()
     ---@type table<string, string|false>
     local env = vim.tbl_extend("force", {}, vim.uv.os_environ(), self.tool.config.env or {}, self.tool.env or {}, {
       NVIM = vim.v.servername,
@@ -322,10 +343,11 @@ function M:fix_cursorline()
   if not self:win_valid() then
     return
   end
-  self:wo({ cursorline = vim.fn.mode() ~= "t" and vim.api.nvim_get_current_win() == self.win })
+  self:wo({ cursorline = vim.fn.mode() ~= "t" and vim.api.nvim_get_current_win() == self:window() })
 end
 
 function M:on_ready()
+  Activity.ready(self)
   self.timer:start(0, SEND_DELAY, function()
     local next = table.remove(self.send_queue, 1) ---@type string?
     if next then
@@ -351,40 +373,7 @@ function M:open_win()
   if self:is_open() or not self.buf then
     return
   end
-
-  local is_float = self.opts.layout == "float"
-
-  ---@type vim.api.keyset.win_config
-  local opts = vim.tbl_extend(
-    "force",
-    vim.deepcopy(is_float and win_opts.float or win_opts.split),
-    vim.deepcopy(is_float and self.opts.float or self.opts.split)
-  )
-
-  opts.width = opts.width <= 1 and math.floor(vim.o.columns * opts.width) or opts.width
-  opts.height = opts.height <= 1 and math.floor(vim.o.lines * opts.height) or opts.height
-
-  if is_float then
-    opts.width, opts.height = math.max(opts.width, 80), math.max(opts.height, 10) -- minimum size
-    opts.row = opts.row <= 1 and math.floor((vim.o.lines - opts.height) * opts.row) or opts.row
-    opts.col = opts.col <= 1 and math.floor((vim.o.columns - opts.width) * opts.col) or opts.col
-  else
-    opts.width = opts.width > 0 and opts.width or nil -- auto split width
-    opts.height = opts.height > 0 and opts.height or nil -- auto split height
-    opts.vertical = self.opts.layout == "top" or self.opts.layout == "bottom"
-    opts.split = ({ top = "above", left = "left", bottom = "below", right = "right" })[self.opts.layout] or "right"
-  end
-
-  self.win = vim.api.nvim_open_win(self.buf, false, opts)
-
-  if opts.vertical then
-    vim.wo[self.win].winfixheight = true
-  else
-    vim.wo[self.win].winfixwidth = true
-  end
-  vim.w[self.win].sidekick_cli = self.tool
-  vim.w[self.win].sidekick_session_id = self.id
-  self:wo()
+  Panel.show(self, false)
 end
 
 function M:focus()
@@ -392,9 +381,7 @@ function M:focus()
   if not self:is_running() then
     return self
   end
-  vim.api.nvim_set_current_win(self.win)
-  vim.cmd.startinsert()
-  self.normal_mode = false
+  Panel.show(self, true)
   return self
 end
 
@@ -407,7 +394,7 @@ function M:blur()
 end
 
 function M:is_focused()
-  return vim.api.nvim_get_current_win() == self.win
+  return vim.api.nvim_get_current_win() == Panel.win(self)
 end
 
 function M:show()
@@ -415,30 +402,12 @@ function M:show()
   if not self:is_running() then
     return
   end
-  self:open_win()
+  Panel.show(self, false)
   return self
 end
 
 function M:hide()
-  if self:is_open() then
-    self:blur()
-    local wins = vim.api.nvim_list_wins()
-    if #wins == 1 and wins[1] == self.win then
-      -- last window, switch to another buffer, or create a new one
-      local buf = vim.tbl_filter(function(b)
-        return vim.bo[b].buflisted
-      end, vim.api.nvim_list_bufs())[1] --[[@as integer?]]
-      if buf then
-        -- switch to another buffer
-        vim.cmd.sbuffer(buf)
-      else
-        -- no other buffers to switch to, create a new empty buffer
-        vim.cmd.enew()
-      end
-    end
-    pcall(vim.api.nvim_win_close, self.win, true)
-    self.win = nil
-  end
+  Panel.hide(self)
   return self
 end
 
@@ -461,7 +430,14 @@ function M:close()
     self.timer:close()
     self.timer = nil
   end
-  self:hide()
+  Activity.close(self)
+  Panel.remove(self.id)
+  if not self.parent and not self.mux_backend then
+    Util.del_state(self.sid)
+  end
+  if self.id ~= self.sid then
+    Util.del_state(self.id)
+  end
   if self:is_running() then
     vim.fn.jobstop(self.job)
     self.job = nil
@@ -485,7 +461,7 @@ function M:toggle()
 end
 
 function M:is_open()
-  return self.win and vim.api.nvim_win_is_valid(self.win)
+  return Panel.win(self) ~= nil
 end
 
 ---@param input string
@@ -493,6 +469,9 @@ function M:send(input)
   self:show()
   if not self:is_running() then
     return
+  end
+  if input:find("[\r\n]") then
+    Activity.input(self, input)
   end
   table.insert(self.send_queue, input)
 end
@@ -550,7 +529,7 @@ function M:keys(buf)
 end
 
 function M:is_float()
-  return self.opts.layout == "float"
+  return Panel.layout() == "float"
 end
 
 return M

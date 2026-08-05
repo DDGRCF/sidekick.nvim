@@ -12,14 +12,19 @@ local PANE_FORMAT =
 
 ---@return sidekick.cli.terminal.Cmd?
 function M:attach()
-  if self.sid == self.mux_session then
-    return { cmd = { "tmux", "attach-session", "-t", self.sid } }
+  if self:is_session() then
+    return { cmd = { "tmux", "attach-session", "-t", self.mux_session } }
   end
+end
+
+function M:is_session()
+  local legacy = require("sidekick.cli.session").sid({ tool = self.tool.name, cwd = self.cwd })
+  return self.mux_session == self.sid or self.mux_session == legacy
 end
 
 function M:init()
   if self.started then
-    self.external = self.sid ~= self.mux_session
+    self.external = not self:is_session()
   else
     self.external = vim.env.TMUX and Config.cli.mux.create ~= "terminal"
     self.mux_session = self.sid
@@ -63,6 +68,7 @@ function M:spawn(cmd)
     self.mux_session = pane.session_name
     self.tmux_pid = pane.pid
     self.started = true
+    require("sidekick.cli.session").persist(self)
   end
 end
 
@@ -134,16 +140,23 @@ function M.sessions()
     procs:walk(pane.pid, function(proc)
       for _, tool in pairs(tools) do
         if tool:is_proc(proc) then
+          local meta = Util.get_state(pane.skid) or Util.get_state(pane.session_name) or {}
+          local session_cwd = proc.cwd or pane.cwd
+          local legacy = require("sidekick.cli.session").sid({ tool = tool.name, cwd = session_cwd })
+          local suffix = pane.session_name:match("^" .. vim.pesc(legacy) .. " ([0-9a-fA-F]+)$")
+          suffix = suffix and #suffix == 8 and suffix or nil
           local pids = Procs.pids(pane.pid)
           vim.list_extend(pids, clients[pane.session_id] or {})
           ret[#ret + 1] = {
             id = pane.skid,
-            cwd = proc.cwd or pane.cwd,
+            cwd = session_cwd,
             tool = tool,
             tmux_pane_id = pane.id,
             tmux_pid = pane.pid,
             mux_session = pane.session_name,
             pids = pids,
+            instance_id = meta.instance_id or suffix,
+            title = meta.title,
           }
           return true
         end

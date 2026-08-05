@@ -32,6 +32,30 @@ M.commands = {
     end,
   },
   cli = {
+    new = function(opts)
+      require("sidekick.cli").new(opts)
+    end,
+    switch = function(opts)
+      require("sidekick.cli").switch(opts)
+    end,
+    next = function(opts)
+      require("sidekick.cli").next(opts)
+    end,
+    prev = function(opts)
+      require("sidekick.cli").prev(opts)
+    end,
+    rename = function(opts)
+      require("sidekick.cli").rename(opts)
+    end,
+    move = function(opts)
+      require("sidekick.cli").move(opts)
+    end,
+    resize = function(opts)
+      require("sidekick.cli").resize(opts)
+    end,
+    sync = function(opts)
+      require("sidekick.cli").sync(opts)
+    end,
     show = function(opts)
       require("sidekick.cli").show(opts)
     end,
@@ -117,6 +141,14 @@ function M.parse(str, opts)
     end
   end
   if type(cmd) == "function" then
+    if M.commands.cli and cmd == M.commands.cli.new and parts[1] and not parts[1]:find("=", 1, true) then
+      local name = table.remove(parts, 1)
+      local args = M.argparse(table.concat(parts, " "), opts)
+      if args then
+        args.name = name
+      end
+      return cmd, args
+    end
     return cmd, M.argparse(table.concat(parts, " "), opts)
   end
   local prefix = #parts > 0 and parts[1] or ""
@@ -129,6 +161,12 @@ end
 ---@param line string
 function M.complete(line)
   line = line:gsub("^%s*Sidekick%s+", "")
+  local tool = line:match("^cli%s+new%s+([^%s=]*)$")
+  if tool then
+    return vim.tbl_filter(function(name)
+      return name:find(tool, 1, true) == 1
+    end, vim.tbl_keys(require("sidekick.config").tools()))
+  end
   local cmd = M.parse(line, { error = false })
   return type(cmd) == "table" and cmd or {}
 end

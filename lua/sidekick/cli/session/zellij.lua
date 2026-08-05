@@ -39,11 +39,16 @@ function M:terminal()
     )) --[[@as string]]
   end
 
-  local session = self.sid
+  local session = self.started and self.mux_session or self.sid
 
   local layout_file = Config.state("zellij-layout-" .. session .. ".kdl")
   vim.fn.writefile(vim.split(layout, "\n"), layout_file)
-  Util.set_state(session, { tool = self.tool.name, cwd = self.cwd })
+  Util.set_state(session, {
+    tool = self.tool.name,
+    cwd = self.cwd,
+    instance_id = self.instance_id,
+    title = self.title,
+  })
 
   return {
     cmd = { "zellij", "--layout", layout_file, "attach", "--create", session },
@@ -103,6 +108,8 @@ function M.sessions()
         tool = state.tool,
         mux_session = s,
         pids = find_pids(s),
+        instance_id = state.instance_id,
+        title = state.title,
       }
     end
   end

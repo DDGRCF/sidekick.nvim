@@ -84,6 +84,14 @@ describe("commands", function()
         expected_args = { name = "copilot" },
       },
       {
+        name = "accepts a positional tool for a new agent",
+        input = "cli new codex focus=false",
+        expect_command = function()
+          return Commands.commands.cli.new
+        end,
+        expected_args = { name = "codex", focus = false },
+      },
+      {
         name = "completes root commands",
         input = "",
         expected_completions = { "cli", "nes" },
@@ -96,7 +104,7 @@ describe("commands", function()
       {
         name = "filters by prefix",
         input = "cli s",
-        expected_completions = { "select", "show", "send" },
+        expected_completions = { "select", "show", "send", "switch", "sync" },
       },
       {
         name = "returns empty for unknown command",
@@ -141,7 +149,12 @@ describe("commands", function()
       {
         name = "suggests subcommands",
         input = "Sidekick cli s",
-        expected = { "select", "show", "send" },
+        expected = { "select", "show", "send", "switch", "sync" },
+      },
+      {
+        name = "suggests tools for a new agent",
+        input = "Sidekick cli new co",
+        expected = { "codex", "copilot" },
       },
       {
         name = "returns empty when no matches",

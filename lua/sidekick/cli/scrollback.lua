@@ -94,11 +94,11 @@ end
 -- Check if the scrollback buffer is open in the terminal window
 function M:is_open()
   local terminal = self.terminal()
-  return terminal
-    and terminal:is_open()
-    and self.buf
-    and vim.api.nvim_buf_is_valid(self.buf)
-    and vim.api.nvim_win_get_buf(terminal.win) == self.buf
+  if not (terminal and terminal:is_open() and self.buf and vim.api.nvim_buf_is_valid(self.buf)) then
+    return false
+  end
+  local win = terminal:window()
+  return win and vim.api.nvim_win_get_buf(win) == self.buf or false
 end
 
 function M:is_focused()
@@ -109,11 +109,12 @@ end
 ---@param win_pos? sidekick.Pos
 function M:open(win_pos)
   local terminal = self.terminal()
-  if not terminal then
+  local win = terminal and terminal:window()
+  if not (terminal and win) then
     return
   end
 
-  self.cursor = vim.api.nvim_win_get_cursor(terminal.win)
+  self.cursor = vim.api.nvim_win_get_cursor(win)
 
   local text = terminal.parent and terminal.parent:dump() or nil
   if not text then
@@ -126,7 +127,7 @@ function M:open(win_pos)
   self.buf = vim.api.nvim_create_buf(false, true)
   terminal:bo(self.buf)
   vim.bo[self.buf].bufhidden = "wipe"
-  vim.api.nvim_win_set_buf(terminal.win, self.buf)
+  vim.api.nvim_win_set_buf(win, self.buf)
 
   local term = vim.api.nvim_open_term(self.buf, {})
   terminal:keys(self.buf)
@@ -142,15 +143,16 @@ end
 
 function M:close()
   local terminal = self.terminal()
-  if not terminal then
+  local win = terminal and terminal:window()
+  if not (terminal and win) then
     return
   end
   if vim.fn.mode() == "t" then
     -- switch to normal mode first
     vim.cmd.stopinsert()
   end
-  if terminal:buf_valid() and terminal:win_valid() then
-    vim.api.nvim_win_set_buf(terminal.win, terminal.buf)
+  if terminal:buf_valid() then
+    vim.api.nvim_win_set_buf(win, terminal.buf)
     terminal:wo()
   end
 end
@@ -228,7 +230,8 @@ function M:scroll(win_pos)
   -- the mouse event is processed
 
   local buf = self.buf or terminal.buf
-  if not (buf and vim.api.nvim_buf_is_valid(buf) and terminal:win_valid()) then
+  local win = terminal:window()
+  if not (buf and vim.api.nvim_buf_is_valid(buf) and win) then
     return
   end
 
@@ -238,11 +241,11 @@ function M:scroll(win_pos)
   while lnum > 1 and not lines[lnum]:find("%S") do
     lnum = lnum - 1
   end
-  local height = vim.api.nvim_win_get_height(terminal.win)
+  local height = vim.api.nvim_win_get_height(win)
   local topline = math.max(1, #lines - height + 1) -- scroll to bottom
   lnum = math.min(math.max(topline, lnum), topline + height - 1)
   col = math.min(math.max(0, col), #lines[lnum] + 1)
-  vim.api.nvim_win_call(terminal.win, function()
+  vim.api.nvim_win_call(win, function()
     vim.fn.winrestview({
       topline = topline,
       lnum = lnum, -- cursor to last non-blank line

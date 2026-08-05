@@ -33,6 +33,11 @@ local defaults = {
   -- Work with AI cli tools directly from within Neovim
   cli = {
     watch = true, -- notify Neovim of file changes done by AI CLI tools
+    status = {
+      -- With no tool-specific status adapter, output becoming quiet after this
+      -- delay marks a working agent as done.
+      quiet_ms = 2000,
+    },
     ---@class sidekick.win.Opts
     win = {
       --- This is run when a new terminal is created, before starting it.
@@ -54,19 +59,64 @@ local defaults = {
         width = 80, -- set to 0 for default split width
         height = 20, -- set to 0 for default split height
       },
+      --- Agent tabs shown in the shared Sidekick container. The renderer is
+      --- standalone, but links to bufferline.nvim highlights when available.
+      tabs = {
+        enabled = true,
+        max_name_length = 28,
+        show_close = true,
+        icons = { ---@type table<string, string>
+          default = "󰚩",
+          aider = "󰚩",
+          claude = "󰋦",
+          codex = "",
+          copilot = "",
+          gemini = "󰊭",
+          opencode = "󰨞",
+        },
+        status = { ---@type table<sidekick.cli.ActivityStatus, string>
+          idle = "○",
+          starting = "◌",
+          working = "●",
+          waiting = "◐",
+          done = "●",
+          error = "●",
+        },
+      },
       --- CLI Tool Keymaps (default mode is `t`)
       ---@type table<string, sidekick.cli.Keymap|false>
       -- stylua: ignore
       keys = {
         buffers       = { "<c-b>", "buffers"   , mode = "nt", desc = "open buffer picker" },
         files         = { "<c-f>", "files"     , mode = "nt", desc = "open file picker" },
-        hide_n        = { "q"    , "hide"      , mode = "n" , desc = "hide the terminal window" },
-        hide_ctrl_q   = { "<c-q>", "hide"      , mode = "n" , desc = "hide the terminal window" },
-        hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the terminal window" },
-        hide_ctrl_z   = { "<c-z>", "blur"      , mode = "nt", desc = "go back to the previous window without hiding the terminal" },
+        hide_n        = { "q"    , "hide"      , mode = "n" , desc = "hide the agent container" },
+        hide_ctrl_q   = { "<c-q>", "hide"      , mode = "n" , desc = "hide the agent container" },
+        hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the agent container" },
+        hide_ctrl_z   = { "<c-z>", "blur"      , mode = "nt", desc = "go back to the previous window without hiding the agent container" },
         prompt        = { "<c-p>", "prompt"    , mode = "t" , desc = "insert prompt or context" },
         stopinsert    = { "<c-q>", "stopinsert", mode = "t" , desc = "enter normal mode" },
         normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter normal mode" },
+        agent_prev    = { "<s-h>"       , "prev"            , mode = "n", desc = "previous agent" },
+        agent_prev_b  = { "[b"          , "prev"            , mode = "n", desc = "previous agent" },
+        agent_next    = { "<s-l>"       , "next"            , mode = "n", desc = "next agent" },
+        agent_next_b  = { "]b"          , "next"            , mode = "n", desc = "next agent" },
+        agent_move_l  = { "[B"          , "move_prev"       , mode = "n", desc = "move agent tab left" },
+        agent_move_r  = { "]B"          , "move_next"       , mode = "n", desc = "move agent tab right" },
+        agent_pick    = { "<leader>bj"  , "pick"            , mode = "n", desc = "pick an agent" },
+        agent_back    = { "<leader>bb"  , "previous"        , mode = "n", desc = "previously active agent" },
+        agent_back_bt = { "<leader>`"   , "previous"        , mode = "n", desc = "previously active agent" },
+        agent_pin     = { "<leader>bp"  , "pin"             , mode = "n", desc = "pin agent" },
+        agent_close   = { "<leader>bd"  , "close_current"   , mode = "n", desc = "close agent" },
+        agent_others  = { "<leader>bo"  , "close_others"    , mode = "n", desc = "close other agents" },
+        agent_left    = { "<leader>bl"  , "close_left"      , mode = "n", desc = "close agents to the left" },
+        agent_right   = { "<leader>br"  , "close_right"     , mode = "n", desc = "close agents to the right" },
+        agent_unused  = { "<leader>bP"  , "close_unpinned"  , mode = "n", desc = "close unpinned agents" },
+        agent_hidden  = { "<leader>bi"  , "close_invisible" , mode = "n", desc = "close agents not in this native tab" },
+        agent_delete  = { "<leader>bD"  , "close_panel"     , mode = "n", desc = "close agent and container" },
+        panel_narrow  = { "<m-left>"    , "panel_narrow"    , mode = "n", desc = "make agent container narrower" },
+        panel_widen   = { "<m-right>"   , "panel_widen"     , mode = "n", desc = "make agent container wider" },
+        panel_shorter = { "<m-down>"    , "panel_shorter"   , mode = "n", desc = "make agent container shorter" },
+        panel_taller  = { "<m-up>"      , "panel_taller"    , mode = "n", desc = "make agent container taller" },
         -- Navigate windows in terminal mode. Only active when:
         -- * layout is not "float"
         -- * there is another window in the direction
@@ -222,6 +272,7 @@ function M.setup(opts)
     require("sidekick.status").setup()
 
     M.validate("cli.win.layout", { "float", "left", "bottom", "top", "right" })
+    M.validate("cli.status.quiet_ms", "number")
     M.validate("cli.mux.backend", { "tmux", "zellij" })
     M.validate("cli.mux.create", { "terminal", "window", "split" })
     M.validate("nes.diff.show", { "always", "cursor" })
@@ -282,6 +333,9 @@ function M.tools()
 end
 
 function M.set_hl()
+  local function available(name, fallback)
+    return vim.fn.hlexists(name) == 1 and name or fallback
+  end
   local links = {
     DiffContext = "DiffChange",
     DiffAdd = "DiffText",
@@ -293,6 +347,12 @@ function M.set_hl()
     CliStarted = "DiagnosticWarn",
     CliInstalled = "DiagnosticOk",
     CliUnavailable = "DiagnosticError",
+    CliStatusIdle = "Comment",
+    CliStatusStarting = "DiagnosticInfo",
+    CliStatusWorking = "DiagnosticWarn",
+    CliStatusWaiting = "DiagnosticHint",
+    CliStatusDone = "DiagnosticOk",
+    CliStatusError = "DiagnosticError",
     LocDelim = "Delimiter",
     LocFile = "@markup.link",
     LocNum = "@attribute",
@@ -301,6 +361,15 @@ function M.set_hl()
   }
   for from, to in pairs(links) do
     vim.api.nvim_set_hl(0, "Sidekick" .. from, { link = to, default = true })
+  end
+  local tabs = {
+    CliTab = available("BufferLineBackground", "TabLine"),
+    CliTabSelected = available("BufferLineBufferSelected", "TabLineSel"),
+    CliTabSeparator = available("BufferLineSeparator", "TabLineFill"),
+  }
+  for from, to in pairs(tabs) do
+    local bufferline = to:find("^BufferLine") ~= nil
+    vim.api.nvim_set_hl(0, "Sidekick" .. from, { link = to, default = not bufferline })
   end
 end
 

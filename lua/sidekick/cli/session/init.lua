@@ -18,11 +18,13 @@ M._attached = {} ---@type table<string,sidekick.cli.Session>
 ---@field parent? sidekick.cli.Session
 ---@field mux_session? string
 ---@field mux_backend? string
+---@field instance_id? string unique agent instance id
+---@field title? string user-facing agent title
 
 ---@alias sidekick.cli.session.Opts sidekick.cli.session.State|{cwd?:string,id?:string}
 
 ---@class sidekick.cli.Session: sidekick.cli.session.State
----@field sid string unique id based on tool and cwd
+---@field sid string unique id based on tool, cwd, and instance
 ---@field tool sidekick.cli.Tool
 ---@field backend string
 ---@field dump? fun(self:sidekick.cli.Session):string?
@@ -87,12 +89,26 @@ function M.new(state)
   self.cwd = M.cwd(state)
   -- self.cmd = state.cmd or { cmd = tool.cmd, env = tool.env }
   self.backend = backend
-  self.sid = M.sid({ tool = tool.name, cwd = self.cwd })
+  local saved = self.id and Util.get_state(self.id) or nil
+  if saved and saved.tool == tool.name and M.cwd({ cwd = saved.cwd }) == self.cwd then
+    self.instance_id = self.instance_id or saved.instance_id
+    self.title = self.title or saved.title
+  end
+  self.instance_id = self.instance_id or M.instance(self.id)
+  self.sid = M.sid({ tool = tool.name, cwd = self.cwd, instance_id = self.instance_id })
   self.id = self.id or self.sid
+  M.persist(self)
   if meta ~= super and self.init then
     self:init()
   end
   return self
+end
+
+---@param seed? string
+---@return string
+function M.instance(seed)
+  local value = seed or table.concat({ vim.uv.hrtime(), vim.fn.getpid(), math.random() }, ":")
+  return vim.fn.sha256(value):sub(1, 8)
 end
 
 ---@param opts? {cwd?:string}
@@ -100,11 +116,33 @@ function M.cwd(opts)
   return vim.fs.normalize(vim.fn.fnamemodify(opts and opts.cwd or vim.fn.getcwd(0), ":p"))
 end
 
----@param opts {tool:string, cwd?:string}
+---@param opts {tool:string, cwd?:string, instance_id?:string}
 function M.sid(opts)
   local tool = assert(opts and opts.tool, "missing tool")
   local cwd = M.cwd(opts)
-  return ("%s %s"):format(tool, vim.fn.sha256(cwd):sub(1, 16 - #tool))
+  local base = ("%s %s"):format(tool, vim.fn.sha256(cwd):sub(1, 16 - #tool))
+  return opts.instance_id and (base .. " " .. opts.instance_id) or base
+end
+
+---@param session sidekick.cli.Session
+function M.persist(session)
+  if session.parent and session.title ~= nil then
+    session.parent.title = session.title
+    M.persist(session.parent)
+  end
+  local data = {
+    tool = session.tool.name,
+    cwd = session.cwd,
+    instance_id = session.instance_id,
+    title = session.title,
+  }
+  Util.set_state(session.sid, data)
+  if session.id and session.id ~= session.sid then
+    Util.set_state(session.id, data)
+  end
+  if session.backend == "zellij" and session.mux_session then
+    Util.set_state(session.mux_session, data)
+  end
 end
 
 ---@param name string
@@ -187,6 +225,8 @@ function M.attach(session)
       mux_backend = session.backend,
       mux_session = session.mux_session,
       parent = session,
+      instance_id = session.instance_id,
+      title = session.title,
     })
     session:start()
   end

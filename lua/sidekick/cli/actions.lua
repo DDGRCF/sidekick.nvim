@@ -4,6 +4,10 @@ local Config = require("sidekick.config")
 ---@type table<string, sidekick.cli.Action>
 local M = {}
 
+local function panel()
+  return require("sidekick.cli.panel")
+end
+
 function M.prompt(t)
   vim.cmd.stopinsert() -- needed, since otherwise Neovim will do this
 
@@ -14,6 +18,7 @@ function M.prompt(t)
         vim.cmd.startinsert()
       end)
       if prompt then
+        Cli.title(t, prompt)
         t:send(prompt .. "\n")
       end
     end)
@@ -46,6 +51,78 @@ end
 
 function M.buffers(t)
   picker("buffers", t)
+end
+
+function M.prev()
+  panel().cycle(-1)
+end
+
+function M.next()
+  panel().cycle(1)
+end
+
+function M.move_prev()
+  panel().reorder(-1)
+end
+
+function M.move_next()
+  panel().reorder(1)
+end
+
+function M.pick()
+  panel().pick()
+end
+
+function M.previous()
+  panel().previous()
+end
+
+function M.pin()
+  panel().pin()
+end
+
+function M.close_current()
+  panel().close()
+end
+
+function M.close_unpinned()
+  panel().close_many("unpinned")
+end
+
+function M.close_others()
+  panel().close_many("others")
+end
+
+function M.close_left()
+  panel().close_many("left")
+end
+
+function M.close_right()
+  panel().close_many("right")
+end
+
+function M.close_invisible()
+  panel().close_many("invisible")
+end
+
+function M.close_panel()
+  panel().close_panel()
+end
+
+function M.panel_narrow()
+  panel().adjust(-2, 0)
+end
+
+function M.panel_widen()
+  panel().adjust(2, 0)
+end
+
+function M.panel_shorter()
+  panel().adjust(0, -1)
+end
+
+function M.panel_taller()
+  panel().adjust(0, 1)
 end
 
 ---@param dir "h"|"j"|"k"|"l"

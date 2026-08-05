@@ -161,6 +161,16 @@ function M.split_chars(str)
   return ret
 end
 
+--- Split a string into composed characters without breaking combining marks.
+---@param str string
+function M.split_graphemes(str)
+  local ret = {} ---@type string[]
+  for i = 0, vim.fn.strchars(str, true) - 1 do
+    ret[#ret + 1] = vim.fn.strcharpart(str, i, 1, true)
+  end
+  return ret
+end
+
 function M.deprecate(deprecated, replacement)
   M.warn(("`%s` is deprecated.\nPlease use `%s` instead."):format(deprecated, replacement))
 end
@@ -248,6 +258,11 @@ function M.get_state(key)
     local ok, result = pcall(vim.json.decode, data)
     return ok and result or nil
   end
+end
+
+---@param key string
+function M.del_state(key)
+  vim.fn.delete(state_dir .. "/" .. key .. ".json")
 end
 
 ---@param event string

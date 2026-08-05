@@ -1,3 +1,4 @@
+local Config = require("sidekick.config")
 local Context = require("sidekick.cli.context")
 local State = require("sidekick.cli.state")
 local Util = require("sidekick.util")
@@ -21,6 +22,7 @@ local M = {}
 ---@field mux_focus? boolean wether the tool needs to be focused in order to receive input
 ---@field format? fun(text:sidekick.Text[], str:string):string?
 ---@field native_scroll? boolean whether the tool handles scrolling natively
+---@field status? fun(self:sidekick.cli.Tool,event:sidekick.cli.ActivityEvent):sidekick.cli.ActivityStatus? exact activity status adapter
 
 ---@class sidekick.cli.Show
 ---@field name? string
@@ -59,9 +61,9 @@ end
 function M.prompt(opts)
   opts = opts or {}
   opts = type(opts) == "function" and { cb = opts } or opts --[[@as sidekick.cli.Prompt]]
-  opts.cb = opts.cb or function(_, text)
+  opts.cb = opts.cb or function(msg, text)
     if text then
-      M.send({ text = text })
+      M.send({ msg = msg, text = text })
     end
   end
   require("sidekick.cli.ui.prompt").select(opts)
@@ -80,6 +82,70 @@ function M.select(opts)
       end
     end
   require("sidekick.cli.ui.select").select(opts)
+end
+
+--- Start a new independent agent, even when the same tool is already running.
+---@param opts? {name?:string,focus?:boolean}
+function M.new(opts)
+  opts = opts or {}
+  local function start(state)
+    if state then
+      State.attach(state, { show = true, focus = opts.focus ~= false })
+    end
+  end
+  if opts.name then
+    local tool = Config.tools()[opts.name]
+    if not tool then
+      return Util.error("Unknown CLI tool: " .. opts.name)
+    end
+    local state = { tool = tool, installed = vim.fn.executable(tool.cmd[1]) == 1 }
+    if not state.installed then
+      return require("sidekick.cli.ui.select").on_missing(tool)
+    end
+    return start(state)
+  end
+  require("sidekick.cli.ui.select").select({ new = true, cb = start })
+end
+
+--- Fuzzy-select an agent tab in the current Sidekick container.
+function M.switch()
+  require("sidekick.cli.panel").pick()
+end
+
+--- Select the next agent tab.
+function M.next()
+  require("sidekick.cli.panel").cycle(1)
+end
+
+--- Select the previous agent tab.
+function M.prev()
+  require("sidekick.cli.panel").cycle(-1)
+end
+
+--- Rename the active agent tab.
+---@param opts? string|{title?:string}
+function M.rename(opts)
+  require("sidekick.cli.panel").rename(opts)
+end
+
+--- Move the shared agent container.
+---@param opts? "left"|"right"|"top"|"bottom"|"float"|{layout?:"left"|"right"|"top"|"bottom"|"float"}
+function M.move(opts)
+  require("sidekick.cli.panel").move(opts)
+end
+
+--- Resize or reposition the active agent container.
+---@param opts? {width?:integer,height?:integer,row?:integer,col?:integer}
+function M.resize(opts)
+  require("sidekick.cli.panel").resize(opts)
+end
+
+--- Re-read bufferline.nvim-style global keymaps for agent tabs.
+function M.sync()
+  local active = require("sidekick.cli.panel").active()
+  if active and active.buf then
+    require("sidekick.cli.panel").keys(active.buf)
+  end
 end
 
 ---@param opts? sidekick.cli.Show
@@ -115,7 +181,7 @@ function M.toggle(opts)
   })
 end
 
---- Toggle focus of the terminal window if it is already open
+--- Toggle focus of the active agent container if it is already open.
 ---@param opts? sidekick.cli.Show
 ---@overload fun(name: string)
 function M.focus(opts)
@@ -165,6 +231,31 @@ function M.render(opts)
   return Context.get():render(opts or "")
 end
 
+---@private
+---@param session sidekick.cli.Session
+---@param value string
+function M.title(session, value)
+  if session.title then
+    return
+  end
+  value = vim.trim(value:gsub("[%c\r\n]+", " "):gsub("%s+", " "))
+  if value == "" then
+    return
+  end
+  local max = math.max(1, Config.cli.win.tabs.max_name_length)
+  local title = ""
+  for _, char in ipairs(Util.split_graphemes(value)) do
+    if vim.api.nvim_strwidth(title .. char) > max then
+      break
+    end
+    title = title .. char
+  end
+  session.title = title
+  require("sidekick.cli.session").persist(session)
+  require("sidekick.cli.panel").refresh(session.id)
+  Util.emit("SidekickCliTitle", { id = session.id, title = title })
+end
+
 --- Send a message or prompt to a CLI
 ---@param opts? sidekick.cli.Send
 ---@overload fun(msg:string)
@@ -176,7 +267,7 @@ function M.send(opts)
     opts.msg = "{selection}"
   end
 
-  local msg, text = "", opts.text ---@type string?, sidekick.Text[]?
+  local msg, text = opts.msg or "", opts.text ---@type string?, sidekick.Text[]?
   if not text then
     msg, text = M.render(opts)
     if msg == "" or not text then
@@ -188,11 +279,13 @@ function M.send(opts)
     end
   end
 
+  local prompt_title = msg
   State.with(function(state)
     Util.exit_visual_mode()
     vim.schedule(function()
-      msg = state.tool:format(text)
-      state.session:send(msg .. "\n")
+      M.title(state.session, prompt_title or "")
+      local formatted = state.tool:format(text)
+      state.session:send(formatted .. "\n")
       if opts.submit then
         state.session:submit()
       end

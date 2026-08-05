@@ -84,3 +84,12 @@ describe("split_chars", function()
     end)
   end
 end)
+
+describe("split_graphemes", function()
+  it("keeps combining sequences together", function()
+    assert.are.same(
+      { "☀️", "á", "👨‍👩‍👧‍👦" },
+      Util.split_graphemes("☀️á👨‍👩‍👧‍👦")
+    )
+  end)
+end)

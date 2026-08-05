@@ -4,13 +4,44 @@ local Util = require("sidekick.util")
 ---@class sidekick.cli.Select: sidekick.cli.With
 ---@field cb fun(state?:sidekick.cli.State)
 ---@field auto? boolean Automatically select if only one tool matches the filter
+---@field new? boolean Select a tool for a new independent agent
 
 local M = {}
+
+local function display_title(value)
+  value = vim.trim(value:gsub("[%c\r\n]+", " "):gsub("%s+", " "))
+  local max = math.max(1, Config.cli.win.tabs.max_name_length)
+  if vim.api.nvim_strwidth(value) <= max then
+    return value
+  end
+  local ret = ""
+  for _, char in ipairs(Util.split_graphemes(value)) do
+    if vim.api.nvim_strwidth(ret .. char .. "…") > max then
+      break
+    end
+    ret = ret .. char
+  end
+  return ret .. "…"
+end
 
 ---@param opts sidekick.cli.Select
 function M.select(opts)
   assert(type(opts) == "table", "opts must be a table")
-  local tools = require("sidekick.cli.state").get(opts.filter)
+  local tools
+  if opts.new then
+    tools = vim.tbl_map(function(tool)
+      return {
+        tool = tool,
+        installed = vim.fn.executable(tool.cmd[1]) == 1,
+        new = true,
+      }
+    end, vim.tbl_values(Config.tools()))
+    table.sort(tools, function(a, b)
+      return a.tool.name < b.tool.name
+    end)
+  else
+    tools = require("sidekick.cli.state").get(opts.filter)
+  end
 
   ---@param state? sidekick.cli.State
   local on_select = function(state)
@@ -83,8 +114,20 @@ function M.format(state, picker)
   ret[#ret + 1] = { " " }
   ret[#ret + 1] = { state.tool.name }
   local len = sw(state.tool.name) + 2
+  if state.new then
+    ret[#ret + 1] = { " · new", "Special" }
+    len = len + 6
+  elseif state.session then
+    local identity = state.session.title
+    if not identity or identity == "" then
+      identity = "#" .. (state.session.instance_id or state.session.id):sub(-8)
+    end
+    identity = display_title(identity)
+    ret[#ret + 1] = { " · " .. identity, "Title" }
+    len = len + 3 + sw(identity)
+  end
   if state.session then
-    ret[#ret + 1] = { string.rep(" ", 12 - len) }
+    ret[#ret + 1] = { string.rep(" ", math.max(1, 12 - len)) }
 
     if state.external then
       ret[#ret + 1] = { Config.ui.icons["external_" .. status], status_hl }
@@ -105,7 +148,7 @@ function M.format(state, picker)
 
     ret[#ret + 1] = { backend, "Special" }
     len = 12 + sw(backend)
-    ret[#ret + 1] = { string.rep(" ", 40 - len) }
+    ret[#ret + 1] = { string.rep(" ", math.max(1, 40 - len)) }
     if picker then
       local item = setmetatable({}, state) --[[@as snacks.picker.Item]]
       item.file = state.session.cwd

@@ -10,6 +10,7 @@ local M = {}
 ---@field attached? boolean
 ---@field external? boolean
 ---@field installed? boolean
+---@field new? boolean
 ---@field session? sidekick.cli.Session
 ---@field started? boolean
 ---@field terminal? sidekick.cli.Terminal
@@ -69,7 +70,6 @@ end
 function M.get(filter)
   filter = filter or {}
   local all = {} ---@type sidekick.cli.State[]
-  local sids = {} ---@type table<string, boolean>
   local sessions = filter.attached and Session.attached() or Session.sessions()
 
   for _, s in pairs(sessions) do
@@ -88,16 +88,15 @@ function M.get(filter)
     if not skip then
       local ss = M.get_state(s)
       all[#all + 1] = ss
-      if not ss.external then
-        sids[s.sid] = true
-      end
     end
   end
 
   if not filter.attached then
     for name, tool in pairs(Config.tools()) do
-      local sid = Session.sid({ tool = name })
-      if not sids[sid] then
+      local have_current = vim.iter(all):any(function(state)
+        return state.session and not state.external and state.tool.name == name and state.session.cwd == Session.cwd()
+      end)
+      if not have_current then
         all[#all + 1] = {
           tool = tool,
           installed = vim.fn.executable(tool.cmd[1]) == 1,
@@ -154,6 +153,18 @@ function M.with(cb, opts)
   end)
 
   local filter_attached = Util.merge(opts.filter, { attached = true })
+
+  if not opts.all then
+    local active = require("sidekick.cli.panel").active()
+    if active then
+      local active_state = M.get_state(active)
+      if M.is(active_state, filter_attached) then
+        use(active_state)
+        return
+      end
+    end
+  end
+
   local attached = M.get(filter_attached)
 
   if #attached == 0 and opts.attach then

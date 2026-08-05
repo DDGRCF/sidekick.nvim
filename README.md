@@ -268,6 +268,11 @@ local defaults = {
   -- Work with AI cli tools directly from within Neovim
   cli = {
     watch = true, -- notify Neovim of file changes done by AI CLI tools
+    status = {
+      -- With no tool-specific status adapter, output becoming quiet after this
+      -- delay marks a working agent as done.
+      quiet_ms = 2000,
+    },
     ---@class sidekick.win.Opts
     win = {
       --- This is run when a new terminal is created, before starting it.
@@ -289,17 +294,63 @@ local defaults = {
         width = 80, -- set to 0 for default split width
         height = 20, -- set to 0 for default split height
       },
+      --- Agent tabs shown in the shared Sidekick container. The renderer is
+      --- standalone, but links to bufferline.nvim highlights when available.
+      tabs = {
+        enabled = true,
+        max_name_length = 28,
+        show_close = true,
+        icons = { ---@type table<string, string>
+          default = "󰚩",
+          aider = "󰚩",
+          claude = "󰋦",
+          codex = "",
+          copilot = "",
+          gemini = "󰊭",
+          opencode = "󰨞",
+        },
+        status = { ---@type table<sidekick.cli.ActivityStatus, string>
+          idle = "○",
+          starting = "◌",
+          working = "●",
+          waiting = "◐",
+          done = "●",
+          error = "●",
+        },
+      },
       --- CLI Tool Keymaps (default mode is `t`)
       ---@type table<string, sidekick.cli.Keymap|false>
       keys = {
         buffers       = { "<c-b>", "buffers"   , mode = "nt", desc = "open buffer picker" },
         files         = { "<c-f>", "files"     , mode = "nt", desc = "open file picker" },
-        hide_n        = { "q"    , "hide"      , mode = "n" , desc = "hide the terminal window" },
-        hide_ctrl_q   = { "<c-q>", "hide"      , mode = "n" , desc = "hide the terminal window" },
-        hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the terminal window" },
-        hide_ctrl_z   = { "<c-z>", "blur"      , mode = "nt", desc = "go back to the previous window without hiding the terminal" },
+        hide_n        = { "q"    , "hide"      , mode = "n" , desc = "hide the agent container" },
+        hide_ctrl_q   = { "<c-q>", "hide"      , mode = "n" , desc = "hide the agent container" },
+        hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the agent container" },
+        hide_ctrl_z   = { "<c-z>", "blur"      , mode = "nt", desc = "go back to the previous window without hiding the agent container" },
         prompt        = { "<c-p>", "prompt"    , mode = "t" , desc = "insert prompt or context" },
         stopinsert    = { "<c-q>", "stopinsert", mode = "t" , desc = "enter normal mode" },
+        normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter normal mode" },
+        agent_prev    = { "<s-h>"       , "prev"            , mode = "n", desc = "previous agent" },
+        agent_prev_b  = { "[b"          , "prev"            , mode = "n", desc = "previous agent" },
+        agent_next    = { "<s-l>"       , "next"            , mode = "n", desc = "next agent" },
+        agent_next_b  = { "]b"          , "next"            , mode = "n", desc = "next agent" },
+        agent_move_l  = { "[B"          , "move_prev"       , mode = "n", desc = "move agent tab left" },
+        agent_move_r  = { "]B"          , "move_next"       , mode = "n", desc = "move agent tab right" },
+        agent_pick    = { "<leader>bj"  , "pick"            , mode = "n", desc = "pick an agent" },
+        agent_back    = { "<leader>bb"  , "previous"        , mode = "n", desc = "previously active agent" },
+        agent_back_bt = { "<leader>`"   , "previous"        , mode = "n", desc = "previously active agent" },
+        agent_pin     = { "<leader>bp"  , "pin"             , mode = "n", desc = "pin agent" },
+        agent_close   = { "<leader>bd"  , "close_current"   , mode = "n", desc = "close agent" },
+        agent_others  = { "<leader>bo"  , "close_others"    , mode = "n", desc = "close other agents" },
+        agent_left    = { "<leader>bl"  , "close_left"      , mode = "n", desc = "close agents to the left" },
+        agent_right   = { "<leader>br"  , "close_right"     , mode = "n", desc = "close agents to the right" },
+        agent_unused  = { "<leader>bP"  , "close_unpinned"  , mode = "n", desc = "close unpinned agents" },
+        agent_hidden  = { "<leader>bi"  , "close_invisible" , mode = "n", desc = "close agents not in this native tab" },
+        agent_delete  = { "<leader>bD"  , "close_panel"     , mode = "n", desc = "close agent and container" },
+        panel_narrow  = { "<m-left>"    , "panel_narrow"    , mode = "n", desc = "make agent container narrower" },
+        panel_widen   = { "<m-right>"   , "panel_widen"     , mode = "n", desc = "make agent container wider" },
+        panel_shorter = { "<m-down>"    , "panel_shorter"   , mode = "n", desc = "make agent container shorter" },
+        panel_taller  = { "<m-up>"      , "panel_taller"    , mode = "n", desc = "make agent container taller" },
         -- Navigate windows in terminal mode. Only active when:
         -- * layout is not "float"
         -- * there is another window in the direction
@@ -328,6 +379,9 @@ local defaults = {
         vertical = true, -- vertical or horizontal split
         size = 0.5, -- size of the split (0-1 for percentage)
       },
+      -- max lines to capture when dumping a multiplexer pane for scrollback support
+      -- more lines means slower loading of the scrollback
+      dump = 2000,
     },
     --- Actual cli tool config is loaded from the runtime path `sk/cli/{tool}.lua` and merged with the config below.
     --- For default configs, see https://github.com/folke/sidekick.nvim/tree/main/sk/cli
@@ -487,10 +541,17 @@ require("sidekick.nes").update()
 
 ## 🤖 AI CLI Integration
 
-Sidekick ships with a lightweight terminal wrapper so you can talk to local AI CLI
-tools without leaving Neovim. Each tool runs in its own scratch terminal window and
-shares helper prompts that bundle buffer context, the current cursor position, and
-diagnostics when requested.
+Sidekick runs every AI agent in an independent session and terminal buffer, including
+multiple agents of the same type. A native Neovim tabpage gets one shared, movable
+agent container; the icon-only tabs inside it switch buffers without opening more
+windows. The active agent receives prompts first, so normal send/prompt actions do not
+ask for a target again.
+
+Use `:Sidekick cli new [tool]` to start another agent and `:Sidekick cli switch` (or
+`<leader>bj`) for fuzzy tab selection when Snacks picker is configured. Tab status is
+`○` idle, `◌` starting, `●` working/done/error (colored by state), and `◐` waiting;
+completed background agents turn green until selected. The container can move between
+left, right, top, bottom, and float layouts and can be resized at runtime.
 
 <!-- api_cli:start -->
 
@@ -505,7 +566,7 @@ require("sidekick.cli").close(opts)
 ```
 
 </td></tr>
-<tr><td><code>:Sidekick cli focus</code> Toggle focus of the terminal window if it is already open</td><td>
+<tr><td><code>:Sidekick cli focus</code> Toggle focus of the active agent container if it is already open.</td><td>
 
 
 ```lua
@@ -525,6 +586,40 @@ require("sidekick.cli").hide(opts)
 ```
 
 </td></tr>
+<tr><td><code>:Sidekick cli move</code> Move the shared agent container.</td><td>
+
+
+```lua
+---@param opts? "left"|"right"|"top"|"bottom"|"float"|{layout?:"left"|"right"|"top"|"bottom"|"float"}
+require("sidekick.cli").move(opts)
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli new</code> Start a new independent agent, even when the same tool is already running.</td><td>
+
+
+```lua
+---@param opts? {name?:string,focus?:boolean}
+require("sidekick.cli").new(opts)
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli next</code> Select the next agent tab.</td><td>
+
+
+```lua
+require("sidekick.cli").next()
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli prev</code> Select the previous agent tab.</td><td>
+
+
+```lua
+require("sidekick.cli").prev()
+```
+
+</td></tr>
 <tr><td><code>:Sidekick cli prompt</code> Select a prompt to send</td><td>
 
 
@@ -535,12 +630,30 @@ require("sidekick.cli").prompt(opts)
 ```
 
 </td></tr>
+<tr><td><code>:Sidekick cli rename</code> Rename the active agent tab.</td><td>
+
+
+```lua
+---@param opts? string|{title?:string}
+require("sidekick.cli").rename(opts)
+```
+
+</td></tr>
 <tr><td> Render a message template or prompt</td><td>
 
 
 ```lua
 ---@param opts? sidekick.cli.Message|string
 require("sidekick.cli").render(opts)
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli resize</code> Resize or reposition the active agent container.</td><td>
+
+
+```lua
+---@param opts? {width?:integer,height?:integer,row?:integer,col?:integer}
+require("sidekick.cli").resize(opts)
 ```
 
 </td></tr>
@@ -571,6 +684,22 @@ require("sidekick.cli").send(opts)
 ---@param opts? sidekick.cli.Show
 ---@overload fun(name: string)
 require("sidekick.cli").show(opts)
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli switch</code> Fuzzy-select an agent tab in the current Sidekick container.</td><td>
+
+
+```lua
+require("sidekick.cli").switch()
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli sync</code> Re-read bufferline.nvim-style global keymaps for agent tabs.</td><td>
+
+
+```lua
+require("sidekick.cli").sync()
 ```
 
 </td></tr>
@@ -677,8 +806,8 @@ With this configuration, pressing `<a-a>` in any Snacks picker will send the sel
 You can customize the keymaps for the CLI window by setting the `cli.win.keys` option.
 The default keymaps are:
 
-- `q` (in normal mode): Hide the terminal window.
-- `<c-q>` (in terminal mode): Hide the terminal window.
+- `q` (in normal mode): Hide the agent container.
+- `<c-q>` (in terminal mode): Hide the agent container.
 - `<c-z>`: Leave the CLI window.
 - `<c-p>`: Insert prompt or context.
 
