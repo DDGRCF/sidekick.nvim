@@ -223,6 +223,31 @@ describe("cli agent panel", function()
     assert.are.equal(1, calls)
   end)
 
+  it("focuses the panel when selecting a tab from its winbar", function()
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "claude", "Two")
+    Panel.show(first)
+    Panel.show(second)
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    local code_win = vim.api.nvim_get_current_win()
+    assert.are_not.equal(p.win, code_win)
+
+    Panel.render(p)
+    local token
+    for id, item in pairs(Panel.clicks) do
+      if item.action == "select" and item.id == first.id then
+        token = id
+        break
+      end
+    end
+    assert.is_not_nil(token)
+
+    _G.SidekickCliTabClick(token)
+
+    assert.are.equal(p.win, vim.api.nvim_get_current_win())
+    assert.are.equal(first, Panel.active())
+  end)
+
   it("disambiguates duplicate tab titles", function()
     local first = fake("one", "codex", "Same title")
     local second = fake("two", "codex", "Same title")

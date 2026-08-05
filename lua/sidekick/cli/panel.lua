@@ -1098,7 +1098,10 @@ function M.setup()
       return
     end
     if item.action == "select" then
-      M.select(item.id)
+      local t = usable(item.id)
+      if t then
+        M.show(t, true)
+      end
     elseif item.action == "close" then
       M.close(item.id)
     elseif item.action == "pick" then
