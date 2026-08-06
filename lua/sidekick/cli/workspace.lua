@@ -275,7 +275,8 @@ end
 
 ---@param saved sidekick.cli.WorkspaceState
 ---@param keys table<string,boolean>
-local function discard_agents(saved, keys)
+---@param silent? boolean
+local function discard_agents(saved, keys, silent)
   if vim.tbl_isempty(keys) then
     return true
   end
@@ -293,21 +294,25 @@ local function discard_agents(saved, keys)
     end
   end
   local ok, err = Util.set_state(state_key, saved)
-  if not ok then
+  if not ok and not silent then
     Util.error("Failed to discard unresumable Sidekick agents: " .. tostring(err))
   end
   return ok
 end
 
+---@param opts? {silent?:boolean}
 ---@return {restored:integer,failed:{agent:sidekick.cli.WorkspaceAgent,error:string}[],modes:table<string,integer>} result
-function M.restore()
+function M.restore(opts)
   if M.restoring then
     return { restored = 0, failed = {}, modes = {} }
   end
+  local silent = opts and opts.silent
   local saved = Util.get_state(state_key)
   local invalid = validate(saved)
   if invalid then
-    Util.warn("No compatible Sidekick workspace was saved: " .. invalid)
+    if not silent then
+      Util.warn("No compatible Sidekick workspace was saved: " .. invalid)
+    end
     return { restored = 0, failed = {}, modes = {} }
   end
   M.restoring = true
@@ -338,7 +343,7 @@ function M.restore()
 
     -- These entries can never be resumed after the process has exited. Persist
     -- their removal before restoring panels so they cannot fail on every startup.
-    local discarded_ok = discard_agents(saved, discarded)
+    local discarded_ok = discard_agents(saved, discarded, silent)
 
     local panel_failures = {}
     local claimed, used = {}, {}
@@ -372,21 +377,23 @@ function M.restore()
       end
     end
     local restored_count = vim.tbl_count(restored)
-    if #failed == 0 and restored_count > 0 then
-      Util.info(("Restored %d Sidekick agent conversation(s)"):format(restored_count))
-    elseif #failed > 0 then
-      local lines = { ("Restored %d agent(s); %d failed:"):format(restored_count, #failed) }
-      for _, failure in ipairs(failed) do
-        lines[#lines + 1] = ("- %s (%s): %s"):format(
-          failure.agent.title or failure.agent.tool,
-          failure.agent.tool,
-          failure.error
-        )
+    if not silent then
+      if #failed == 0 and restored_count > 0 then
+        Util.info(("Restored %d Sidekick agent conversation(s)"):format(restored_count))
+      elseif #failed > 0 then
+        local lines = { ("Restored %d agent(s); %d failed:"):format(restored_count, #failed) }
+        for _, failure in ipairs(failed) do
+          lines[#lines + 1] = ("- %s (%s): %s"):format(
+            failure.agent.title or failure.agent.tool,
+            failure.agent.tool,
+            failure.error
+          )
+        end
+        Util.warn(lines)
       end
-      Util.warn(lines)
-    end
-    if #panel_failures > 0 then
-      Util.warn(("%d Sidekick panel(s) could not be restored"):format(#panel_failures))
+      if #panel_failures > 0 then
+        Util.warn(("%d Sidekick panel(s) could not be restored"):format(#panel_failures))
+      end
     end
     M.partial = #failed > 0 or #panel_failures > 0 or not discarded_ok
     return { restored = restored_count, failed = failed, modes = modes, panel_failures = panel_failures }
@@ -402,7 +409,9 @@ function M.restore()
       end
     end
     M.partial = true
-    Util.error("Failed to restore Sidekick workspace: " .. tostring(result))
+    if not silent then
+      Util.error("Failed to restore Sidekick workspace: " .. tostring(result))
+    end
     return { restored = 0, failed = {}, modes = {} }
   end
   return result
@@ -428,6 +437,12 @@ function M.clear()
   Util.del_state(state_key)
   M.partial = false
   Util.info("Cleared the saved Sidekick workspace")
+end
+
+local function autorestore()
+  if not M.restoring and Util.get_state(state_key) then
+    M.restore({ silent = true })
+  end
 end
 
 function M.setup()
@@ -468,11 +483,15 @@ function M.setup()
     end,
   })
   if Config.cli.workspace.autorestore then
-    vim.schedule(function()
-      if not M.restoring and Util.get_state(state_key) then
-        M.restore()
-      end
-    end)
+    if vim.v.vim_did_enter == 1 then
+      autorestore()
+    else
+      vim.api.nvim_create_autocmd("VimEnter", {
+        group = Config.augroup,
+        once = true,
+        callback = autorestore,
+      })
+    end
   end
 end
 

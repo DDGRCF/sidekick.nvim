@@ -5,6 +5,7 @@ local Session = require("sidekick.cli.session")
 local Terminal = require("sidekick.cli.terminal")
 local Util = require("sidekick.util")
 local Workspace = require("sidekick.cli.workspace")
+local Config = require("sidekick.config")
 
 describe("cli workspace", function()
   local terminal
@@ -12,12 +13,18 @@ describe("cli workspace", function()
   local session_sessions
   local executable
   local info
+  local did_setup
+  local workspace_enabled
+  local workspace_autorestore
 
   before_each(function()
     saved_workspace = Util.get_state("cli-workspace")
     session_sessions = Session.sessions
     executable = vim.fn.executable
     info = Util.info
+    did_setup = Workspace.did_setup
+    workspace_enabled = Config.cli.workspace.enabled
+    workspace_autorestore = Config.cli.workspace.autorestore
   end)
 
   after_each(function()
@@ -33,6 +40,9 @@ describe("cli workspace", function()
     Session.sessions = session_sessions
     vim.fn.executable = executable
     Util.info = info
+    Workspace.did_setup = did_setup
+    Config.cli.workspace.enabled = workspace_enabled
+    Config.cli.workspace.autorestore = workspace_autorestore
     Workspace.partial = false
     Workspace.restoring = false
     if saved_workspace == nil then
@@ -152,6 +162,52 @@ describe("cli workspace", function()
 
     assert.are.equal(0, result.restored)
     assert.are.same({}, messages)
+  end)
+
+  it("restores immediately after VimEnter and otherwise waits for VimEnter", function()
+    local original_restore = Workspace.restore
+    local original_create_autocmd = vim.api.nvim_create_autocmd
+    local original_vim = vim
+    local restore_calls = 0
+    local restore_opts
+    local vim_enter
+    Config.cli.workspace.enabled = true
+    Config.cli.workspace.autorestore = true
+    Util.set_state("cli-workspace", { version = 1, saved_at = os.time(), agents = {}, panels = {} })
+    Workspace.restore = function(opts)
+      restore_calls = restore_calls + 1
+      restore_opts = opts
+      return { restored = 0, failed = {}, modes = {} }
+    end
+    vim.api.nvim_create_autocmd = function(event, opts)
+      if event == "VimEnter" then
+        vim_enter = opts.callback
+      end
+      return 1
+    end
+
+    local function setup(did_enter)
+      _G.vim = setmetatable({ v = { vim_did_enter = did_enter } }, { __index = original_vim })
+      Workspace.did_setup = false
+      Workspace.setup()
+      _G.vim = original_vim
+    end
+
+    setup(1)
+    assert.are.equal(1, restore_calls)
+    assert.are.same({ silent = true }, restore_opts)
+
+    restore_calls = 0
+    restore_opts = nil
+    setup(0)
+    assert.are.equal(0, restore_calls)
+    assert.is_function(vim_enter)
+    vim_enter()
+    assert.are.equal(1, restore_calls)
+    assert.are.same({ silent = true }, restore_opts)
+
+    vim.api.nvim_create_autocmd = original_create_autocmd
+    Workspace.restore = original_restore
   end)
 
   it("claims a different native tab for panels with the same cwd", function()

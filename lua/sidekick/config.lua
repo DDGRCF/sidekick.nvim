@@ -257,8 +257,10 @@ function M.setup(opts)
     end,
   })
 
+  vim.fn.mkdir(state_dir, "p")
+  require("sidekick.cli.workspace").setup()
+
   vim.schedule(function()
-    vim.fn.mkdir(state_dir, "p")
     M.set_hl()
 
     vim.api.nvim_create_autocmd("ColorScheme", {
@@ -291,7 +293,6 @@ function M.setup(opts)
     M.validate("cli.mux.create", { "terminal", "window", "split" })
     M.validate("nes.diff.show", { "always", "cursor" })
 
-    require("sidekick.cli.workspace").setup()
   end)
 end
 
