@@ -81,6 +81,28 @@ local function current_tab()
   return vim.api.nvim_get_current_tabpage()
 end
 
+---@param tab? integer
+---@return string
+function M.cwd(tab)
+  tab = tab or current_tab()
+  local function editor_window(win)
+    return valid(win)
+      and vim.api.nvim_win_get_tabpage(win) == tab
+      and vim.api.nvim_win_get_config(win).relative == ""
+      and not vim.w[win].sidekick_panel
+  end
+  local current = vim.api.nvim_get_current_win()
+  if editor_window(current) then
+    return vim.api.nvim_win_call(current, vim.fn.getcwd)
+  end
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+    if editor_window(win) then
+      return vim.api.nvim_win_call(win, vim.fn.getcwd)
+    end
+  end
+  return vim.fn.getcwd()
+end
+
 ---@param value any
 ---@return boolean
 local function valid_layout(value)
@@ -1090,8 +1112,7 @@ function M.snapshot()
         id = require("sidekick.cli.session").instance(tostring(vim.uv.hrtime()))
         vim.t[tab].sidekick_workspace_id = id
       end
-      local win = vim.api.nvim_tabpage_list_wins(tab)[1]
-      local cwd = win and vim.api.nvim_win_call(win, vim.fn.getcwd) or vim.fn.getcwd()
+      local cwd = M.cwd(tab)
       local order, pinned = {}, {}
       for _, terminal_id in ipairs(p.order) do
         local t = terminal(terminal_id)

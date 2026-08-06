@@ -170,6 +170,41 @@ describe("cli workspace", function()
     assert.are.same({}, messages)
   end)
 
+  it("keeps the cwd of an existing tab when restoring its panel", function()
+    local tab = vim.api.nvim_get_current_tabpage()
+    local original_cwd = vim.fn.getcwd()
+    local original_id = vim.t[tab].sidekick_workspace_id
+    local saved_cwd = vim.fn.tempname()
+    vim.fn.mkdir(saved_cwd, "p")
+    vim.t[tab].sidekick_workspace_id = "existing-panel"
+    Util.set_state("cli-workspace", {
+      version = 1,
+      saved_at = os.time(),
+      agents = {},
+      panels = {
+        {
+          tab = { id = "existing-panel", cwd = saved_cwd },
+          order = {},
+          pinned = {},
+          layout = "right",
+          sizes = {},
+        },
+      },
+    })
+    Session.sessions = function()
+      return {}
+    end
+
+    local result = Workspace.restore()
+    local restored_cwd = vim.fn.getcwd()
+
+    vim.t[tab].sidekick_workspace_id = original_id
+    vim.cmd.tcd(vim.fn.fnameescape(original_cwd))
+    vim.fn.delete(saved_cwd, "rf")
+    assert.are.equal(0, #result.failed)
+    assert.are.equal(original_cwd, restored_cwd)
+  end)
+
   it("restores after VimEnter and delays pickers until restore completes", function()
     local original_restore = Workspace.restore
     local original_create_autocmd = vim.api.nvim_create_autocmd

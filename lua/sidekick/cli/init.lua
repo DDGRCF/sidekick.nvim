@@ -1,6 +1,7 @@
 local Config = require("sidekick.config")
 local Context = require("sidekick.cli.context")
 local History = require("sidekick.cli.history")
+local Session = require("sidekick.cli.session")
 local State = require("sidekick.cli.state")
 local Util = require("sidekick.util")
 
@@ -8,6 +9,7 @@ local M = {}
 
 ---@class sidekick.Prompt
 ---@field msg string
+---@field cwd? string
 
 ---@class sidekick.cli.Message
 ---@field msg? string
@@ -41,6 +43,7 @@ local M = {}
 ---@field focus? boolean
 ---@field filter? sidekick.cli.Filter
 ---@field all? boolean
+---@field cwd? string
 
 ---@class sidekick.cli.Hide
 ---@field name? string
@@ -73,36 +76,39 @@ end
 function M.prompt(opts)
   opts = opts or {}
   opts = type(opts) == "function" and { cb = opts } or opts --[[@as sidekick.cli.Prompt]]
+  local cwd = Session.cwd({ cwd = opts.cwd })
   opts.cb = opts.cb or function(msg, text)
     if text then
-      M.send({ msg = msg, text = text })
+      M.send({ msg = msg, text = text, cwd = cwd })
     end
   end
   require("sidekick.cli.ui.prompt").select(opts)
 end
 
 --- Start or attach to a CLI tool
----@param opts? sidekick.cli.Select|{cb:nil}|{focus?:boolean}
+---@param opts? sidekick.cli.Select|{cb:nil}|{focus?:boolean,cwd?:string}
 ---@overload fun(cb:fun(state?:sidekick.cli.State))
 function M.select(opts)
   opts = opts or {}
   opts = type(opts) == "function" and { cb = opts } or opts --[[@as sidekick.cli.Select]]
+  local cwd = Session.cwd({ cwd = opts.cwd })
   opts.cb = opts.cb
     or function(state)
       if state then
-        State.attach(state, { show = true, focus = opts.focus })
+        State.attach(state, { show = true, focus = opts.focus, cwd = cwd })
       end
     end
   require("sidekick.cli.ui.select").select(opts)
 end
 
 --- Start a new independent agent, even when the same tool is already running.
----@param opts? {name?:string,focus?:boolean}
+---@param opts? {name?:string,focus?:boolean,cwd?:string}
 function M.new(opts)
   opts = opts or {}
+  local cwd = Session.cwd({ cwd = opts.cwd })
   local function start(state)
     if state then
-      State.attach(state, { show = true, focus = opts.focus ~= false })
+      State.attach(state, { show = true, focus = opts.focus ~= false, cwd = cwd })
     end
   end
   if opts.name then
@@ -289,6 +295,7 @@ end
 function M.send(opts)
   opts = type(opts) == "string" and { msg = opts } or opts
   opts = filter_opts(opts)
+  opts.cwd = Session.cwd({ cwd = opts.cwd })
 
   if not opts.msg and not opts.prompt and Util.visual_mode() then
     opts.msg = "{selection}"
@@ -319,6 +326,7 @@ function M.send(opts)
     end)
   end, {
     attach = true,
+    cwd = opts.cwd,
     filter = opts.filter,
     focus = opts.focus,
     show = true,

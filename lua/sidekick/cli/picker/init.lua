@@ -1,4 +1,5 @@
 local Config = require("sidekick.config")
+local Session = require("sidekick.cli.session")
 local Util = require("sidekick.util")
 
 local M = {}
@@ -34,6 +35,7 @@ end
 ---@param opts? sidekick.context.loc.Opts|sidekick.cli.Send
 function M._send_cb(opts)
   opts = opts or {}
+  local cwd = Session.cwd({ cwd = opts.cwd })
   ---@param items sidekick.context.Loc[]
   return function(items)
     local Loc = require("sidekick.cli.context.location")
@@ -46,7 +48,7 @@ function M._send_cb(opts)
       end
     end
     vim.schedule(function()
-      opts = vim.tbl_deep_extend("force", vim.deepcopy(opts or {}), { text = { ret } })
+      opts = vim.tbl_deep_extend("force", vim.deepcopy(opts), { text = { ret }, cwd = cwd })
       ---@cast opts sidekick.cli.Send
       require("sidekick.cli").send(opts)
     end)

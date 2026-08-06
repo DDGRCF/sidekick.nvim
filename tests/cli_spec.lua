@@ -10,6 +10,93 @@ local State = require("sidekick.cli.state")
 local Workspace = require("sidekick.cli.workspace")
 
 describe("cli routing", function()
+  it("captures the cwd before opening the new-agent picker", function()
+    local original_tools = Config.tools
+    local original_attach = State.attach
+    local original_select = vim.ui.select
+    local original_cwd = Session.cwd
+    local original_after_restore = Workspace.after_restore
+    local attached
+    local source_cwd = "/tmp/sidekick-source"
+    local picker_cwd = "/tmp/sidekick-picker"
+    Config.tools = function()
+      return { codex = { name = "codex", cmd = { "true" } } }
+    end
+    Session.cwd = function(opts)
+      return opts and opts.cwd or source_cwd
+    end
+    State.attach = function(_, opts)
+      attached = opts
+    end
+    Workspace.after_restore = function()
+      return false
+    end
+    vim.ui.select = function(items, _, cb)
+      Session.cwd = function(opts)
+        return opts and opts.cwd or picker_cwd
+      end
+      cb(items[1])
+    end
+
+    Cli.new()
+
+    Config.tools = original_tools
+    State.attach = original_attach
+    vim.ui.select = original_select
+    Session.cwd = original_cwd
+    Workspace.after_restore = original_after_restore
+    assert.are.equal(source_cwd, attached.cwd)
+  end)
+
+  it("does not auto-attach an agent from another cwd", function()
+    local original_attached = Session.attached
+    local original_active = require("sidekick.cli.panel").active
+    local original_select = Select.select
+    local original_schedule = vim.schedule
+    local original_schedule_wrap = vim.schedule_wrap
+    local original_cwd = Session.cwd
+    local selected
+    local source_cwd = "/tmp/sidekick-source"
+    local other = {
+      id = "other-cwd",
+      tool = { name = "codex" },
+      cwd = "/tmp/sidekick-other",
+      backend = "terminal",
+      is_attached = function()
+        return true
+      end,
+    }
+    Session.cwd = function(opts)
+      return opts and opts.cwd or source_cwd
+    end
+    Session.attached = function()
+      return { [other.id] = other }
+    end
+    require("sidekick.cli.panel").active = function()
+      return nil
+    end
+    Select.select = function(opts)
+      selected = opts
+    end
+    vim.schedule = function(cb)
+      cb()
+    end
+    vim.schedule_wrap = function(cb)
+      return cb
+    end
+
+    State.with(function() end, { attach = true })
+
+    Session.attached = original_attached
+    require("sidekick.cli.panel").active = original_active
+    Select.select = original_select
+    vim.schedule = original_schedule
+    vim.schedule_wrap = original_schedule_wrap
+    Session.cwd = original_cwd
+    assert.is_not_nil(selected)
+    assert.are.equal(source_cwd, selected.filter.cwd)
+  end)
+
   it("defers the new-agent picker until a prompt callback has returned", function()
     local original_prompt_select = Prompt.select
     local original_select = Select.select
@@ -84,8 +171,15 @@ describe("cli routing", function()
   it("preserves the selected prompt text for the first agent title", function()
     local original_select = Prompt.select
     local original_send = Cli.send
+    local original_cwd = Session.cwd
     local sent
+    Session.cwd = function(opts)
+      return opts and opts.cwd or "/tmp/sidekick-source"
+    end
     Prompt.select = function(opts)
+      Session.cwd = function(opts)
+        return opts and opts.cwd or "/tmp/sidekick-picker"
+      end
       opts.cb("Review the current changes", { { { "context" } } })
     end
     Cli.send = function(opts)
@@ -96,8 +190,10 @@ describe("cli routing", function()
 
     Prompt.select = original_select
     Cli.send = original_send
+    Session.cwd = original_cwd
     assert.are.equal("Review the current changes", sent.msg)
     assert.is_not_nil(sent.text)
+    assert.are.equal("/tmp/sidekick-source", sent.cwd)
   end)
 
   it("auto-selects a sole managed session instead of adding a duplicate tool", function()

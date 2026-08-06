@@ -17,7 +17,7 @@ local M = {}
 
 ---@class sidekick.cli.Filter
 ---@field attached? boolean
----@field cwd? boolean
+---@field cwd? boolean|string
 ---@field external? boolean
 ---@field installed? boolean
 ---@field name? string
@@ -31,13 +31,15 @@ local M = {}
 ---@field focus? boolean
 ---@field attach? boolean
 ---@field all? boolean
+---@field cwd? string
 
 ---@param t sidekick.cli.State
 ---@param filter? sidekick.cli.Filter
 function M.is(t, filter)
   filter = filter or {}
+  local cwd = type(filter.cwd) == "string" and Session.cwd({ cwd = filter.cwd }) or filter.cwd and Session.cwd() or nil
   return (filter.attached == nil or filter.attached == t.attached)
-    and (filter.cwd == nil or (t.session and t.session.cwd == Session.cwd()))
+    and (cwd == nil or not t.session or t.session.cwd == cwd)
     and (filter.external == nil or filter.external == t.external)
     and (filter.installed == nil or filter.installed == t.installed)
     and (filter.name == nil or filter.name == t.tool.name)
@@ -71,6 +73,7 @@ function M.get(filter)
   filter = filter or {}
   local all = {} ---@type sidekick.cli.State[]
   local sessions = filter.attached and Session.attached() or Session.sessions()
+  local cwd = type(filter.cwd) == "string" and Session.cwd({ cwd = filter.cwd }) or Session.cwd()
 
   for _, s in pairs(sessions) do
     -- if not attached, skip if another session with higher priority
@@ -94,7 +97,7 @@ function M.get(filter)
   if not filter.attached then
     for name, tool in pairs(Config.tools()) do
       local have_current = vim.iter(all):any(function(state)
-        return state.session and not state.external and state.tool.name == name and state.session.cwd == Session.cwd()
+        return state.session and not state.external and state.tool.name == name and state.session.cwd == cwd
       end)
       if not have_current then
         all[#all + 1] = {
@@ -104,8 +107,6 @@ function M.get(filter)
       end
     end
   end
-
-  local cwd = Session.cwd()
 
   ---@type sidekick.cli.State[]
   ---@param t sidekick.cli.State
@@ -141,6 +142,7 @@ end
 ---@param opts? sidekick.cli.With
 function M.with(cb, opts)
   opts = opts or {}
+  local cwd = Session.cwd({ cwd = opts.cwd })
   cb = vim.schedule_wrap(cb)
 
   ---@param state sidekick.cli.State
@@ -148,17 +150,21 @@ function M.with(cb, opts)
     if not state then
       return
     end
-    local ret, attached = M.attach(state, { show = opts.show, focus = opts.focus })
+    local ret, attached = M.attach(state, { show = opts.show, focus = opts.focus, cwd = cwd })
     cb(ret, attached)
   end)
 
-  local filter_attached = Util.merge(opts.filter, { attached = true })
+  local active_filter = Util.merge(opts.filter, { attached = true })
+  local filter_attached = Util.merge(active_filter)
+  if filter_attached.cwd == nil then
+    filter_attached.cwd = cwd
+  end
 
   if not opts.all then
     local active = require("sidekick.cli.panel").active()
     if active then
       local active_state = M.get_state(active)
-      if M.is(active_state, filter_attached) then
+      if M.is(active_state, active_filter) then
         use(active_state)
         return
       end
@@ -171,7 +177,7 @@ function M.with(cb, opts)
     vim.schedule(function()
       require("sidekick.cli.ui.select").select({
         auto = true,
-        filter = opts.filter,
+        filter = Util.merge(opts.filter, { cwd = filter_attached.cwd }),
         cb = use,
       })
     end)
@@ -187,7 +193,7 @@ function M.with(cb, opts)
 end
 
 ---@param state sidekick.cli.State
----@param opts? {show?:boolean, focus?:boolean}
+---@param opts? {show?:boolean, focus?:boolean, cwd?:string}
 ---@return sidekick.cli.State state, boolean attached whether we just attached
 function M.attach(state, opts)
   opts = opts or {}
@@ -195,7 +201,7 @@ function M.attach(state, opts)
   local tool = state.tool
 
   -- if the session is already attached, the below is a no-op
-  local session = state.session or Session.new({ tool = tool.name })
+  local session = state.session or Session.new({ tool = tool.name, cwd = opts.cwd })
   session = Session.attach(session)
 
   state = M.get_state(session) -- update state

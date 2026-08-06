@@ -448,8 +448,9 @@ end
 function M.open(items)
   items = items or Panel.picker_items()
   if #items == 0 then
+    local cwd = require("sidekick.cli.session").cwd()
     return vim.schedule(function()
-      require("sidekick.cli").new()
+      require("sidekick.cli").new({ cwd = cwd })
     end)
   end
   local provider = Config.cli.agent_picker.provider

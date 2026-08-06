@@ -43,9 +43,15 @@ describe("cli agent picker", function()
   it("opens the new-agent picker when no agents are available", function()
     local original_new = Cli.new
     local original_schedule = vim.schedule
+    local original_cwd = require("sidekick.cli.session").cwd
     local new_calls = 0
-    Cli.new = function()
+    local cwd
+    require("sidekick.cli.session").cwd = function()
+      return "/tmp/sidekick-source"
+    end
+    Cli.new = function(opts)
       new_calls = new_calls + 1
+      cwd = opts.cwd
     end
     vim.schedule = function(cb)
       cb()
@@ -55,7 +61,9 @@ describe("cli agent picker", function()
 
     Cli.new = original_new
     vim.schedule = original_schedule
+    require("sidekick.cli.session").cwd = original_cwd
     assert.are.equal(1, new_calls)
+    assert.are.equal("/tmp/sidekick-source", cwd)
   end)
 
   it("falls back to vim.ui.select and activates the chosen agent", function()

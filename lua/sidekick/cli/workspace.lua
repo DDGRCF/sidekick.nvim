@@ -191,8 +191,7 @@ local function panel_tab(saved, original, claimed)
     local wanted = Session.cwd({ cwd = saved.tab.cwd })
     for _, tab in ipairs(tabs) do
       if not claimed[tab] then
-        local win = vim.api.nvim_tabpage_list_wins(tab)[1]
-        local cwd = win and vim.api.nvim_win_call(win, vim.fn.getcwd) or nil
+        local cwd = require("sidekick.cli.panel").cwd(tab)
         if cwd and Session.cwd({ cwd = cwd }) == wanted then
           cwd_matches[#cwd_matches + 1] = tab
         end
@@ -208,10 +207,7 @@ local function panel_tab(saved, original, claimed)
   vim.cmd.tabnew()
   local tab = vim.api.nvim_get_current_tabpage()
   vim.t[tab].sidekick_workspace_id = saved.tab.id
-  if type(saved.tab.cwd) == "string" and vim.fn.isdirectory(saved.tab.cwd) == 1 then
-    vim.cmd.tcd(vim.fn.fnameescape(saved.tab.cwd))
-  end
-  return tab
+  return tab, true
 end
 
 local function validate(saved)
@@ -349,12 +345,12 @@ function M.restore(opts)
     local claimed, used = {}, {}
     for _, p in ipairs(saved.panels or {}) do
       local panel_ok, panel_err = pcall(function()
-        local tab = panel_tab(p, original, claimed)
+        local tab, created = panel_tab(p, original, claimed)
         if tab and vim.api.nvim_tabpage_is_valid(tab) then
           claimed[tab] = true
           vim.api.nvim_set_current_tabpage(tab)
           vim.t[tab].sidekick_workspace_id = p.tab.id
-          if type(p.tab.cwd) == "string" and vim.fn.isdirectory(p.tab.cwd) == 1 then
+          if created and type(p.tab.cwd) == "string" and vim.fn.isdirectory(p.tab.cwd) == 1 then
             vim.cmd.tcd(vim.fn.fnameescape(p.tab.cwd))
           end
           require("sidekick.cli.panel").restore(p, restored)
