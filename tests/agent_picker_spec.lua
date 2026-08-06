@@ -2,6 +2,7 @@
 
 local Config = require("sidekick.config")
 local Picker = require("sidekick.cli.agent_picker")
+local Cli = require("sidekick.cli")
 
 describe("cli agent picker", function()
   local old_provider
@@ -37,6 +38,24 @@ describe("cli agent picker", function()
       end
     end
     registered = {}
+  end)
+
+  it("opens the new-agent picker when no agents are available", function()
+    local original_new = Cli.new
+    local original_schedule = vim.schedule
+    local new_calls = 0
+    Cli.new = function()
+      new_calls = new_calls + 1
+    end
+    vim.schedule = function(cb)
+      cb()
+    end
+
+    Picker.open({})
+
+    Cli.new = original_new
+    vim.schedule = original_schedule
+    assert.are.equal(1, new_calls)
   end)
 
   it("falls back to vim.ui.select and activates the chosen agent", function()
@@ -81,7 +100,15 @@ describe("cli agent picker", function()
   it("uses Snacks for searchable metadata and output preview", function()
     Config.cli.agent_picker.provider = "snacks"
     local opts
+    local directory_icon_calls = 0
     package.loaded.snacks = {
+      util = {
+        icon = function(_, category)
+          directory_icon_calls = directory_icon_calls + 1
+          assert.are.equal("directory", category)
+          return "D", "Directory"
+        end,
+      },
       picker = {
         pick = function(value)
           opts = value
@@ -118,17 +145,48 @@ describe("cli agent picker", function()
     terminal.status = "done"
     assert.matches("#done", opts.finder()[1].text)
     local lines
+    local preview_buf = vim.api.nvim_create_buf(false, true)
     opts.preview({
       item = found,
+      buf = preview_buf,
       preview = {
-        reset = function() end,
+        reset = function()
+          vim.api.nvim_buf_clear_namespace(preview_buf, -1, 0, -1)
+        end,
         set_title = function() end,
         set_lines = function(_, value)
           lines = value
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, value)
         end,
       },
     })
     assert.are.equal("latest output", lines[#lines])
+    assert.are.equal(1, directory_icon_calls)
+    local extmarks = vim.api.nvim_buf_get_extmarks(preview_buf, -1, 0, -1, { details = true })
+    local highlights = vim.tbl_map(function(extmark)
+      return {
+        row = extmark[2],
+        col = extmark[3],
+        end_col = extmark[4].end_col,
+        hl_group = extmark[4].hl_group,
+      }
+    end, extmarks)
+    local status_label_col = assert(lines[2]:find("Status:", 1, true)) - 1
+    local directory_label_col = assert(lines[3]:find("Directory:", 1, true)) - 1
+    local backend_label_col = assert(lines[4]:find("Backend:", 1, true)) - 1
+    assert.are.same({
+      { row = 0, col = 0, end_col = #lines[1], hl_group = "Title" },
+      { row = 1, col = 0, end_col = status_label_col - 1, hl_group = "SidekickCliStatusDone" },
+      { row = 1, col = status_label_col, end_col = status_label_col + #"Status:", hl_group = "Special" },
+      { row = 1, col = status_label_col + #"Status: ", end_col = #lines[2], hl_group = "SidekickCliStatusDone" },
+      { row = 2, col = 0, end_col = directory_label_col - 1, hl_group = "Directory" },
+      { row = 2, col = directory_label_col, end_col = directory_label_col + #"Directory:", hl_group = "Special" },
+      { row = 2, col = directory_label_col + #"Directory: ", end_col = #lines[3], hl_group = "Directory" },
+      { row = 3, col = 0, end_col = backend_label_col - 1, hl_group = "Identifier" },
+      { row = 3, col = backend_label_col, end_col = backend_label_col + #"Backend:", hl_group = "Special" },
+      { row = 3, col = backend_label_col + #"Backend: ", end_col = #lines[4], hl_group = "Identifier" },
+    }, highlights)
+    vim.api.nvim_buf_delete(preview_buf, { force = true })
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 

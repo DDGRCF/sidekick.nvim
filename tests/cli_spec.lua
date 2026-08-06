@@ -10,6 +10,45 @@ local State = require("sidekick.cli.state")
 local Workspace = require("sidekick.cli.workspace")
 
 describe("cli routing", function()
+  it("defers the new-agent picker until a prompt callback has returned", function()
+    local original_prompt_select = Prompt.select
+    local original_select = Select.select
+    local original_get = State.get
+    local original_active = require("sidekick.cli.panel").active
+    local original_schedule = vim.schedule
+    local selected
+    local scheduled
+    Prompt.select = function(opts)
+      opts.cb("Explain this", {})
+    end
+    Select.select = function(opts)
+      selected = opts
+    end
+    State.get = function(filter)
+      assert.is_true(filter.attached)
+      return {}
+    end
+    require("sidekick.cli.panel").active = function()
+      return nil
+    end
+    vim.schedule = function(cb)
+      scheduled = cb
+    end
+
+    Cli.prompt()
+
+    assert.is_function(scheduled)
+    assert.is_nil(selected)
+    scheduled()
+    assert.is_true(selected.auto)
+
+    Prompt.select = original_prompt_select
+    Select.select = original_select
+    State.get = original_get
+    require("sidekick.cli.panel").active = original_active
+    vim.schedule = original_schedule
+  end)
+
   it("waits for an automatic workspace restore before opening the tool picker", function()
     local original_after_restore = Workspace.after_restore
     local original_get = State.get

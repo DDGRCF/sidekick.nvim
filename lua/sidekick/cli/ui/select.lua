@@ -126,7 +126,7 @@ function M.format(state, picker)
   ret[#ret + 1] = { " " }
   ret[#ret + 1] = { state.tool.name }
   local len = sw(state.tool.name) + 2
-  if state.new then
+  if state.new or not state.session then
     ret[#ret + 1] = { " · new", "Special" }
     len = len + 6
   elseif state.session then

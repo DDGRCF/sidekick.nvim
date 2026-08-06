@@ -168,11 +168,13 @@ function M.with(cb, opts)
   local attached = M.get(filter_attached)
 
   if #attached == 0 and opts.attach then
-    require("sidekick.cli.ui.select").select({
-      auto = true,
-      filter = opts.filter,
-      cb = use,
-    })
+    vim.schedule(function()
+      require("sidekick.cli.ui.select").select({
+        auto = true,
+        filter = opts.filter,
+        cb = use,
+      })
+    end)
   elseif #attached > 1 and not opts.all then
     require("sidekick.cli.ui.select").select({
       auto = true,

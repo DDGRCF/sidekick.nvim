@@ -4,6 +4,7 @@ local Panel = require("sidekick.cli.panel")
 local M = {}
 local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
 local PREVIEW_CACHE_MAX = 64
+local preview_ns = vim.api.nvim_create_namespace("sidekick.cli.agent_picker.preview")
 
 local function enrich(item, git)
   local t = item.terminal
@@ -88,18 +89,66 @@ local function prune_cache(limit)
   end
 end
 
-local function preview_lines(item, on_update)
-  local t = resolve(item)
-  local lines = {
+---@param item {tool:string,label:string,cwd:string,backend:string}
+---@param terminal? sidekick.cli.Terminal
+---@param Snacks? table
+local function preview_metadata(item, terminal, Snacks)
+  local status = terminal and terminal.status or "closed"
+  local function configured_icon(icon, fallback)
+    icon = type(icon) == "string" and vim.trim(icon) or ""
+    return icon ~= "" and icon or fallback
+  end
+  local directory_icon = "[dir]"
+  if Snacks and Snacks.util and Snacks.util.icon then
+    local ok, icon = pcall(Snacks.util.icon, item.cwd, "directory", { fallback = { dir = directory_icon } })
+    directory_icon = ok and configured_icon(icon, directory_icon) or directory_icon
+  end
+  local status_icon = configured_icon(Config.cli.win.tabs.status[status], "*")
+  local backend_source = item.backend == "terminal" and Config.ui.icons.terminal_attached
+    or Config.ui.icons.external_attached
+  local backend_icon = configured_icon(backend_source, ">_")
+  return {
     ("%s · %s"):format(item.tool, item.label),
-    ("Status: %s"):format(t and t.status or "closed"),
-    ("Directory: %s"):format(vim.fn.fnamemodify(item.cwd, ":p:~")),
-    ("Backend: %s"):format(item.backend),
+    ("%s Status: %s"):format(status_icon, status),
+    ("%s Directory: %s"):format(directory_icon, vim.fn.fnamemodify(item.cwd, ":p:~")),
+    ("%s Backend: %s"):format(backend_icon, item.backend),
     "",
+    status = status,
+    status_hl = "SidekickCliStatus" .. (terminal and status:gsub("^%l", string.upper) or "Error"),
+    status_icon = status_icon,
+    directory_icon = directory_icon,
+    backend_icon = backend_icon,
   }
+end
+
+---@param buf number
+---@param metadata table
+local function highlight_metadata(buf, metadata)
+  if not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+  local function highlight(row, col, end_col, hl_group)
+    vim.api.nvim_buf_set_extmark(buf, preview_ns, row, col, { end_col = end_col, hl_group = hl_group })
+  end
+
+  highlight(0, 0, #metadata[1], "Title")
+  local function highlight_field(row, icon, label, value_hl)
+    local label_col = #icon + 1
+    highlight(row, 0, #icon, value_hl)
+    highlight(row, label_col, label_col + #label, "Special")
+    highlight(row, label_col + #label + 1, #metadata[row + 1], value_hl)
+  end
+  highlight_field(1, metadata.status_icon, "Status:", metadata.status_hl)
+  highlight_field(2, metadata.directory_icon, "Directory:", "Directory")
+  highlight_field(3, metadata.backend_icon, "Backend:", "Identifier")
+end
+
+local function preview_lines(item, on_update, Snacks)
+  local t = resolve(item)
+  local lines = preview_metadata(item, t, Snacks)
   if not t then
     lines[#lines + 1] = "This agent is no longer available."
-    return lines
+    return lines, lines
   end
   local max = math.max(1, Config.cli.agent_picker.preview_lines)
   if t.buf and vim.api.nvim_buf_is_valid(t.buf) then
@@ -146,7 +195,7 @@ local function preview_lines(item, on_update)
       lines[#lines + 1] = "No terminal output is available."
     end
   end
-  return trim(lines)
+  return trim(lines), lines
 end
 
 local function selected(picker, item)
@@ -213,7 +262,9 @@ local function snacks(items, Snacks)
         if (not picker or not picker.closed) and generation == preview_generation then
           ctx.preview:reset()
           ctx.preview:set_title(ctx.item.agent.label)
-          ctx.preview:set_lines(preview_lines(ctx.item.agent, render))
+          local lines, metadata = preview_lines(ctx.item.agent, render, Snacks)
+          ctx.preview:set_lines(lines)
+          highlight_metadata(ctx.buf, metadata)
         end
       end
       render()
@@ -397,7 +448,9 @@ end
 function M.open(items)
   items = items or Panel.picker_items()
   if #items == 0 then
-    return require("sidekick.util").warn("No Sidekick agents are open")
+    return vim.schedule(function()
+      require("sidekick.cli").new()
+    end)
   end
   local provider = Config.cli.agent_picker.provider
   local ok, Snacks = pcall(require, "snacks")
