@@ -89,7 +89,7 @@ describe("cli workspace", function()
     assert.is_false(Workspace.partial)
   end)
 
-  it("discards agents without exact resume metadata after reporting the failure", function()
+  it("discards agents without exact resume metadata without a persistent failure", function()
     local cwd = vim.fn.getcwd()
     Util.set_state("cli-workspace", {
       version = 1,
@@ -124,7 +124,7 @@ describe("cli workspace", function()
     local state = Util.get_state("cli-workspace")
 
     assert.are.equal(0, result.restored)
-    assert.are.equal(1, #result.failed)
+    assert.are.equal(0, #result.failed)
     assert.is_false(Workspace.partial)
     assert.are.same({}, state.agents)
     assert.are.same({}, state.panels[1].order)

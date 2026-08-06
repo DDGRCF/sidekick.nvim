@@ -327,13 +327,18 @@ function M.restore()
       else
         if mode == "unsupported" and lacks_exact_conversation(agent) then
           discarded[agent.key] = true
+        else
+          failed[#failed + 1] = {
+            agent = agent,
+            error = agent_ok and (err or "unknown restore error") or tostring(terminal),
+          }
         end
-        failed[#failed + 1] = {
-          agent = agent,
-          error = agent_ok and (err or "unknown restore error") or tostring(terminal),
-        }
       end
     end
+
+    -- These entries can never be resumed after the process has exited. Persist
+    -- their removal before restoring panels so they cannot fail on every startup.
+    local discarded_ok = discard_agents(saved, discarded)
 
     local panel_failures = {}
     local claimed, used = {}, {}
@@ -383,8 +388,7 @@ function M.restore()
     if #panel_failures > 0 then
       Util.warn(("%d Sidekick panel(s) could not be restored"):format(#panel_failures))
     end
-    local discarded_ok = discard_agents(saved, discarded)
-    M.partial = (#failed > vim.tbl_count(discarded)) or #panel_failures > 0 or not discarded_ok
+    M.partial = #failed > 0 or #panel_failures > 0 or not discarded_ok
     return { restored = restored_count, failed = failed, modes = modes, panel_failures = panel_failures }
   end, debug.traceback)
   M.restoring = false
