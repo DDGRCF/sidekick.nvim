@@ -3,7 +3,7 @@ local Resume = require("sidekick.cli.resume")
 local Session = require("sidekick.cli.session")
 local Util = require("sidekick.util")
 
-local M = { did_setup = false, restoring = false, partial = false }
+local M = { did_setup = false, restoring = false, partial = false, restore_pending = false, restore_waiters = {} }
 
 local state_key = "cli-workspace"
 local version = 1
@@ -445,6 +445,36 @@ local function autorestore()
   end
 end
 
+local function flush_restore_waiters()
+  local waiters = M.restore_waiters
+  M.restore_waiters = {}
+  for _, waiter in ipairs(waiters) do
+    waiter()
+  end
+end
+
+local function schedule_autorestore()
+  if M.restore_pending or not Util.get_state(state_key) then
+    return
+  end
+  M.restore_pending = true
+  vim.schedule(function()
+    autorestore()
+    M.restore_pending = false
+    flush_restore_waiters()
+  end)
+end
+
+---@param cb fun()
+---@return boolean deferred
+function M.after_restore(cb)
+  if M.restore_pending or M.restoring then
+    M.restore_waiters[#M.restore_waiters + 1] = cb
+    return true
+  end
+  return false
+end
+
 function M.setup()
   if M.did_setup or not Config.cli.workspace.enabled then
     return
@@ -484,12 +514,12 @@ function M.setup()
   })
   if Config.cli.workspace.autorestore then
     if vim.v.vim_did_enter == 1 then
-      autorestore()
+      schedule_autorestore()
     else
       vim.api.nvim_create_autocmd("VimEnter", {
         group = Config.augroup,
         once = true,
-        callback = autorestore,
+        callback = schedule_autorestore,
       })
     end
   end

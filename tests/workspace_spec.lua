@@ -16,6 +16,8 @@ describe("cli workspace", function()
   local did_setup
   local workspace_enabled
   local workspace_autorestore
+  local restore_pending
+  local restore_waiters
 
   before_each(function()
     saved_workspace = Util.get_state("cli-workspace")
@@ -25,6 +27,8 @@ describe("cli workspace", function()
     did_setup = Workspace.did_setup
     workspace_enabled = Config.cli.workspace.enabled
     workspace_autorestore = Config.cli.workspace.autorestore
+    restore_pending = Workspace.restore_pending
+    restore_waiters = Workspace.restore_waiters
   end)
 
   after_each(function()
@@ -43,6 +47,8 @@ describe("cli workspace", function()
     Workspace.did_setup = did_setup
     Config.cli.workspace.enabled = workspace_enabled
     Config.cli.workspace.autorestore = workspace_autorestore
+    Workspace.restore_pending = restore_pending
+    Workspace.restore_waiters = restore_waiters
     Workspace.partial = false
     Workspace.restoring = false
     if saved_workspace == nil then
@@ -164,13 +170,16 @@ describe("cli workspace", function()
     assert.are.same({}, messages)
   end)
 
-  it("restores immediately after VimEnter and otherwise waits for VimEnter", function()
+  it("restores after VimEnter and delays pickers until restore completes", function()
     local original_restore = Workspace.restore
     local original_create_autocmd = vim.api.nvim_create_autocmd
+    local original_schedule = vim.schedule
     local original_vim = vim
     local restore_calls = 0
     local restore_opts
     local vim_enter
+    local scheduled = {}
+    local picker_calls = 0
     Config.cli.workspace.enabled = true
     Config.cli.workspace.autorestore = true
     Util.set_state("cli-workspace", { version = 1, saved_at = os.time(), agents = {}, panels = {} })
@@ -185,28 +194,46 @@ describe("cli workspace", function()
       end
       return 1
     end
+    vim.schedule = function(cb)
+      scheduled[#scheduled + 1] = cb
+    end
 
     local function setup(did_enter)
       _G.vim = setmetatable({ v = { vim_did_enter = did_enter } }, { __index = original_vim })
       Workspace.did_setup = false
+      Workspace.restore_pending = false
+      Workspace.restore_waiters = {}
       Workspace.setup()
       _G.vim = original_vim
     end
 
     setup(1)
+    assert.are.equal(0, restore_calls)
+    assert.is_true(Workspace.after_restore(function()
+      picker_calls = picker_calls + 1
+    end))
+    assert.are.equal(1, #scheduled)
+    scheduled[1]()
     assert.are.equal(1, restore_calls)
     assert.are.same({ silent = true }, restore_opts)
+    assert.are.equal(1, picker_calls)
 
     restore_calls = 0
     restore_opts = nil
+    picker_calls = 0
+    scheduled = {}
     setup(0)
     assert.are.equal(0, restore_calls)
     assert.is_function(vim_enter)
     vim_enter()
+    assert.are.equal(0, restore_calls)
+    assert.are.equal(1, #scheduled)
+    scheduled[1]()
     assert.are.equal(1, restore_calls)
     assert.are.same({ silent = true }, restore_opts)
 
     vim.api.nvim_create_autocmd = original_create_autocmd
+    vim.schedule = original_schedule
     Workspace.restore = original_restore
   end)
 

@@ -28,6 +28,11 @@ end
 ---@param opts sidekick.cli.Select
 function M.select(opts)
   assert(type(opts) == "table", "opts must be a table")
+  if require("sidekick.cli.workspace").after_restore(function()
+    M.select(opts)
+  end) then
+    return
+  end
   local tools
   if opts.new then
     tools = vim.tbl_map(function(tool)

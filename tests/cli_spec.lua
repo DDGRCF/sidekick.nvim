@@ -7,8 +7,41 @@ local Prompt = require("sidekick.cli.ui.prompt")
 local Select = require("sidekick.cli.ui.select")
 local Session = require("sidekick.cli.session")
 local State = require("sidekick.cli.state")
+local Workspace = require("sidekick.cli.workspace")
 
 describe("cli routing", function()
+  it("waits for an automatic workspace restore before opening the tool picker", function()
+    local original_after_restore = Workspace.after_restore
+    local original_get = State.get
+    local original_select = vim.ui.select
+    local deferred
+    local select_calls = 0
+    Workspace.after_restore = function(cb)
+      deferred = cb
+      return true
+    end
+    State.get = function()
+      return { { tool = { name = "codex" }, installed = true } }
+    end
+    vim.ui.select = function()
+      select_calls = select_calls + 1
+    end
+
+    Select.select({ cb = function() end })
+
+    assert.are.equal(0, select_calls)
+    assert.is_function(deferred)
+    Workspace.after_restore = function()
+      return false
+    end
+    deferred()
+    assert.are.equal(1, select_calls)
+
+    Workspace.after_restore = original_after_restore
+    State.get = original_get
+    vim.ui.select = original_select
+  end)
+
   it("preserves the selected prompt text for the first agent title", function()
     local original_select = Prompt.select
     local original_send = Cli.send
