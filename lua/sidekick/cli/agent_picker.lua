@@ -127,6 +127,7 @@ local function highlight_metadata(buf, metadata)
   if not vim.api.nvim_buf_is_valid(buf) then
     return
   end
+  vim.api.nvim_buf_clear_namespace(buf, preview_ns, 0, -1)
   local function highlight(row, col, end_col, hl_group)
     vim.api.nvim_buf_set_extmark(buf, preview_ns, row, col, { end_col = end_col, hl_group = hl_group })
   end
@@ -198,6 +199,63 @@ local function preview_lines(item, on_update, Snacks)
   return trim(lines), lines
 end
 
+---@param ctx snacks.picker.preview.ctx
+local function save_preview_view(ctx)
+  if not (ctx.win and vim.api.nvim_win_is_valid(ctx.win)) then
+    return
+  end
+  return vim.api.nvim_win_call(ctx.win, vim.fn.winsaveview)
+end
+
+---@param ctx snacks.picker.preview.ctx
+---@param view? vim.fn.winsaveview.ret
+local function restore_preview_view(ctx, view)
+  if not (view and ctx.win and vim.api.nvim_win_is_valid(ctx.win) and vim.api.nvim_buf_is_valid(ctx.buf)) then
+    return
+  end
+  local count = vim.api.nvim_buf_line_count(ctx.buf)
+  if count == 0 then
+    return
+  end
+  view = vim.deepcopy(view)
+  view.lnum = math.min(math.max(view.lnum, 1), count)
+  view.topline = math.min(math.max(view.topline, 1), count)
+  vim.api.nvim_win_call(ctx.win, function()
+    vim.fn.winrestview(view)
+  end)
+end
+
+---@param ctx snacks.picker.preview.ctx
+local function show_preview_tail(ctx)
+  if not (ctx.win and vim.api.nvim_win_is_valid(ctx.win) and vim.api.nvim_buf_is_valid(ctx.buf)) then
+    return
+  end
+  local count = vim.api.nvim_buf_line_count(ctx.buf)
+  if count == 0 then
+    return
+  end
+  vim.api.nvim_win_call(ctx.win, function()
+    -- Keep the cursor on the first visible line. This shows the newest output
+    -- without pinning the cursor to the final line or leaving empty rows below.
+    local first = math.max(1, count - vim.api.nvim_win_get_height(ctx.win) + 1)
+    vim.api.nvim_win_set_cursor(ctx.win, { first, 0 })
+    vim.cmd("normal! zt")
+  end)
+end
+
+---@param ctx snacks.picker.preview.ctx
+---@param lines string[]
+local function set_preview_lines(ctx, lines)
+  if vim.api.nvim_buf_is_valid(ctx.buf) then
+    local current = vim.api.nvim_buf_get_lines(ctx.buf, 0, -1, false)
+    if vim.deep_equal(current, lines) then
+      return false
+    end
+  end
+  ctx.preview:set_lines(lines)
+  return true
+end
+
 local function selected(picker, item)
   local ret = {}
   for _, selected_item in ipairs(picker:selected({ fallback = true })) do
@@ -258,13 +316,23 @@ local function snacks(items, Snacks)
     preview = function(ctx)
       preview_generation = preview_generation + 1
       local generation = preview_generation
+      local initialized = false
       local function render()
         if (not picker or not picker.closed) and generation == preview_generation then
-          ctx.preview:reset()
+          local view = initialized and save_preview_view(ctx) or nil
+          if not initialized then
+            ctx.preview:reset()
+          end
           ctx.preview:set_title(ctx.item.agent.label)
           local lines, metadata = preview_lines(ctx.item.agent, render, Snacks)
-          ctx.preview:set_lines(lines)
+          set_preview_lines(ctx, lines)
           highlight_metadata(ctx.buf, metadata)
+          if view then
+            restore_preview_view(ctx, view)
+          else
+            show_preview_tail(ctx)
+          end
+          initialized = true
         end
       end
       render()

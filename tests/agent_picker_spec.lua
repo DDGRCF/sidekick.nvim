@@ -9,6 +9,7 @@ describe("cli agent picker", function()
   local old_select
   local old_snacks
   local old_picker
+  local old_new_timer
   local Terminal = require("sidekick.cli.terminal")
   local registered = {}
 
@@ -24,6 +25,7 @@ describe("cli agent picker", function()
     old_picker = Config.cli.picker
     old_select = vim.ui.select
     old_snacks = package.loaded.snacks
+    old_new_timer = vim.uv.new_timer
   end)
 
   after_each(function()
@@ -31,6 +33,7 @@ describe("cli agent picker", function()
     Config.cli.picker = old_picker
     vim.ui.select = old_select
     package.loaded.snacks = old_snacks
+    vim.uv.new_timer = old_new_timer
     for _, t in ipairs(registered) do
       Terminal.terminals[t.id] = nil
       if t.test_timer and not t.test_timer:is_closing() then
@@ -243,5 +246,107 @@ describe("cli agent picker", function()
     assert.are.equal(1, updates)
     assert.are.equal(0, stale_updates)
     assert.are.equal(0, sync_calls)
+  end)
+
+  it("shows terminal preview tails and preserves a custom view while output updates", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local timer
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return { closed = false, id = "preview-test" }
+        end,
+      },
+    }
+    local output = {}
+    for i = 1, 12 do
+      output[i] = "output " .. i
+    end
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, output)
+    local terminal = register({
+      id = "preview-one",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "working",
+      buf = buf,
+      test_timer = vim.uv.new_timer(),
+    })
+    vim.uv.new_timer = function()
+      return {
+        close = function() end,
+        is_closing = function()
+          return false
+        end,
+        start = function(_, _, _, callback)
+          timer = callback
+        end,
+        stop = function() end,
+      }
+    end
+
+    Picker.open({
+      {
+        id = terminal.id,
+        key = terminal.id,
+        label = "Codex: Preview",
+        terminal = terminal,
+      },
+    })
+
+    local preview_buf = vim.api.nvim_create_buf(false, true)
+    local preview_win = vim.api.nvim_open_win(preview_buf, false, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 30,
+      height = 4,
+      style = "minimal",
+    })
+    local resets = 0
+    local item = opts.finder()[1]
+    opts.preview({
+      item = item,
+      buf = preview_buf,
+      win = preview_win,
+      preview = {
+        reset = function()
+          resets = resets + 1
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, {})
+        end,
+        set_lines = function(_, lines)
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, lines)
+        end,
+        set_title = function() end,
+      },
+    })
+
+    local line_count = vim.api.nvim_buf_line_count(preview_buf)
+    local initial = vim.api.nvim_win_call(preview_win, vim.fn.winsaveview)
+    assert.are.equal(math.max(1, line_count - vim.api.nvim_win_get_height(preview_win) + 1), initial.lnum)
+    assert.are.equal(initial.lnum, initial.topline)
+
+    vim.api.nvim_win_set_cursor(preview_win, { 9, 0 })
+    vim.api.nvim_win_call(preview_win, function()
+      vim.cmd("normal! zt")
+    end)
+    local before = vim.api.nvim_win_call(preview_win, vim.fn.winsaveview)
+    vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "latest output" })
+    timer()
+    assert.is_true(vim.wait(100, function()
+      local lines = vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+      return lines[#lines] == "latest output"
+    end, 10))
+
+    local after = vim.api.nvim_win_call(preview_win, vim.fn.winsaveview)
+    assert.are.equal(1, resets)
+    assert.are.equal(before.lnum, after.lnum)
+    assert.are.equal(before.topline, after.topline)
+    opts.on_close()
+    vim.api.nvim_win_close(preview_win, true)
+    vim.api.nvim_buf_delete(preview_buf, { force = true })
+    vim.api.nvim_buf_delete(buf, { force = true })
   end)
 end)
