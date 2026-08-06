@@ -3,6 +3,7 @@
 local Config = require("sidekick.config")
 local Picker = require("sidekick.cli.agent_picker")
 local Cli = require("sidekick.cli")
+local Usage = require("sidekick.cli.agent_usage")
 
 describe("cli agent picker", function()
   local old_provider
@@ -34,6 +35,7 @@ describe("cli agent picker", function()
     vim.ui.select = old_select
     package.loaded.snacks = old_snacks
     vim.uv.new_timer = old_new_timer
+    Usage.clear()
     for _, t in ipairs(registered) do
       Terminal.terminals[t.id] = nil
       if t.test_timer and not t.test_timer:is_closing() then
@@ -127,7 +129,7 @@ describe("cli agent picker", function()
       },
     }
     local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "older", "latest output" })
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Context: 12k / 128k", "older", "latest output" })
     local terminal = register({
       id = "one",
       tool = { name = "codex" },
@@ -157,12 +159,21 @@ describe("cli agent picker", function()
     assert.matches("#done", opts.finder()[1].text)
     local lines
     local preview_buf = vim.api.nvim_create_buf(false, true)
+    local preview_win = vim.api.nvim_open_win(preview_buf, false, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 30,
+      height = 4,
+      style = "minimal",
+    })
     opts.preview({
       item = found,
       buf = preview_buf,
+      win = preview_win,
       preview = {
         reset = function()
-          vim.api.nvim_buf_clear_namespace(preview_buf, -1, 0, -1)
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, {})
         end,
         set_title = function() end,
         set_lines = function(_, value)
@@ -173,30 +184,37 @@ describe("cli agent picker", function()
     })
     assert.are.equal("latest output", lines[#lines])
     assert.are.equal(1, directory_icon_calls)
-    local extmarks = vim.api.nvim_buf_get_extmarks(preview_buf, -1, 0, -1, { details = true })
-    local highlights = vim.tbl_map(function(extmark)
-      return {
-        row = extmark[2],
-        col = extmark[3],
-        end_col = extmark[4].end_col,
-        hl_group = extmark[4].hl_group,
-      }
-    end, extmarks)
-    local status_label_col = assert(lines[2]:find("Status:", 1, true)) - 1
-    local directory_label_col = assert(lines[3]:find("Directory:", 1, true)) - 1
-    local backend_label_col = assert(lines[4]:find("Backend:", 1, true)) - 1
-    assert.are.same({
-      { row = 0, col = 0, end_col = #lines[1], hl_group = "Title" },
-      { row = 1, col = 0, end_col = status_label_col - 1, hl_group = "SidekickCliStatusDone" },
-      { row = 1, col = status_label_col, end_col = status_label_col + #"Status:", hl_group = "Special" },
-      { row = 1, col = status_label_col + #"Status: ", end_col = #lines[2], hl_group = "SidekickCliStatusDone" },
-      { row = 2, col = 0, end_col = directory_label_col - 1, hl_group = "Directory" },
-      { row = 2, col = directory_label_col, end_col = directory_label_col + #"Directory:", hl_group = "Special" },
-      { row = 2, col = directory_label_col + #"Directory: ", end_col = #lines[3], hl_group = "Directory" },
-      { row = 3, col = 0, end_col = backend_label_col - 1, hl_group = "Identifier" },
-      { row = 3, col = backend_label_col, end_col = backend_label_col + #"Backend:", hl_group = "Special" },
-      { row = 3, col = backend_label_col + #"Backend: ", end_col = #lines[4], hl_group = "Identifier" },
-    }, highlights)
+    local winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
+    assert.matches("Status:", winbar)
+    assert.matches("done", winbar)
+    assert.matches("Directory:", winbar)
+    assert.matches("/tmp/project", winbar)
+    assert.matches("Backend:", winbar)
+    assert.matches("terminal", winbar)
+    assert.is_true(vim.wait(100, function()
+      local context = Usage.get(terminal)
+      return context and context.percent == 9
+    end, 10))
+    opts.preview({
+      item = found,
+      buf = preview_buf,
+      win = preview_win,
+      preview = {
+        reset = function()
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, {})
+        end,
+        set_title = function() end,
+        set_lines = function(_, value)
+          lines = value
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, value)
+        end,
+      },
+    })
+    winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
+    assert.matches("Context:", winbar)
+    assert.matches("12k / 128k", winbar)
+    opts.on_close()
+    vim.api.nvim_win_close(preview_win, true)
     vim.api.nvim_buf_delete(preview_buf, { force = true })
     vim.api.nvim_buf_delete(buf, { force = true })
   end)

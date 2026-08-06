@@ -1,10 +1,10 @@
 local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
+local Usage = require("sidekick.cli.agent_usage")
 
 local M = {}
 local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
 local PREVIEW_CACHE_MAX = 64
-local preview_ns = vim.api.nvim_create_namespace("sidekick.cli.agent_picker.preview")
 
 local function enrich(item, git)
   local t = item.terminal
@@ -107,49 +107,89 @@ local function preview_metadata(item, terminal, Snacks)
   local backend_source = item.backend == "terminal" and Config.ui.icons.terminal_attached
     or Config.ui.icons.external_attached
   local backend_icon = configured_icon(backend_source, ">_")
+  local context = terminal and Usage.get(terminal)
   return {
-    ("%s · %s"):format(item.tool, item.label),
-    ("%s Status: %s"):format(status_icon, status),
-    ("%s Directory: %s"):format(directory_icon, vim.fn.fnamemodify(item.cwd, ":p:~")),
-    ("%s Backend: %s"):format(backend_icon, item.backend),
-    "",
     status = status,
     status_hl = "SidekickCliStatus" .. (terminal and status:gsub("^%l", string.upper) or "Error"),
     status_icon = status_icon,
     directory_icon = directory_icon,
     backend_icon = backend_icon,
+    directory = vim.fn.fnamemodify(item.cwd, ":p:~"),
+    backend = item.backend,
+    context = context,
   }
 end
 
----@param buf number
+---@param value any
+local function escape_winbar(value)
+  return tostring(value):gsub("%%", "%%%%")
+end
+
 ---@param metadata table
-local function highlight_metadata(buf, metadata)
-  if not vim.api.nvim_buf_is_valid(buf) then
+---@return string
+local function preview_winbar(metadata)
+  local function highlight(group, text)
+    return ("%%#%s#%s%%*"):format(group, escape_winbar(text))
+  end
+  local function count(value)
+    if value >= 1e6 then
+      return ("%.1fm"):format(value / 1e6):gsub("%.0m$", "m")
+    elseif value >= 1e3 then
+      return ("%.1fk"):format(value / 1e3):gsub("%.0k$", "k")
+    end
+    return tostring(math.floor(value + 0.5))
+  end
+  local ret = {
+    highlight(metadata.status_hl, metadata.status_icon),
+    " ",
+    highlight("Special", "Status:"),
+    " ",
+    highlight(metadata.status_hl, metadata.status),
+    "  ",
+  }
+  if metadata.context then
+    local context = metadata.context
+    local text = ("Context: %s"):format(count(context.used))
+    if context.max then
+      text = ("Context: %s / %s"):format(count(context.used), count(context.max))
+    end
+    if context.percent then
+      text = text .. (" (%d%%)"):format(context.percent)
+    end
+    vim.list_extend(ret, { highlight("Number", text), "  " })
+  end
+  vim.list_extend(ret, {
+    highlight("Directory", metadata.directory_icon),
+    " ",
+    highlight("Special", "Directory:"),
+    " ",
+    highlight("Directory", metadata.directory),
+    "  ",
+    highlight("Identifier", metadata.backend_icon),
+    " ",
+    highlight("Special", "Backend:"),
+    " ",
+    highlight("Identifier", metadata.backend),
+  })
+  return table.concat(ret)
+end
+
+---@param ctx snacks.picker.preview.ctx
+---@param metadata table
+local function set_preview_winbar(ctx, metadata)
+  if not (ctx.win and vim.api.nvim_win_is_valid(ctx.win)) then
     return
   end
-  vim.api.nvim_buf_clear_namespace(buf, preview_ns, 0, -1)
-  local function highlight(row, col, end_col, hl_group)
-    vim.api.nvim_buf_set_extmark(buf, preview_ns, row, col, { end_col = end_col, hl_group = hl_group })
-  end
-
-  highlight(0, 0, #metadata[1], "Title")
-  local function highlight_field(row, icon, label, value_hl)
-    local label_col = #icon + 1
-    highlight(row, 0, #icon, value_hl)
-    highlight(row, label_col, label_col + #label, "Special")
-    highlight(row, label_col + #label + 1, #metadata[row + 1], value_hl)
-  end
-  highlight_field(1, metadata.status_icon, "Status:", metadata.status_hl)
-  highlight_field(2, metadata.directory_icon, "Directory:", "Directory")
-  highlight_field(3, metadata.backend_icon, "Backend:", "Identifier")
+  vim.api.nvim_set_option_value("winbar", preview_winbar(metadata), { win = ctx.win })
 end
 
 local function preview_lines(item, on_update, Snacks)
   local t = resolve(item)
-  local lines = preview_metadata(item, t, Snacks)
+  local metadata = preview_metadata(item, t, Snacks)
+  local lines = {}
   if not t then
     lines[#lines + 1] = "This agent is no longer available."
-    return lines, lines
+    return lines, metadata
   end
   local max = math.max(1, Config.cli.agent_picker.preview_lines)
   if t.buf and vim.api.nvim_buf_is_valid(t.buf) then
@@ -196,7 +236,7 @@ local function preview_lines(item, on_update, Snacks)
       lines[#lines + 1] = "No terminal output is available."
     end
   end
-  return trim(lines), lines
+  return trim(lines), metadata
 end
 
 ---@param ctx snacks.picker.preview.ctx
@@ -326,7 +366,7 @@ local function snacks(items, Snacks)
           ctx.preview:set_title(ctx.item.agent.label)
           local lines, metadata = preview_lines(ctx.item.agent, render, Snacks)
           set_preview_lines(ctx, lines)
-          highlight_metadata(ctx.buf, metadata)
+          set_preview_winbar(ctx, metadata)
           if view then
             restore_preview_view(ctx, view)
           else

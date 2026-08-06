@@ -89,6 +89,7 @@ return {
   },
   is_proc = "\\<opencode\\>",
   url = "https://github.com/anomalyco/opencode",
+  usage = require("sidekick.cli.agent_usage").opencode,
   continue = { "--continue" },
   resume = require("sidekick.cli.provider_sessions").adapter("opencode", { "--session" }),
   native_scroll = true,

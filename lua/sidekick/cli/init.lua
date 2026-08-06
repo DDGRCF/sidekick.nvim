@@ -26,6 +26,7 @@ local M = {}
 ---@field format? fun(text:sidekick.Text[], str:string):string?
 ---@field native_scroll? boolean whether the tool handles scrolling natively
 ---@field status? fun(self:sidekick.cli.Tool,event:sidekick.cli.ActivityEvent):sidekick.cli.ActivityStatus? exact activity status adapter
+---@field usage? fun(self:sidekick.cli.Tool,session:sidekick.cli.Terminal,cb:fun(value?:sidekick.cli.ContextUsage)):sidekick.cli.ContextUsage?|boolean? async context-usage adapter; return `true` when it will invoke `cb`
 ---@field resume? string[]|sidekick.cli.ResumeAdapter|fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
 ---@field continue? string[] native CLI arguments for resuming the most recent conversation
 
