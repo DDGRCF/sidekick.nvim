@@ -753,11 +753,12 @@ function M.layout()
 end
 
 ---@param id string
-function M.select(id)
+---@param focus? boolean
+function M.select(id, focus)
   local t = usable(id)
   if t then
     require("sidekick.cli.activity").ack(t)
-    M.show(t, false)
+    M.show(t, focus)
   end
 end
 

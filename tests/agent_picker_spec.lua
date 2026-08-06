@@ -3,6 +3,7 @@
 local Config = require("sidekick.config")
 local Picker = require("sidekick.cli.agent_picker")
 local Cli = require("sidekick.cli")
+local Panel = require("sidekick.cli.panel")
 local Usage = require("sidekick.cli.agent_usage")
 
 describe("cli agent picker", function()
@@ -11,6 +12,9 @@ describe("cli agent picker", function()
   local old_snacks
   local old_picker
   local old_new_timer
+  local old_panel_rename
+  local old_schedule
+  local old_icons
   local Terminal = require("sidekick.cli.terminal")
   local registered = {}
 
@@ -27,6 +31,9 @@ describe("cli agent picker", function()
     old_select = vim.ui.select
     old_snacks = package.loaded.snacks
     old_new_timer = vim.uv.new_timer
+    old_panel_rename = Panel.rename
+    old_schedule = vim.schedule
+    old_icons = Config.cli.win.tabs.icons
   end)
 
   after_each(function()
@@ -35,6 +42,9 @@ describe("cli agent picker", function()
     vim.ui.select = old_select
     package.loaded.snacks = old_snacks
     vim.uv.new_timer = old_new_timer
+    Panel.rename = old_panel_rename
+    vim.schedule = old_schedule
+    Config.cli.win.tabs.icons = old_icons
     Usage.clear()
     for _, t in ipairs(registered) do
       Terminal.terminals[t.id] = nil
@@ -74,9 +84,11 @@ describe("cli agent picker", function()
   it("falls back to vim.ui.select and activates the chosen agent", function()
     Config.cli.agent_picker.provider = "native"
     local selected
+    local focused
     local old_panel_select = require("sidekick.cli.panel").select
-    require("sidekick.cli.panel").select = function(id)
+    require("sidekick.cli.panel").select = function(id, focus)
       selected = id
+      focused = focus
     end
     local calls = 0
     vim.ui.select = function(items, opts, cb)
@@ -108,6 +120,7 @@ describe("cli agent picker", function()
 
     require("sidekick.cli.panel").select = old_panel_select
     assert.are.equal("one", selected)
+    assert.is_true(focused)
   end)
 
   it("uses Snacks for searchable metadata and output preview", function()
@@ -157,6 +170,22 @@ describe("cli agent picker", function()
     assert.is_true(pcall(vim.deepcopy, found))
     terminal.status = "done"
     assert.matches("#done", opts.finder()[1].text)
+    found.agent.branch = "main"
+    found.agent.changed_files = { "lua/a.lua", "tests/a.lua" }
+    local formatted = table.concat(vim.tbl_map(function(part)
+      return part[1]
+    end, opts.format(found)))
+    assert.matches("codex", formatted)
+    assert.matches("Agent one", formatted)
+    assert.matches("done", formatted)
+    assert.matches("project", formatted)
+    assert.matches("main", formatted)
+    assert.matches("%+2", formatted)
+    assert.are.equal("SidekickCliToolCodex", opts.format(found)[1][2])
+    Config.cli.win.tabs.icons = { codex = "C" }
+    local with_icon = opts.format(found)
+    assert.are.same({ "C ", "SidekickCliToolCodex" }, with_icon[1])
+    assert.are.equal("Identifier", with_icon[2][2])
     local lines
     local preview_buf = vim.api.nvim_create_buf(false, true)
     local preview_win = vim.api.nvim_open_win(preview_buf, false, {
@@ -213,10 +242,95 @@ describe("cli agent picker", function()
     winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
     assert.matches("Context:", winbar)
     assert.matches("12k / 128k", winbar)
+    assert.matches("SidekickCliStatusDone", winbar)
     opts.on_close()
     vim.api.nvim_win_close(preview_win, true)
     vim.api.nvim_buf_delete(preview_buf, { force = true })
     vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("renames an agent in the Snacks picker without closing it", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local find_calls = 0
+    local picker = {
+      closed = false,
+      id = "rename-test",
+      opts = { live = false },
+      input = {
+        filter = { pattern = "old filter", search = "" },
+      },
+    }
+    function picker.input:get()
+      return self.text
+    end
+    function picker.input:set(pattern, search)
+      self.filter.pattern = pattern or self.filter.pattern
+      self.filter.search = search or self.filter.search
+      self.text = picker.opts.live and self.filter.search or self.filter.pattern
+    end
+    function picker:find()
+      find_calls = find_calls + 1
+    end
+    local original_find = picker.find
+    function picker:focus()
+      self.focused = true
+    end
+    function picker:update_titles() end
+    function picker:selected()
+      return { self.item }
+    end
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return picker
+        end,
+      },
+    }
+    local terminal = register({
+      id = "rename-one",
+      tool = { name = "codex" },
+      title = "Before rename",
+      cwd = "/tmp/project",
+      status = "working",
+    })
+    local renamed
+    Panel.rename = function(value, id)
+      renamed = { value = value, id = id }
+      terminal.title = value
+    end
+    vim.schedule = function(callback)
+      callback()
+    end
+
+    Picker.open({ {
+      id = terminal.id,
+      key = terminal.id,
+      label = "Codex: Before rename",
+      terminal = terminal,
+    } })
+    local item = opts.finder()[1]
+    picker.item = item
+    opts.actions.agent_rename(picker, item)
+
+    assert.is_true(picker.focused)
+    assert.are.equal("Rename Agent", picker.title)
+    assert.are.equal("Rename agent: ", picker.opts.prompt)
+    assert.are.equal("Before rename", picker.input:get())
+    assert.are_not.equal(original_find, picker.find)
+
+    picker.input.text = "After rename"
+    opts.actions.agent_confirm(picker, item)
+
+    assert.are.same({ value = "After rename", id = terminal.id }, renamed)
+    assert.are.equal(original_find, picker.find)
+    assert.are.equal("old filter", picker.input.filter.pattern)
+    assert.is_nil(picker.opts.prompt)
+    assert.is_nil(picker.title)
+    assert.are.equal(1, find_calls)
+    assert.is_false(picker.closed)
+    opts.on_close()
   end)
 
   it("loads mux previews asynchronously without calling synchronous dump", function()

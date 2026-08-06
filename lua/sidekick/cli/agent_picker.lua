@@ -6,25 +6,37 @@ local M = {}
 local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
 local PREVIEW_CACHE_MAX = 64
 
+local function agent_title(item, terminal)
+  local title = terminal.title
+  if type(title) ~= "string" or vim.trim(title) == "" then
+    title = item.label:match("^[^:]+:%s*(.+)$") or terminal.tool.name
+  end
+  return vim.trim(tostring(title):gsub("[%c\r\n]+", " "):gsub("%s+", " "))
+end
+
 local function enrich(item, git)
   local t = item.terminal
   local project = vim.fn.fnamemodify(t.cwd or "", ":t")
   local metadata = git[t.cwd or ""] or {}
   local branch = metadata.branch or ""
   local changed = metadata.changed_files or {}
+  local title = agent_title(item, t)
   return {
     id = item.id,
     instance_id = t.instance_id,
     key = item.key,
     label = item.label,
+    title = title,
     tool = t.tool.name,
     status = t.status or "idle",
     cwd = t.cwd or "",
+    project = project,
     backend = t.mux_backend or t.backend or "terminal",
     branch = branch,
     changed_files = vim.deepcopy(changed),
     search = table.concat({
       item.label,
+      title,
       "@" .. t.tool.name,
       "#" .. (t.status or "idle"),
       "%" .. project,
@@ -139,6 +151,16 @@ local function preview_winbar(metadata)
     end
     return tostring(math.floor(value + 0.5))
   end
+  local function context_hl(context)
+    if not context.percent then
+      return "Number"
+    elseif context.percent >= 85 then
+      return "SidekickCliStatusError"
+    elseif context.percent >= 60 then
+      return "SidekickCliStatusWorking"
+    end
+    return "SidekickCliStatusDone"
+  end
   local ret = {
     highlight(metadata.status_hl, metadata.status_icon),
     " ",
@@ -156,7 +178,7 @@ local function preview_winbar(metadata)
     if context.percent then
       text = text .. (" (%d%%)"):format(context.percent)
     end
-    vim.list_extend(ret, { highlight("Number", text), "  " })
+    vim.list_extend(ret, { highlight(context_hl(context), text), "  " })
   end
   vim.list_extend(ret, {
     highlight("Directory", metadata.directory_icon),
@@ -322,6 +344,7 @@ local function snacks(items, Snacks)
   local preview_timer
   local preview_generation = 0
   local refresh_pending = false
+  local renaming ---@type {agent:table,find:function,prompt:string|nil,title:string,pattern:string,search:string}|nil
   local function refresh()
     if refresh_pending or not picker or picker.closed then
       return
@@ -336,6 +359,96 @@ local function snacks(items, Snacks)
       end
     end)
   end
+  local function tool_icon(tool)
+    local icons = Config.cli.win.tabs.icons
+    local icon = icons[tool] or icons.default
+    return type(icon) == "string" and vim.trim(icon) or ""
+  end
+  local function status_icon(status)
+    local icon = Config.cli.win.tabs.status[status]
+    return type(icon) == "string" and vim.trim(icon) or "*"
+  end
+  local tool_highlights = {
+    aider = "SidekickCliToolAider",
+    amazon_q = "SidekickCliToolAmazonQ",
+    antigravity = "SidekickCliToolAntigravity",
+    claude = "SidekickCliToolClaude",
+    codex = "SidekickCliToolCodex",
+    copilot = "SidekickCliToolCopilot",
+    crush = "SidekickCliToolCrush",
+    cursor = "SidekickCliToolCursor",
+    grok = "SidekickCliToolGrok",
+    opencode = "SidekickCliToolOpencode",
+    pi = "SidekickCliToolPi",
+    qwen = "SidekickCliToolQwen",
+  }
+  local function tool_highlight(tool)
+    return tool_highlights[tool] or "SidekickCliTool"
+  end
+  local function finish_rename(commit)
+    if not renaming or not picker or picker.closed then
+      return false
+    end
+    local state = renaming
+    local value = picker.input:get()
+    renaming = nil
+    picker.find = state.find
+    picker.opts.prompt = state.prompt
+    picker.title = state.title
+    picker.input:set(state.pattern, state.search)
+    picker:update_titles()
+    if commit and value and vim.trim(value) ~= "" and resolve(state.agent) then
+      Panel.rename(value, state.agent.id)
+      refresh()
+    end
+    return true
+  end
+  local function start_rename(agent)
+    if renaming or not picker or picker.closed or not agent then
+      return
+    end
+    local terminal = resolve(agent)
+    if not terminal then
+      return
+    end
+    local input = picker.input
+    if not input then
+      return
+    end
+    renaming = {
+      agent = agent,
+      find = picker.find,
+      prompt = picker.opts.prompt,
+      title = picker.title,
+      pattern = input.filter.pattern,
+      search = input.filter.search,
+    }
+    -- The picker input doubles as the title editor. Ignore its normal
+    -- filtering while editing so the selected row and preview stay in place.
+    picker.find = function() end
+    picker.opts.prompt = "Rename agent: "
+    picker.title = "Rename Agent"
+    if picker.opts.live then
+      input:set(nil, agent_title(agent, terminal))
+    else
+      input:set(agent_title(agent, terminal))
+    end
+    picker:focus("input")
+    if input.win and input.win:valid() then
+      vim.schedule(function()
+        if picker and not picker.closed and renaming then
+          picker:focus("input")
+          vim.cmd("startinsert!")
+        end
+      end)
+    end
+  end
+  local function confirm(picker, item)
+    picker:close()
+    if item and item.agent and resolve(item.agent) then
+      Panel.select(item.agent.id, true)
+    end
+  end
   picker = Snacks.picker.pick({
     source = "sidekick_agents",
     title = "Sidekick Agents",
@@ -348,10 +461,31 @@ local function snacks(items, Snacks)
       local t = resolve(item.agent)
       local status = t and t.status or "error"
       local state = status:gsub("^%l", string.upper)
-      return {
-        { item.agent.label, "SidekickCliStatus" .. state },
-        { "  " .. vim.fn.fnamemodify(item.agent.cwd, ":p:~"), "Directory" },
-      }
+      local agent = item.agent
+      local icon = tool_icon(agent.tool)
+      local tool_hl = tool_highlight(agent.tool)
+      local ret = {}
+      if icon ~= "" then
+        ret[#ret + 1] = { icon .. " ", tool_hl }
+        ret[#ret + 1] = { agent.tool, "Identifier" }
+      else
+        ret[#ret + 1] = { agent.tool, tool_hl }
+      end
+      if agent.title ~= agent.tool then
+        ret[#ret + 1] = { "  " .. agent.title, "Title" }
+      end
+      ret[#ret + 1] = { "  " .. status_icon(status) .. " " .. status, "SidekickCliStatus" .. state }
+      if agent.project ~= "" then
+        ret[#ret + 1] = { "  " .. agent.project, "Directory" }
+      end
+      if agent.branch ~= "" then
+        ret[#ret + 1] = { "   " .. agent.branch, "Special" }
+      end
+      local changed = #agent.changed_files
+      if changed > 0 then
+        ret[#ret + 1] = { "  +" .. changed, "DiffChange" }
+      end
+      return ret
     end,
     preview = function(ctx)
       preview_generation = preview_generation + 1
@@ -382,13 +516,20 @@ local function snacks(items, Snacks)
         preview_timer:start(500, 500, vim.schedule_wrap(render))
       end
     end,
-    confirm = function(picker, item)
-      picker:close()
-      if item and item.agent and resolve(item.agent) then
-        Panel.select(item.agent.id)
-      end
-    end,
+    confirm = confirm,
     actions = {
+      agent_confirm = function(picker, item)
+        if not finish_rename(true) then
+          confirm(picker, item)
+        end
+      end,
+      agent_cancel = function(picker)
+        if not finish_rename(false) then
+          picker:norm(function()
+            picker:close()
+          end)
+        end
+      end,
       agent_pin = function(picker, item)
         for _, agent in ipairs(selected(picker, item)) do
           if resolve(agent) then
@@ -398,13 +539,7 @@ local function snacks(items, Snacks)
         reopen(picker)
       end,
       agent_rename = function(picker, item)
-        local agent = selected(picker, item)[1]
-        picker:close()
-        if agent and resolve(agent) then
-          vim.schedule(function()
-            Panel.rename(nil, agent.id)
-          end)
-        end
+        start_rename(selected(picker, item)[1])
       end,
       agent_close = function(picker, item)
         for _, agent in ipairs(selected(picker, item)) do
@@ -424,6 +559,8 @@ local function snacks(items, Snacks)
     win = {
       input = {
         keys = {
+          ["<CR>"] = { "agent_confirm", mode = { "n", "i" }, desc = "open agent" },
+          ["<Esc>"] = { "agent_cancel", mode = { "n", "i" }, desc = "close picker" },
           ["<c-p>"] = { "agent_pin", mode = { "n", "i" }, desc = "pin/unpin agent" },
           ["<c-r>"] = { "agent_rename", mode = { "n", "i" }, desc = "rename agent" },
           ["<c-x>"] = { "agent_close", mode = { "n", "i" }, desc = "close agent" },
@@ -482,7 +619,7 @@ local function native(items)
       {
         label = "Open agent",
         action = function()
-          Panel.select(item.id)
+          Panel.select(item.id, true)
         end,
       },
       {

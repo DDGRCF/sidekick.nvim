@@ -94,6 +94,19 @@ describe("cli agent panel", function()
     assert.are.same({ "codex-1", "claude-1" }, Panel.panels[vim.api.nvim_get_current_tabpage()].order)
   end)
 
+  it("focuses an explicitly selected agent", function()
+    local first = fake("codex-1", "codex", "Implement panel")
+    local second = fake("claude-1", "claude", "Review panel")
+
+    Panel.show(first)
+    Panel.show(second)
+    Panel.select(first.id, true)
+
+    assert.are.equal(Panel.win(first), vim.api.nvim_get_current_win())
+    assert.are.equal(first.buf, vim.api.nvim_win_get_buf(Panel.win(first)))
+    vim.cmd.stopinsert()
+  end)
+
   it("renders tool names and activity state by default", function()
     local codex = fake("codex-1", "codex", "Implement panel")
     Panel.show(codex)
