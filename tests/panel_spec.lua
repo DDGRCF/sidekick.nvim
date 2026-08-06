@@ -116,7 +116,20 @@ describe("cli agent panel", function()
     assert.matches("Implement panel", line)
     assert.matches("codex", line)
     assert.matches("SidekickCliToolCodex", line)
+    assert.matches("SidekickCliTabSelected", line)
     assert.matches("SidekickCliStatusDone", line)
+  end)
+
+  it("uses tool highlights only for the active agent tab", function()
+    local codex = fake("codex-1", "codex", "Implement panel")
+    local claude = fake("claude-1", "claude", "Review panel")
+    Panel.show(codex)
+    Panel.show(claude)
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    assert.is_nil(line:find("SidekickCliToolCodex", 1, true))
+    assert.matches("SidekickCliToolClaude", line)
   end)
 
   it("uses configured agent icons before falling back to the tool name", function()

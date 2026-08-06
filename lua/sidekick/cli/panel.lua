@@ -533,14 +533,15 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
   local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
   local state = (t.status or "idle"):gsub("^%l", string.upper)
   local marker = agent_marker_text()
-  local tool_hl = tool_highlight(t)
+  local tool_hl = selected and tool_highlight(t) or base
+  local marker_hl = selected and "SidekickCliInstalled" or base
   if selected then
     parts[#parts + 1] = "%<"
   end
   parts[#parts + 1] = ("%%#SidekickCliTabSeparator#%s"):format(escape(left_separator))
   parts[#parts + 1] = click("select", p, t.id)
   if marker ~= "" then
-    parts[#parts + 1] = ("%%#SidekickCliInstalled# %s "):format(agent_marker())
+    parts[#parts + 1] = ("%%#%s# %s "):format(marker_hl, agent_marker())
   end
   parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_icon(t))
   parts[#parts + 1] = ("%%#SidekickCliStatus%s#%s"):format(state, status_icon(t))
