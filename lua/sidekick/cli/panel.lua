@@ -404,6 +404,25 @@ local function agent_icon(t)
   return escape(agent_icon_text(t))
 end
 
+local tool_highlights = {
+  aider = "SidekickCliToolAider",
+  amazon_q = "SidekickCliToolAmazonQ",
+  antigravity = "SidekickCliToolAntigravity",
+  claude = "SidekickCliToolClaude",
+  codex = "SidekickCliToolCodex",
+  copilot = "SidekickCliToolCopilot",
+  crush = "SidekickCliToolCrush",
+  cursor = "SidekickCliToolCursor",
+  grok = "SidekickCliToolGrok",
+  opencode = "SidekickCliToolOpencode",
+  pi = "SidekickCliToolPi",
+  qwen = "SidekickCliToolQwen",
+}
+
+local function tool_highlight(t)
+  return tool_highlights[t.tool.name] or "SidekickCliTool"
+end
+
 local function agent_marker_text()
   local icon = Config.ui.icons.installed
   return type(icon) == "string" and vim.trim(icon) or ""
@@ -514,6 +533,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
   local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
   local state = (t.status or "idle"):gsub("^%l", string.upper)
   local marker = agent_marker_text()
+  local tool_hl = tool_highlight(t)
   if selected then
     parts[#parts + 1] = "%<"
   end
@@ -522,9 +542,9 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
   if marker ~= "" then
     parts[#parts + 1] = ("%%#SidekickCliInstalled# %s "):format(agent_marker())
   end
-  parts[#parts + 1] = ("%%#%s#%s%s"):format(base, marker == "" and " " or "", agent_icon(t))
+  parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_icon(t))
   parts[#parts + 1] = ("%%#SidekickCliStatus%s#%s"):format(state, status_icon(t))
-  parts[#parts + 1] = ("%%#%s#: %s%s "):format(base, title(t, title_value), p.pinned[t.id] and " 󰐃" or "")
+  parts[#parts + 1] = ("%%#%s#: %s%s "):format(tool_hl, title(t, title_value), p.pinned[t.id] and " 󰐃" or "")
   parts[#parts + 1] = "%T"
   if Config.cli.win.tabs.show_close then
     parts[#parts + 1] = click("close", p, t.id)

@@ -115,6 +115,7 @@ describe("cli agent panel", function()
 
     assert.matches("Implement panel", line)
     assert.matches("codex", line)
+    assert.matches("SidekickCliToolCodex", line)
     assert.matches("SidekickCliStatusDone", line)
   end)
 
