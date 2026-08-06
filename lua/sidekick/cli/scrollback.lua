@@ -1,4 +1,5 @@
 local Config = require("sidekick.config")
+local Panel = require("sidekick.cli.panel")
 local Util = require("sidekick.util")
 
 ---@class sidekick.cli.Scrollback
@@ -127,7 +128,7 @@ function M:open(win_pos)
   self.buf = vim.api.nvim_create_buf(false, true)
   terminal:bo(self.buf)
   vim.bo[self.buf].bufhidden = "wipe"
-  vim.api.nvim_win_set_buf(win, self.buf)
+  Panel.set_buf(win, self.buf)
 
   local term = vim.api.nvim_open_term(self.buf, {})
   terminal:keys(self.buf)
@@ -152,7 +153,7 @@ function M:close()
     vim.cmd.stopinsert()
   end
   if terminal:buf_valid() then
-    vim.api.nvim_win_set_buf(win, terminal.buf)
+    Panel.set_buf(win, terminal.buf)
     terminal:wo()
   end
 end

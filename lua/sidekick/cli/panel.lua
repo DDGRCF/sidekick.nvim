@@ -37,6 +37,35 @@ local function valid(win)
   return win and vim.api.nvim_win_is_valid(win) or false
 end
 
+---@param win integer
+---@param buf integer
+---@param winfixbuf boolean
+local function set_window_buf(win, buf, winfixbuf)
+  local ok, err
+  vim.wo[win].winfixbuf = false
+  ok, err = pcall(vim.api.nvim_win_set_buf, win, buf)
+  vim.wo[win].winfixbuf = winfixbuf
+  if not ok then
+    error(err, 0)
+  end
+end
+
+---@param p sidekick.cli.Panel
+---@param buf integer
+local function set_panel_buf(p, buf)
+  if valid(p.win) then
+    set_window_buf(p.win, buf, true)
+  end
+end
+
+---@param win integer
+---@param buf integer
+function M.set_buf(win, buf)
+  if valid(win) then
+    set_window_buf(win, buf, vim.wo[win].winfixbuf)
+  end
+end
+
 ---@param p sidekick.cli.Panel
 local function close_window(p)
   if not valid(p.win) then
@@ -59,7 +88,7 @@ local function close_window(p)
       end
     end
     replacement = replacement or vim.api.nvim_create_buf(true, false)
-    vim.api.nvim_win_set_buf(p.win, replacement)
+    set_window_buf(p.win, replacement, false)
     vim.wo[p.win].winbar = ""
     vim.w[p.win].sidekick_panel = nil
     vim.w[p.win].sidekick_cli = nil
@@ -645,7 +674,7 @@ end
 ---@param buf integer
 local function open(p, buf)
   if valid(p.win) then
-    vim.api.nvim_win_set_buf(p.win, buf)
+    set_panel_buf(p, buf)
     return
   end
   local base = p.opts or Config.cli.win
@@ -688,6 +717,7 @@ local function open(p, buf)
   end
   vim.wo[p.win].winfixwidth = layout == "left" or layout == "right"
   vim.wo[p.win].winfixheight = layout == "top" or layout == "bottom"
+  vim.wo[p.win].winfixbuf = true
   vim.w[p.win].sidekick_panel = true
 end
 
@@ -697,7 +727,7 @@ local function activate_window(p, t)
   if not valid(p.win) then
     return
   end
-  vim.api.nvim_win_set_buf(p.win, t.buf)
+  set_panel_buf(p, t.buf)
   vim.w[p.win].sidekick_cli = t.tool
   vim.w[p.win].sidekick_session_id = t.id
   t.win = p.win -- backwards compatibility for window callbacks

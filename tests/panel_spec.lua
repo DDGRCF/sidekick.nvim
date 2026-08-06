@@ -94,6 +94,25 @@ describe("cli agent panel", function()
     assert.are.same({ "codex-1", "claude-1" }, Panel.panels[vim.api.nvim_get_current_tabpage()].order)
   end)
 
+  it("locks the panel buffer against external window switches", function()
+    local first = fake("winfix-one", "codex", "One")
+    local second = fake("winfix-two", "claude", "Two")
+    Panel.show(first, true)
+    vim.cmd.stopinsert()
+    local win = Panel.win(first)
+    local other = vim.api.nvim_create_buf(false, true)
+    bufs[#bufs + 1] = other
+
+    assert.is_true(vim.wo[win].winfixbuf)
+    local ok = pcall(vim.api.nvim_set_current_buf, other)
+    assert.is_false(ok)
+    assert.are.equal(first.buf, vim.api.nvim_win_get_buf(win))
+
+    Panel.select(second.id)
+    assert.are.equal(second.buf, vim.api.nvim_win_get_buf(win))
+    assert.is_true(vim.wo[win].winfixbuf)
+  end)
+
   it("focuses an explicitly selected agent", function()
     local first = fake("codex-1", "codex", "Implement panel")
     local second = fake("claude-1", "claude", "Review panel")
@@ -548,7 +567,7 @@ describe("cli agent panel", function()
     vim.api.nvim_set_current_tabpage(first_tab)
     local scroll_buf = vim.api.nvim_create_buf(false, true)
     bufs[#bufs + 1] = scroll_buf
-    vim.api.nvim_win_set_buf(first_win, scroll_buf)
+    Panel.set_buf(first_win, scroll_buf)
     local scrollback = setmetatable({
       terminal = function()
         return first
@@ -558,7 +577,7 @@ describe("cli agent panel", function()
 
     assert.is_true(scrollback:is_open())
 
-    vim.api.nvim_win_set_buf(first_win, first.buf)
+    Panel.set_buf(first_win, first.buf)
     vim.api.nvim_set_current_tabpage(second_tab)
     Panel.hide()
     Panel.panels[second_tab] = nil
