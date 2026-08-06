@@ -5,6 +5,7 @@ local Usage = require("sidekick.cli.agent_usage")
 local M = {}
 local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
 local PREVIEW_CACHE_MAX = 64
+local RENAME_ICON = "󰏫"
 
 local function agent_title(item, terminal)
   local title = terminal.title
@@ -430,8 +431,8 @@ local function snacks(items, Snacks)
     -- The picker input doubles as the title editor. Ignore its normal
     -- filtering while editing so the selected row and preview stay in place.
     picker.find = function() end
-    picker.opts.prompt = "Rename agent: "
-    picker.title = "Rename Agent"
+    picker.opts.prompt = RENAME_ICON .. " Rename agent: "
+    picker.title = RENAME_ICON .. " Rename Agent"
     if picker.opts.live then
       input:set(nil, agent_title(agent, terminal))
     else

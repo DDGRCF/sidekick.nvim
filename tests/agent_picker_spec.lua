@@ -316,8 +316,8 @@ describe("cli agent picker", function()
     opts.actions.agent_rename(picker, item)
 
     assert.is_true(picker.focused)
-    assert.are.equal("Rename Agent", picker.title)
-    assert.are.equal("Rename agent: ", picker.opts.prompt)
+    assert.are.equal("󰏫 Rename Agent", picker.title)
+    assert.are.equal("󰏫 Rename agent: ", picker.opts.prompt)
     assert.are.equal("Before rename", picker.input:get())
     assert.are_not.equal(original_find, picker.find)
 
