@@ -10,6 +10,38 @@ M.roots = {
   grok = vim.fs.normalize(vim.fn.expand("~/.grok")),
 }
 
+local function env_value(tool, name)
+  local value
+  for _, env in ipairs({ tool and tool.config and tool.config.env, tool and tool.env }) do
+    if type(env) == "table" and env[name] ~= nil then
+      value = env[name]
+    end
+  end
+  if value == false then
+    return
+  end
+  return type(value) == "string" and value or vim.env[name]
+end
+
+local function resolve_path(path, cwd)
+  if type(path) ~= "string" or path == "" then
+    return
+  end
+  path = vim.fn.expand(path)
+  local absolute = path:match("^/") or path:match("^%a:[/\\]") or path:match("^\\\\")
+  return vim.fs.normalize(absolute and path or vim.fs.joinpath(cwd or vim.fn.getcwd(), path))
+end
+
+local function root(provider, tool, cwd)
+  if provider == "codex" then
+    local home = resolve_path(env_value(tool, "CODEX_HOME"), cwd)
+    if home then
+      return vim.fs.joinpath(home, "sessions")
+    end
+  end
+  return M.roots[provider]
+end
+
 local function read_prefix(path)
   local file = io.open(path, "rb")
   if not file then
@@ -18,6 +50,30 @@ local function read_prefix(path)
   local data = file:read(128 * 1024)
   file:close()
   return data
+end
+
+local function read_first_line(path)
+  local file = io.open(path, "rb")
+  if not file then
+    return
+  end
+  local parts, bytes = {}, 0
+  while bytes < 2 * 1024 * 1024 do
+    local chunk = file:read(64 * 1024)
+    if not chunk then
+      break
+    end
+    local newline = chunk:find("[\r\n]")
+    if newline then
+      parts[#parts + 1] = chunk:sub(1, newline - 1)
+      file:close()
+      return table.concat(parts)
+    end
+    bytes = bytes + #chunk
+    parts[#parts + 1] = chunk
+  end
+  file:close()
+  return bytes < 2 * 1024 * 1024 and table.concat(parts) or nil
 end
 
 local function valid_antigravity(path)
@@ -32,12 +88,11 @@ local function session_id(provider, path)
   if provider == "antigravity" then
     return vim.fs.basename(path):match("^([%w%-]+)%.db$")
   end
-  local data = read_prefix(path)
-  if not data then
+  local line = read_first_line(path)
+  if not line then
     return
   end
-  local first = data:match("^[^\r\n]+")
-  local ok, value = pcall(vim.json.decode, first or "")
+  local ok, value = pcall(vim.json.decode, line)
   if not ok or type(value) ~= "table" then
     return
   end
@@ -48,14 +103,14 @@ local function session_id(provider, path)
   return value.sessionId
 end
 
-local function allowed(provider, path)
+local function allowed(provider, path, session_root)
   path = vim.fs.normalize(path)
-  local root = M.roots[provider]
+  session_root = session_root or M.roots[provider]
   if provider == "grok" then
-    return root and path == root .. "/grok.db"
+    return session_root and path == session_root .. "/grok.db"
   end
   local extension = provider == "antigravity" and "%.db$" or "%.jsonl?$"
-  return root and path:sub(1, #root + 1) == root .. "/" and path:match(extension)
+  return session_root and path:sub(1, #session_root + 1) == session_root .. "/" and path:match(extension)
 end
 
 local function database_path(provider, path)
@@ -212,6 +267,7 @@ function M.capture(provider, session)
   end
   local found = {}
   local scanned = {}
+  local session_root = root(provider, session.tool, session.cwd)
   local function scan(pid)
     if scanned[pid] then
       return
@@ -219,7 +275,7 @@ function M.capture(provider, session)
     scanned[pid] = true
     for _, path in ipairs(proc_paths(pid)) do
       path = database_path(provider, path)
-      if allowed(provider, path) then
+      if allowed(provider, path, session_root) then
         if provider == "grok" then
           found[path] = path
         else
@@ -268,8 +324,11 @@ end
 
 ---@param provider "antigravity"|"codex"|"claude"|"grok"|"opencode"
 ---@param conversation sidekick.cli.Conversation
-function M.verify(provider, conversation)
+---@param tool? sidekick.cli.Tool
+---@param cwd? string
+function M.verify(provider, conversation, tool, cwd)
   local path = conversation.data and conversation.data.path
+  local session_root = root(provider, tool, cwd)
   if provider == "opencode" then
     return valid_id(provider, conversation.id) and opencode_has(conversation.id)
   elseif provider == "grok" then
@@ -280,7 +339,7 @@ function M.verify(provider, conversation)
       and valid_database(path)
   end
   return type(path) == "string"
-    and allowed(provider, path)
+    and allowed(provider, path, session_root)
     and vim.uv.fs_stat(path) ~= nil
     and session_id(provider, path) == conversation.id
     and (provider ~= "antigravity" or valid_antigravity(path))
@@ -295,7 +354,7 @@ function M.adapter(provider, args)
       return M.capture(provider, session)
     end,
     verify = function(_, terminal, conversation)
-      if not M.verify(provider, conversation) then
+      if not M.verify(provider, conversation, terminal.tool, terminal.cwd) then
         return false
       end
       local matched = false
@@ -318,8 +377,8 @@ function M.adapter(provider, args)
       end, 50)
       return matched
     end,
-    preflight = function(_, conversation)
-      return M.verify(provider, conversation)
+    preflight = function(tool, conversation, saved)
+      return M.verify(provider, conversation, tool, saved and saved.cwd)
     end,
   }
 end

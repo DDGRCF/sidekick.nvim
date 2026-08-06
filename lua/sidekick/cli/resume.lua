@@ -68,6 +68,7 @@ function M.command(tool, saved)
     or conversation.resumable ~= true
     or type(conversation.id) ~= "string"
     or conversation.id == ""
+    or conversation.id:sub(1, 1) == "-"
     or #conversation.id > 4096
     or conversation.id:find("[%c%s]")
   then

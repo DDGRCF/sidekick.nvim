@@ -28,6 +28,15 @@ describe("cli conversation resume", function()
     assert.are.equal("unsupported", mode)
   end)
 
+  it("rejects option-like conversation ids", function()
+    local cmd, mode = Resume.command(tool({ resume = { "resume" } }), {
+      conversation = { id = "--last", provider = "agent", resumable = true },
+    })
+
+    assert.is_nil(cmd)
+    assert.are.equal("unsupported", mode)
+  end)
+
   it("never treats an interactive session browser as an exact restore", function()
     local cmd, mode = Resume.command(tool({ resume = { "--resume" } }), {})
 

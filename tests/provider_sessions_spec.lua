@@ -36,6 +36,50 @@ describe("cli provider sessions", function()
     vim.fn.delete(root, "rf")
   end)
 
+  it("uses CODEX_HOME from the Codex tool environment", function()
+    local home = vim.fn.tempname()
+    local root = home .. "/sessions"
+    vim.fn.mkdir(root, "p")
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd4"
+    local path = root .. "/rollout-conversation.jsonl"
+    local file = assert(io.open(path, "wb"))
+    file:write(vim.json.encode({ type = "session_meta", payload = { id = id } }) .. "\n")
+    file:flush()
+
+    local conversation = Provider.capture("codex", {
+      pids = { vim.fn.getpid() },
+      cwd = home,
+      tool = { env = { CODEX_HOME = home } },
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.is_true(Provider.verify("codex", conversation, { env = { CODEX_HOME = home } }, home))
+    file:close()
+    vim.fn.delete(home, "rf")
+  end)
+
+  it("reads Codex session metadata larger than the prefix buffer", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd4"
+    local path = root .. "/rollout-conversation.jsonl"
+    local file = assert(io.open(path, "wb"))
+    file:write(vim.json.encode({
+      type = "session_meta",
+      payload = { id = id, instructions = string.rep("x", 128 * 1024) },
+    }) .. "\n")
+    file:flush()
+    local old_root = Provider.roots.codex
+    Provider.roots.codex = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("codex", { pids = { vim.fn.getpid() } })
+
+    assert.are.equal(id, conversation.id)
+    file:close()
+    Provider.roots.codex = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
   it("captures and verifies an open Antigravity conversation database", function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")

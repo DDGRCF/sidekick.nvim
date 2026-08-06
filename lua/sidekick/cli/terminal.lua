@@ -355,6 +355,8 @@ function M:fix_cursorline()
 end
 
 function M:on_ready()
+  -- Capture native session metadata before the ready event triggers a workspace save.
+  require("sidekick.cli.resume").capture(self)
   Activity.ready(self)
   self.timer:start(0, SEND_DELAY, function()
     local next = table.remove(self.send_queue, 1) ---@type string?
