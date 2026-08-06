@@ -368,6 +368,10 @@ local function snacks(items, Snacks)
     local icon = Config.cli.win.tabs.status[status]
     return type(icon) == "string" and vim.trim(icon) or "*"
   end
+  local function agent_icon()
+    local icon = Config.ui.icons.installed
+    return type(icon) == "string" and vim.trim(icon) or ""
+  end
   local tool_highlights = {
     aider = "SidekickCliToolAider",
     amazon_q = "SidekickCliToolAmazonQ",
@@ -465,6 +469,10 @@ local function snacks(items, Snacks)
       local icon = tool_icon(agent.tool)
       local tool_hl = tool_highlight(agent.tool)
       local ret = {}
+      local agent_marker = agent_icon()
+      if agent_marker ~= "" then
+        ret[#ret + 1] = { agent_marker .. " ", "SidekickCliInstalled" }
+      end
       if icon ~= "" then
         ret[#ret + 1] = { icon .. " ", tool_hl }
         ret[#ret + 1] = { agent.tool, "Identifier" }

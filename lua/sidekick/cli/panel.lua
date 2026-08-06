@@ -404,6 +404,15 @@ local function agent_icon(t)
   return escape(agent_icon_text(t))
 end
 
+local function agent_marker_text()
+  local icon = Config.ui.icons.installed
+  return type(icon) == "string" and vim.trim(icon) or ""
+end
+
+local function agent_marker()
+  return escape(agent_marker_text())
+end
+
 local function status_icon_text(t)
   if Config.cli.win.tabs.show_status == false then
     return ""
@@ -431,7 +440,9 @@ end
 ---@param right_separator string
 ---@param title_value? string
 local function tab_width(p, t, left_separator, right_separator, title_value)
-  local text = " " .. agent_icon_text(t) .. status_icon_text(t) .. ": " .. (title_value or title_text(t))
+  local marker = agent_marker_text()
+  local text = " " .. (marker ~= "" and (marker .. " ") or "") .. agent_icon_text(t) .. status_icon_text(t) .. ": "
+    .. (title_value or title_text(t))
   if p.pinned[t.id] then
     text = text .. " 󰐃"
   end
@@ -502,12 +513,16 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
   local selected = t.id == p.active
   local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
   local state = (t.status or "idle"):gsub("^%l", string.upper)
+  local marker = agent_marker_text()
   if selected then
     parts[#parts + 1] = "%<"
   end
   parts[#parts + 1] = ("%%#SidekickCliTabSeparator#%s"):format(escape(left_separator))
   parts[#parts + 1] = click("select", p, t.id)
-  parts[#parts + 1] = ("%%#%s# %s"):format(base, agent_icon(t))
+  if marker ~= "" then
+    parts[#parts + 1] = ("%%#SidekickCliInstalled# %s "):format(agent_marker())
+  end
+  parts[#parts + 1] = ("%%#%s#%s%s"):format(base, marker == "" and " " or "", agent_icon(t))
   parts[#parts + 1] = ("%%#SidekickCliStatus%s#%s"):format(state, status_icon(t))
   parts[#parts + 1] = ("%%#%s#: %s%s "):format(base, title(t, title_value), p.pinned[t.id] and " 󰐃" or "")
   parts[#parts + 1] = "%T"
@@ -902,7 +917,9 @@ function M.picker_items()
   for _, item in ipairs(tab_items) do
     local t = item.t
     local status = status_icon(t)
-    local prefix = agent_icon(t) .. (status ~= "" and (" " .. status) or "")
+    local prefix = agent_marker()
+    prefix = prefix ~= "" and (prefix .. " ") or ""
+    prefix = prefix .. agent_icon(t) .. (status ~= "" and (" " .. status) or "")
     items[#items + 1] = {
       id = item.id,
       label = ("%s: %s"):format(prefix, title_text(t, nil, suffixes[item.id])),
