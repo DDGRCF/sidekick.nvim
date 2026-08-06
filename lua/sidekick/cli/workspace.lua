@@ -154,7 +154,10 @@ local function restore_agent(saved, discovered)
   end
   local backend = Session.backends[saved.backend] and saved.backend or "terminal"
   local session = Session.new({
-    tool = tool:clone({ cmd = cmd }),
+    tool = tool:clone({
+      cmd = cmd,
+      env = vim.tbl_extend("force", vim.deepcopy(tool.env or {}), Resume.env(tool, saved) or {}),
+    }),
     cwd = saved.cwd,
     backend = backend,
     instance_id = saved.instance_id,

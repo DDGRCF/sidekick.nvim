@@ -107,6 +107,44 @@ local function process_id(session, spec)
   end
 end
 
+local function read_json(path)
+  local file = io.open(path, "r")
+  local raw = file and file:read("*a") or nil
+  if file then
+    file:close()
+  end
+  local ok, decoded = pcall(vim.json.decode, raw or "")
+  return ok and type(decoded) == "table" and decoded or nil
+end
+
+local function resolve_path(path, cwd)
+  if type(path) ~= "string" or path == "" then
+    return
+  end
+  path = vim.fn.expand(path)
+  local absolute = path:match("^/") or path:match("^%a:[/\\]") or path:match("^\\\\")
+  return vim.fs.normalize(absolute and path or vim.fs.joinpath(cwd or vim.fn.getcwd(), path))
+end
+
+local function qwen_roots(tool, cwd)
+  local home = resolve_path(env_value(tool, "QWEN_HOME") or "~/.qwen", cwd)
+  local project = read_json(vim.fs.joinpath(cwd or vim.fn.getcwd(), ".qwen", "settings.json"))
+  local global = home and read_json(vim.fs.joinpath(home, "settings.json")) or nil
+  local configured = project and project.advanced and project.advanced.runtimeOutputDir
+    or global and global.advanced and global.advanced.runtimeOutputDir
+  local roots, seen = {}, {}
+  local function add(root)
+    if root and not seen[root] then
+      roots[#roots + 1] = root
+      seen[root] = true
+    end
+  end
+  add(resolve_path(env_value(tool, "QWEN_RUNTIME_DIR"), cwd))
+  add(resolve_path(configured, cwd))
+  add(home)
+  return roots
+end
+
 local function qwen_active_id(session, tool)
   local pids = {}
   for _, pid in ipairs(session.pids or {}) do
@@ -115,29 +153,59 @@ local function qwen_active_id(session, tool)
   if vim.tbl_isempty(pids) then
     return
   end
-  local root = env_value(tool, "QWEN_RUNTIME_DIR") or vim.fn.expand("~/.qwen")
-  local locks = vim.fs.joinpath(root, "tmp", "session-writer-locks")
-  for _, path in ipairs(vim.fn.globpath(locks, "*.lock", false, true)) do
-    local file = io.open(path, "r")
-    local raw = file and file:read("*a") or nil
-    if file then
-      file:close()
-    end
-    local ok, record = pcall(vim.json.decode, raw or "")
-    if
-      ok
-      and type(record) == "table"
-      and record.state == "active"
-      and pids[tonumber(record.pid)]
-      and M.valid_id(record.session_id)
-    then
-      return record.session_id
+  for _, root in ipairs(qwen_roots(tool, session.cwd)) do
+    local locks = vim.fs.joinpath(root, "tmp", "session-writer-locks")
+    for _, path in ipairs(vim.fn.globpath(locks, "*.lock", false, true)) do
+      local record = read_json(path)
+      if record and record.state == "active" and pids[tonumber(record.pid)] and M.valid_id(record.session_id) then
+        return record.session_id
+      end
     end
   end
 end
 
+local function pi_control_id(session)
+  local control = session.conversation and session.conversation.data and session.conversation.data.control
+  local record = type(control) == "string" and read_json(control) or nil
+  return record and M.valid_id(record.id) and record.id or nil
+end
+
 local function current_id(provider, session, spec, tool)
-  return provider == "qwen" and qwen_active_id(session, tool) or process_id(session, spec)
+  if provider == "qwen" then
+    return qwen_active_id(session, tool) or process_id(session, spec)
+  elseif provider == "pi" then
+    return pi_control_id(session) or process_id(session, spec)
+  end
+  return process_id(session, spec)
+end
+
+local function verified_id(provider, session, spec, tool, conversation)
+  if provider == "qwen" then
+    return qwen_active_id(session, tool)
+  elseif provider == "pi" and conversation.data and conversation.data.control then
+    return pi_control_id(session)
+  end
+  return process_id(session, spec)
+end
+
+local function copilot_tui_id(session)
+  if not (session.buf and vim.api.nvim_buf_is_valid(session.buf)) then
+    return
+  end
+  local count = vim.api.nvim_buf_line_count(session.buf)
+  local lines = vim.api.nvim_buf_get_lines(session.buf, math.max(0, count - 2000), count, false)
+  local switched = nil
+  for _, line in ipairs(lines) do
+    if line:find("/resume", 1, true) or line:find("/continue", 1, true) then
+      switched = false
+      for id in line:gmatch("[0-9a-fA-F%-]+") do
+        if M.valid_id(id) then
+          switched = id
+        end
+      end
+    end
+  end
+  return switched
 end
 
 ---@param cmd string[]
@@ -161,9 +229,14 @@ local function copilot_exists(id, _, tool)
   return vim.uv.fs_stat(vim.fs.joinpath(root, "session-state", id, "events.jsonl")) ~= nil
 end
 
-local function pi_exists(id, _, tool)
+local function pi_exists(id, cwd, tool)
   local root = tool and arg_value(tool.cmd, "--session-dir") or env_value(tool, "PI_CODING_AGENT_SESSION_DIR")
-  root = vim.fs.normalize(root or vim.fn.expand("~/.pi/agent/sessions"))
+  if not root then
+    local agent = resolve_path(env_value(tool, "PI_CODING_AGENT_DIR") or "~/.pi/agent")
+    local settings = agent and read_json(vim.fs.joinpath(agent, "settings.json")) or nil
+    root = settings and settings.sessionDir or agent and vim.fs.joinpath(agent, "sessions")
+  end
+  root = resolve_path(root or "~/.pi/agent/sessions", cwd)
   if vim.uv.fs_stat(root) == nil then
     return false
   end
@@ -197,6 +270,7 @@ local exists = {
 ---@param provider "copilot"|"pi"|"qwen"
 function M.adapter(provider)
   local spec = assert(providers[provider], "unknown managed CLI provider: " .. provider)
+  local extension = provider == "pi" and vim.api.nvim_get_runtime_file("sk/extensions/pi-sidekick.ts", false)[1] or nil
   return {
     args = spec.resume,
     prepare = function(tool, session)
@@ -210,20 +284,48 @@ function M.adapter(provider)
         vim.list_extend(cmd, spec.new)
         cmd[#cmd + 1] = id
       end
+      local data = { managed = true }
+      local env
+      if provider == "pi" and extension then
+        local control = vim.fs.joinpath(vim.fn.stdpath("state"), "sidekick", "pi", id .. ".json")
+        vim.fn.mkdir(vim.fs.dirname(control), "p")
+        vim.list_extend(cmd, { "--extension", extension })
+        data.control = control
+        env = { SIDEKICK_PI_SESSION_FILE = control }
+      end
       return {
         cmd = cmd,
+        env = env,
         conversation = {
           id = id,
           provider = provider,
           resumable = true,
-          data = { managed = true },
+          data = data,
         },
       }
     end,
     capture = function(tool, session)
+      local tui_id
+      if provider == "copilot" then
+        tui_id = copilot_tui_id(session)
+      end
+      if tui_id == false then
+        local data = vim.deepcopy(session.conversation and session.conversation.data or {})
+        data.managed = true
+        data.reason = "interactive session switch could not be identified"
+        return {
+          id = session.conversation and session.conversation.id,
+          provider = provider,
+          resumable = false,
+          data = data,
+        }
+      end
       local id = current_id(provider, session, spec, tool)
+      id = type(tui_id) == "string" and tui_id or id
       if id then
-        return { id = id, provider = provider, resumable = true, data = { managed = true } }
+        local data = vim.deepcopy(session.conversation and session.conversation.data or {})
+        data.managed = true
+        return { id = id, provider = provider, resumable = true, data = data }
       end
       if session.conversation and session.conversation.provider == provider then
         return session.conversation
@@ -232,22 +334,38 @@ function M.adapter(provider)
     preflight = function(tool, conversation, saved)
       return M.valid_id(conversation.id) and exists[provider](conversation.id, saved and saved.cwd, tool)
     end,
+    command = provider == "pi" and function(tool, conversation)
+      local cmd = vim.deepcopy(tool.cmd)
+      if extension and conversation.data and conversation.data.control then
+        vim.list_extend(cmd, { "--extension", extension })
+      end
+      vim.list_extend(cmd, { "--session", conversation.id })
+      return cmd
+    end or nil,
+    env = provider == "pi" and function(_, conversation)
+      local control = conversation.data and conversation.data.control
+      return type(control) == "string" and { SIDEKICK_PI_SESSION_FILE = control } or nil
+    end or nil,
     verify = function(tool, terminal, conversation)
       local logical = terminal.parent or terminal
       if
         not M.valid_id(conversation and conversation.id)
-        or current_id(provider, logical, spec, tool) ~= conversation.id
         or not exists[provider](conversation.id, logical.cwd, tool)
       then
         return false
       end
-      local stable = false
+      local matched = false
       local started = vim.uv.now()
-      vim.wait(1500, function()
-        stable = terminal.closed ~= true and terminal:is_running() and vim.uv.now() - started >= 1000
-        return stable or terminal.closed == true or not terminal:is_running()
+      local timeout = math.max(1000, require("sidekick.config").cli.workspace.resume_timeout_ms)
+      vim.wait(timeout, function()
+        if terminal.closed == true or not terminal:is_running() then
+          return true
+        end
+        local active = verified_id(provider, logical, spec, tool, conversation)
+        matched = active == conversation.id and vim.uv.now() - started >= 1000
+        return matched
       end, 50)
-      return stable
+      return matched
     end,
   }
 end

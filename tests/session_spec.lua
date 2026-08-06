@@ -51,7 +51,7 @@ describe("cli sessions", function()
       assert.are.equal(name, session.conversation.provider)
       assert.is_true(session.conversation.resumable)
       assert.is_true(require("sidekick.cli.managed_sessions").valid_id(session.conversation.id))
-      assert.are.equal(session.conversation.id, session.tool.cmd[#session.tool.cmd])
+      assert.is_true(vim.tbl_contains(session.tool.cmd, session.conversation.id))
       session:close()
     end
   end)

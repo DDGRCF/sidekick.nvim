@@ -47,8 +47,30 @@ describe("managed CLI conversations", function()
 
   it("creates Pi sessions with the dedicated exact-id flag", function()
     local prepared = Managed.adapter("pi").prepare({ cmd = { "pi" } }, { instance_id = "agent" })
-    assert.are.equal("--session-id", prepared.cmd[#prepared.cmd - 1])
-    assert.are.equal(prepared.conversation.id, prepared.cmd[#prepared.cmd])
+    assert.are.equal("--session-id", prepared.cmd[2])
+    assert.are.equal(prepared.conversation.id, prepared.cmd[3])
+    assert.are.equal("--extension", prepared.cmd[4])
+    assert.are.equal(prepared.conversation.data.control, prepared.env.SIDEKICK_PI_SESSION_FILE)
+  end)
+
+  it("tracks Pi session switches through its session_start extension", function()
+    local adapter = Managed.adapter("pi")
+    local tool = { cmd = { "pi" }, config = { env = {} } }
+    local prepared = adapter.prepare(tool, { instance_id = "agent" })
+    local active = Managed.uuid("pi-active")
+    local file = assert(io.open(prepared.conversation.data.control, "w"))
+    file:write(vim.json.encode({ id = active }))
+    file:close()
+
+    local conversation = adapter.capture(tool, {
+      tool = { cmd = prepared.cmd },
+      conversation = prepared.conversation,
+      pids = {},
+    })
+
+    vim.fn.delete(prepared.conversation.data.control)
+    assert.are.equal(active, conversation.id)
+    assert.are.equal(prepared.conversation.data.control, conversation.data.control)
   end)
 
   it("does not override an explicit interactive resume command", function()
@@ -100,5 +122,27 @@ describe("managed CLI conversations", function()
 
     vim.fn.delete(root, "rf")
     assert.are.equal(active, conversation.id)
+  end)
+
+  it("never restores Copilot's old conversation after an ambiguous TUI switch", function()
+    local adapter = Managed.adapter("copilot")
+    local launched = Managed.uuid("copilot-launched")
+    local active = Managed.uuid("copilot-active")
+    local tool = { cmd = { "copilot", "--session-id", launched }, config = { env = {} } }
+    local buf = vim.api.nvim_create_buf(false, true)
+    local session = {
+      tool = tool,
+      buf = buf,
+      conversation = { id = launched, provider = "copilot", resumable = true, data = { managed = true } },
+    }
+
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "> /resume" })
+    assert.is_false(adapter.capture(tool, session).resumable)
+
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "> /resume " .. active })
+    local captured = adapter.capture(tool, session)
+    vim.api.nvim_buf_delete(buf, { force = true })
+    assert.is_true(captured.resumable)
+    assert.are.equal(active, captured.id)
   end)
 end)

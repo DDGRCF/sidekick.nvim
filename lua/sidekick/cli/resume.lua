@@ -119,4 +119,14 @@ function M.preflight(tool, saved)
   return false
 end
 
+---@param tool sidekick.cli.Tool
+---@param saved sidekick.cli.WorkspaceAgent
+function M.env(tool, saved)
+  local adapter = tool.config.resume
+  if type(adapter) == "table" and not vim.islist(adapter) and type(adapter.env) == "function" then
+    local env = call(adapter.env, tool, saved.conversation, saved)
+    return type(env) == "table" and env or nil
+  end
+end
+
 return M

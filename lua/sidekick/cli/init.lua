@@ -29,7 +29,8 @@ local M = {}
 
 ---@class sidekick.cli.ResumeAdapter
 ---@field args? string[]
----@field prepare? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):{cmd:string[],conversation:sidekick.cli.Conversation}?
+---@field prepare? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):{cmd:string[],env?:table<string,string>,conversation:sidekick.cli.Conversation}?
+---@field env? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):table<string,string>?
 ---@field capture? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):sidekick.cli.Conversation|string?
 ---@field command? fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
 ---@field preflight? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean

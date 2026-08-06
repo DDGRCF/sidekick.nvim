@@ -117,7 +117,10 @@ function M.new(state)
     local ok, prepared = pcall(adapter.prepare, tool, self)
     if ok and type(prepared) == "table" then
       if type(prepared.cmd) == "table" then
-        self.tool = tool:clone({ cmd = prepared.cmd })
+        self.tool = tool:clone({
+          cmd = prepared.cmd,
+          env = vim.tbl_extend("force", vim.deepcopy(tool.env or {}), prepared.env or {}),
+        })
         tool = self.tool
       end
       if type(prepared.conversation) == "table" then
