@@ -11,11 +11,13 @@ describe("cli workspace", function()
   local saved_workspace
   local session_sessions
   local executable
+  local info
 
   before_each(function()
     saved_workspace = Util.get_state("cli-workspace")
     session_sessions = Session.sessions
     executable = vim.fn.executable
+    info = Util.info
   end)
 
   after_each(function()
@@ -30,6 +32,7 @@ describe("cli workspace", function()
     Panel.panels[vim.api.nvim_get_current_tabpage()] = nil
     Session.sessions = session_sessions
     vim.fn.executable = executable
+    Util.info = info
     Workspace.partial = false
     Workspace.restoring = false
     if saved_workspace == nil then
@@ -133,6 +136,22 @@ describe("cli workspace", function()
     local next_result = Workspace.restore()
 
     assert.are.equal(0, #next_result.failed)
+  end)
+
+  it("is silent when an empty workspace has nothing to restore", function()
+    local messages = {}
+    Util.info = function(message)
+      messages[#messages + 1] = message
+    end
+    Util.set_state("cli-workspace", { version = 1, saved_at = os.time(), agents = {}, panels = {} })
+    Session.sessions = function()
+      return {}
+    end
+
+    local result = Workspace.restore()
+
+    assert.are.equal(0, result.restored)
+    assert.are.same({}, messages)
   end)
 
   it("claims a different native tab for panels with the same cwd", function()

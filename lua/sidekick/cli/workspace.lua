@@ -372,9 +372,9 @@ function M.restore()
       end
     end
     local restored_count = vim.tbl_count(restored)
-    if #failed == 0 then
+    if #failed == 0 and restored_count > 0 then
       Util.info(("Restored %d Sidekick agent conversation(s)"):format(restored_count))
-    else
+    elseif #failed > 0 then
       local lines = { ("Restored %d agent(s); %d failed:"):format(restored_count, #failed) }
       for _, failure in ipairs(failed) do
         lines[#lines + 1] = ("- %s (%s): %s"):format(
