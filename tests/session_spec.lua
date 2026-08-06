@@ -45,6 +45,17 @@ describe("cli sessions", function()
     assert.are_not.equal(Session.instance("tmux 42"), Session.instance("tmux 43"))
   end)
 
+  it("assigns exact provider conversation ids to managed CLIs", function()
+    for _, name in ipairs({ "copilot", "pi", "qwen" }) do
+      local session = Session.new({ tool = name, backend = "terminal" })
+      assert.are.equal(name, session.conversation.provider)
+      assert.is_true(session.conversation.resumable)
+      assert.is_true(require("sidekick.cli.managed_sessions").valid_id(session.conversation.id))
+      assert.are.equal(session.conversation.id, session.tool.cmd[#session.tool.cmd])
+      session:close()
+    end
+  end)
+
   it("keeps the legacy tool/cwd id available for discovery", function()
     local sid = Session.sid({ tool = "codex", cwd = "/tmp/project" })
     local instance = Session.sid({ tool = "codex", cwd = "/tmp/project", instance_id = "12345678" })

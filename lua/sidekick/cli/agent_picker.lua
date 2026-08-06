@@ -2,6 +2,8 @@ local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
 
 local M = {}
+local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
+local PREVIEW_CACHE_MAX = 64
 
 local function enrich(item, git)
   local t = item.terminal
@@ -38,7 +40,55 @@ local function resolve(item)
   end
 end
 
-local function preview_lines(item)
+local function trim(lines)
+  local bytes = math.max(1024, Config.cli.agent_picker.preview_bytes)
+  local ret, used = {}, 0
+  for _, line in ipairs(lines) do
+    if used >= bytes then
+      break
+    end
+    line = #line > bytes - used and line:sub(1, bytes - used) or line
+    ret[#ret + 1] = line
+    used = used + #line + 1
+  end
+  return ret
+end
+
+local function append_output(lines, output, max)
+  if output then
+    local output_lines = vim.split(output, "\n", { plain = true })
+    vim.list_extend(lines, vim.list_slice(output_lines, math.max(1, #output_lines - max + 1)))
+  end
+end
+
+local function cache_output(output)
+  if not output then
+    return
+  end
+  local max = math.max(1, Config.cli.agent_picker.preview_lines)
+  local lines = vim.split(output, "\n", { plain = true })
+  lines = vim.list_slice(lines, math.max(1, #lines - max + 1))
+  return table.concat(trim(lines), "\n")
+end
+
+local function prune_cache(limit)
+  limit = limit or PREVIEW_CACHE_MAX
+  while vim.tbl_count(preview_cache) > limit do
+    local oldest_key, oldest_at
+    for key, cached in pairs(preview_cache) do
+      if not oldest_at or cached.at < oldest_at then
+        oldest_key, oldest_at = key, cached.at
+      end
+    end
+    if not oldest_key then
+      return
+    end
+    preview_cache[oldest_key].waiter = nil
+    preview_cache[oldest_key] = nil
+  end
+end
+
+local function preview_lines(item, on_update)
   local t = resolve(item)
   local lines = {
     ("%s · %s"):format(item.tool, item.label),
@@ -55,26 +105,48 @@ local function preview_lines(item)
   if t.buf and vim.api.nvim_buf_is_valid(t.buf) then
     local count = vim.api.nvim_buf_line_count(t.buf)
     vim.list_extend(lines, vim.api.nvim_buf_get_lines(t.buf, math.max(0, count - max), count, false))
-  elseif type(t.dump) == "function" then
-    local output = t:dump()
-    if output then
-      local output_lines = vim.split(output, "\n", { plain = true })
-      vim.list_extend(lines, vim.list_slice(output_lines, math.max(1, #output_lines - max + 1)))
-    end
   else
-    lines[#lines + 1] = "No terminal output is available."
-  end
-  local bytes = math.max(1024, Config.cli.agent_picker.preview_bytes)
-  local ret, used = {}, 0
-  for _, line in ipairs(lines) do
-    if used >= bytes then
-      break
+    local source = type(t.dump_async) == "function" and t
+      or (t.parent and type(t.parent.dump_async) == "function" and t.parent or nil)
+    if source then
+      local key = table.concat({ item.tool, item.id, item.instance_id or "" }, ":")
+      local cached = preview_cache[key]
+      if not cached then
+        prune_cache(PREVIEW_CACHE_MAX - 1)
+        cached = { at = 0 }
+        preview_cache[key] = cached
+      end
+      if on_update then
+        cached.waiter = on_update
+      end
+      if cached.output then
+        append_output(lines, cached.output, max)
+      elseif cached.ready then
+        lines[#lines + 1] = "No terminal output is available."
+      else
+        lines[#lines + 1] = "Loading terminal output…"
+      end
+      if vim.uv.now() - cached.at > 500 and not cached.pending then
+        cached.pending = true
+        cached.at = vim.uv.now()
+        source:dump_async(function(output)
+          cached.pending = false
+          cached.output = cache_output(output)
+          cached.ready = true
+          cached.at = vim.uv.now()
+          prune_cache()
+          local waiter = cached.waiter
+          cached.waiter = nil
+          if waiter then
+            waiter()
+          end
+        end)
+      end
+    else
+      lines[#lines + 1] = "No terminal output is available."
     end
-    line = #line > bytes - used and line:sub(1, bytes - used) or line
-    ret[#ret + 1] = line
-    used = used + #line + 1
   end
-  return ret
+  return trim(lines)
 end
 
 local function selected(picker, item)
@@ -100,6 +172,8 @@ end
 
 local function snacks(items, Snacks)
   local picker, group
+  local preview_timer
+  local preview_generation = 0
   local refresh_pending = false
   local function refresh()
     if refresh_pending or not picker or picker.closed then
@@ -133,9 +207,21 @@ local function snacks(items, Snacks)
       }
     end,
     preview = function(ctx)
-      ctx.preview:reset()
-      ctx.preview:set_title(ctx.item.agent.label)
-      ctx.preview:set_lines(preview_lines(ctx.item.agent))
+      preview_generation = preview_generation + 1
+      local generation = preview_generation
+      local function render()
+        if (not picker or not picker.closed) and generation == preview_generation then
+          ctx.preview:reset()
+          ctx.preview:set_title(ctx.item.agent.label)
+          ctx.preview:set_lines(preview_lines(ctx.item.agent, render))
+        end
+      end
+      render()
+      if picker then
+        preview_timer = preview_timer or assert(vim.uv.new_timer())
+        preview_timer:stop()
+        preview_timer:start(500, 500, vim.schedule_wrap(render))
+      end
     end,
     confirm = function(picker, item)
       picker:close()
@@ -187,6 +273,13 @@ local function snacks(items, Snacks)
       },
     },
     on_close = function()
+      if preview_timer and not preview_timer:is_closing() then
+        preview_timer:stop()
+        preview_timer:close()
+      end
+      for _, cached in pairs(preview_cache) do
+        cached.waiter = nil
+      end
       if group then
         pcall(vim.api.nvim_del_augroup_by_id, group)
       end
@@ -202,6 +295,8 @@ local function snacks(items, Snacks)
     })
   end
 end
+
+M.preview_lines = preview_lines
 
 ---@param id string
 function M.is_pinned(id)

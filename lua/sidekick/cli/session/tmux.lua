@@ -210,4 +210,62 @@ function M:dump()
   return ret
 end
 
+---@param cb fun(output?:string)
+function M:dump_async(cb)
+  local function run(cmd, done)
+    local completed, exited = false, false
+    local timer = assert(vim.uv.new_timer())
+    local job
+    local function finish(output)
+      if completed then
+        return
+      end
+      completed = true
+      if not timer:is_closing() then
+        timer:stop()
+        timer:close()
+      end
+      done(output)
+    end
+    job = vim.system(cmd, { text = true }, function(result)
+      exited = true
+      vim.schedule(function()
+        finish(result.code == 0 and result.stdout or nil)
+      end)
+    end)
+    timer:start(
+      2000,
+      0,
+      vim.schedule_wrap(function()
+        finish()
+        if not exited then
+          job:kill(15)
+          vim.defer_fn(function()
+            if not exited then
+              job:kill(9)
+            end
+          end, 250)
+        end
+      end)
+    )
+  end
+  local function capture(pane_id)
+    run({ "tmux", "capture-pane", "-p", "-t", pane_id, "-S", "-" .. Config.cli.mux.dump, "-E", "-", "-e" }, cb)
+  end
+  if self.tmux_pane_id then
+    return capture(self.tmux_pane_id)
+  end
+  if not self.mux_session then
+    return vim.schedule(cb)
+  end
+  run({ "tmux", "list-panes", "-s", "-F", PANE_FORMAT, "-t", self.mux_session }, function(output)
+    local pane_id = output and output:match("^%$%d+:(%%%d+):") or nil
+    if not pane_id then
+      return cb()
+    end
+    self.tmux_pane_id = pane_id
+    capture(pane_id)
+  end)
+end
+
 return M

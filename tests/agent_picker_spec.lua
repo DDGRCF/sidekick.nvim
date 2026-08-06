@@ -131,4 +131,51 @@ describe("cli agent picker", function()
     assert.are.equal("latest output", lines[#lines])
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("loads mux previews asynchronously without calling synchronous dump", function()
+    local callback
+    local sync_calls = 0
+    local terminal = register({
+      id = "mux-one",
+      instance_id = "mux-instance",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "working",
+      backend = "terminal",
+      parent = {
+        dump = function()
+          sync_calls = sync_calls + 1
+        end,
+        dump_async = function(_, cb)
+          callback = cb
+        end,
+      },
+    })
+    local item = {
+      id = terminal.id,
+      instance_id = terminal.instance_id,
+      tool = "codex",
+      label = "Mux agent",
+      cwd = terminal.cwd,
+      backend = "tmux",
+    }
+    local stale_updates, updates = 0, 0
+    local initial = Picker.preview_lines(item, function()
+      stale_updates = stale_updates + 1
+    end)
+    Picker.preview_lines(item, function()
+      updates = updates + 1
+    end)
+
+    assert.are.equal("Loading terminal output…", initial[#initial])
+    assert.are.equal(0, sync_calls)
+    assert.is_function(callback)
+
+    callback("old output\nlatest mux output")
+    local loaded = Picker.preview_lines(item)
+    assert.are.equal("latest mux output", loaded[#loaded])
+    assert.are.equal(1, updates)
+    assert.are.equal(0, stale_updates)
+    assert.are.equal(0, sync_calls)
+  end)
 end)

@@ -3,6 +3,7 @@ return {
   cmd = { "qwen" },
   is_proc = "\\<qwen\\>",
   url = "https://github.com/QwenLM/qwen-code",
+  resume = require("sidekick.cli.managed_sessions").adapter("qwen"),
   mux_focus = true, -- qwen needs focus in order to process input
   format = function(text)
     require("sidekick.text").transform(text, function(str)

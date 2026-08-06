@@ -7,6 +7,6 @@ return {
     return re:match_str(proc.cmd) and not proc.cmd:find("language%-server") or false
   end,
   url = "https://github.com/github/copilot-cli",
-  resume = { "--resume" },
+  resume = require("sidekick.cli.managed_sessions").adapter("copilot"),
   continue = { "--continue" },
 }

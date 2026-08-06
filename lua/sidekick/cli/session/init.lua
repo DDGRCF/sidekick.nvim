@@ -36,6 +36,7 @@ M._attached = {} ---@type table<string,sidekick.cli.Session>
 ---@field tool sidekick.cli.Tool
 ---@field backend string
 ---@field dump? fun(self:sidekick.cli.Session):string?
+---@field dump_async? fun(self:sidekick.cli.Session,cb:fun(output?:string))
 local B = {}
 B.__index = B
 B.priority = 0
@@ -105,6 +106,27 @@ function M.new(state)
     self.conversation = self.conversation or saved.conversation
   end
   self.instance_id = self.instance_id or M.instance(self.id)
+  local adapter = tool.config.resume
+  if
+    not self.started
+    and not self.conversation
+    and type(adapter) == "table"
+    and not vim.islist(adapter)
+    and type(adapter.prepare) == "function"
+  then
+    local ok, prepared = pcall(adapter.prepare, tool, self)
+    if ok and type(prepared) == "table" then
+      if type(prepared.cmd) == "table" then
+        self.tool = tool:clone({ cmd = prepared.cmd })
+        tool = self.tool
+      end
+      if type(prepared.conversation) == "table" then
+        self.conversation = vim.deepcopy(prepared.conversation)
+      end
+    else
+      Util.debug("CLI managed session preparation failed", prepared)
+    end
+  end
   self.sid = M.sid({ tool = tool.name, cwd = self.cwd, instance_id = self.instance_id })
   self.id = self.id or self.sid
   M.persist(self)

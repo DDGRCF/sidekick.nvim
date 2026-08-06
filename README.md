@@ -570,7 +570,9 @@ tmux/zellij session; if the process is gone, it starts the tool's native resume 
 in a new terminal. A failed or unsupported resume is reported and never replaced with a
 metadata-only tab. Use `:Sidekick cli workspace save|restore|status|clear` to manage the
 snapshot explicitly. Exact provider conversation IDs can be supplied by a tool's
-`resume` adapter; Antigravity, Claude, Codex, Grok, and OpenCode include exact adapters.
+`resume` adapter. Antigravity, Claude, Codex, Grok, and OpenCode include exact discovery adapters;
+Copilot, Pi, and Qwen receive a Sidekick-managed UUID at launch so multiple agents of the same type
+can be restored without relying on a provider's “latest conversation” shortcut.
 If no stable ID is available, Sidekick reports that agent as failed instead of
 substituting a latest session or interactive browser.
 
