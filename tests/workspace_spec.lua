@@ -10,10 +10,12 @@ describe("cli workspace", function()
   local terminal
   local saved_workspace
   local session_sessions
+  local executable
 
   before_each(function()
     saved_workspace = Util.get_state("cli-workspace")
     session_sessions = Session.sessions
+    executable = vim.fn.executable
   end)
 
   after_each(function()
@@ -27,6 +29,7 @@ describe("cli workspace", function()
     Panel.hide()
     Panel.panels[vim.api.nvim_get_current_tabpage()] = nil
     Session.sessions = session_sessions
+    vim.fn.executable = executable
     Workspace.partial = false
     Workspace.restoring = false
     if saved_workspace == nil then
@@ -84,6 +87,52 @@ describe("cli workspace", function()
     assert.are.equal(0, #result.failed)
     assert.are.equal(before, vim.tbl_count(Terminal.terminals))
     assert.is_false(Workspace.partial)
+  end)
+
+  it("discards agents without exact resume metadata after reporting the failure", function()
+    local cwd = vim.fn.getcwd()
+    Util.set_state("cli-workspace", {
+      version = 1,
+      saved_at = os.time(),
+      agents = {
+        {
+          key = "unresumable",
+          tool = "codex",
+          cwd = cwd,
+          backend = "terminal",
+          instance_id = "agent0001",
+        },
+      },
+      panels = {
+        {
+          tab = { id = "unresumable-panel", cwd = cwd },
+          order = { "unresumable" },
+          pinned = { unresumable = true },
+          layout = "right",
+          sizes = {},
+        },
+      },
+    })
+    Session.sessions = function()
+      return {}
+    end
+    vim.fn.executable = function(cmd)
+      return cmd == "codex" and 1 or executable(cmd)
+    end
+
+    local result = Workspace.restore()
+    local state = Util.get_state("cli-workspace")
+
+    assert.are.equal(0, result.restored)
+    assert.are.equal(1, #result.failed)
+    assert.is_false(Workspace.partial)
+    assert.are.same({}, state.agents)
+    assert.are.same({}, state.panels[1].order)
+    assert.are.same({}, state.panels[1].pinned)
+
+    local next_result = Workspace.restore()
+
+    assert.are.equal(0, #next_result.failed)
   end)
 
   it("claims a different native tab for panels with the same cwd", function()

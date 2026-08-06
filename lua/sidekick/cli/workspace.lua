@@ -144,7 +144,7 @@ local function restore_agent(saved, discovered)
   end
   local cmd, mode = Resume.command(tool, saved)
   if not cmd then
-    return nil, ("CLI tool `%s` has no exact resumable conversation id"):format(saved.tool)
+    return nil, ("CLI tool `%s` has no exact resumable conversation id"):format(saved.tool), mode
   end
   if not Resume.preflight(tool, saved) then
     return nil, ("CLI tool `%s` could not verify the saved conversation id"):format(saved.tool)
@@ -260,6 +260,45 @@ local function validate(saved)
   end
 end
 
+---@param agent sidekick.cli.WorkspaceAgent
+local function lacks_exact_conversation(agent)
+  local conversation = agent.conversation
+  return type(conversation) ~= "table"
+    or conversation.provider ~= agent.tool
+    or conversation.resumable ~= true
+    or type(conversation.id) ~= "string"
+    or conversation.id == ""
+    or conversation.id:sub(1, 1) == "-"
+    or #conversation.id > 4096
+    or conversation.id:find("[%c%s]")
+end
+
+---@param saved sidekick.cli.WorkspaceState
+---@param keys table<string,boolean>
+local function discard_agents(saved, keys)
+  if vim.tbl_isempty(keys) then
+    return true
+  end
+  saved.agents = vim.tbl_filter(function(agent)
+    return not keys[agent.key]
+  end, saved.agents)
+  for _, panel in ipairs(saved.panels) do
+    panel.order = vim.tbl_filter(function(key)
+      return not keys[key]
+    end, panel.order)
+    if panel.pinned then
+      for key in pairs(keys) do
+        panel.pinned[key] = nil
+      end
+    end
+  end
+  local ok, err = Util.set_state(state_key, saved)
+  if not ok then
+    Util.error("Failed to discard unresumable Sidekick agents: " .. tostring(err))
+  end
+  return ok
+end
+
 ---@return {restored:integer,failed:{agent:sidekick.cli.WorkspaceAgent,error:string}[],modes:table<string,integer>} result
 function M.restore()
   if M.restoring then
@@ -278,7 +317,7 @@ function M.restore()
     Session.setup()
     local discovered = Session.sessions()
 
-    local failed, modes = {}, {}
+    local failed, modes, discarded = {}, {}, {}
     for _, agent in ipairs(saved.agents or {}) do
       local agent_ok, terminal, err, mode = pcall(restore_agent, agent, discovered)
       if agent_ok and terminal then
@@ -286,6 +325,9 @@ function M.restore()
         restore_modes[agent.key] = mode
         modes[mode] = (modes[mode] or 0) + 1
       else
+        if mode == "unsupported" and lacks_exact_conversation(agent) then
+          discarded[agent.key] = true
+        end
         failed[#failed + 1] = {
           agent = agent,
           error = agent_ok and (err or "unknown restore error") or tostring(terminal),
@@ -341,7 +383,8 @@ function M.restore()
     if #panel_failures > 0 then
       Util.warn(("%d Sidekick panel(s) could not be restored"):format(#panel_failures))
     end
-    M.partial = #failed > 0 or #panel_failures > 0
+    local discarded_ok = discard_agents(saved, discarded)
+    M.partial = (#failed > vim.tbl_count(discarded)) or #panel_failures > 0 or not discarded_ok
     return { restored = restored_count, failed = failed, modes = modes, panel_failures = panel_failures }
   end, debug.traceback)
   M.restoring = false
