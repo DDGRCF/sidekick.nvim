@@ -166,6 +166,7 @@ describe("cli agent picker", function()
     assert.matches("@codex", found.text)
     assert.matches("#working", found.text)
     assert.matches("%%project", found.text)
+    assert.are.equal(found.agent.id, found._select_key)
     assert.is_nil(found.agent.terminal)
     assert.is_true(pcall(vim.deepcopy, found))
     terminal.status = "done"
@@ -248,6 +249,127 @@ describe("cli agent picker", function()
     vim.api.nvim_win_close(preview_win, true)
     vim.api.nvim_buf_delete(preview_buf, { force = true })
     vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("scopes agent state to the current panel", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return { closed = false, id = "panel-state-test" }
+        end,
+      },
+    }
+
+    local terminal = register({
+      id = "panel-state-agent",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "working",
+    })
+    local tab = vim.api.nvim_get_current_tabpage()
+    local foreign = "sidekick-agent-picker-foreign-panel"
+    local old_current = Panel.panels[tab]
+    local old_foreign = Panel.panels[foreign]
+    local ok, err = pcall(function()
+      Panel.panels[tab] = { active = "another-agent", pinned = {} }
+      Panel.panels[foreign] = { active = terminal.id, pinned = { [terminal.id] = true } }
+
+      Picker.open({ {
+        id = terminal.id,
+        key = terminal.id,
+        label = "Codex: Panel state",
+        terminal = terminal,
+      } })
+
+      local first = opts.finder()[1]
+      assert.is_false(first.agent.active)
+      assert.is_false(first.agent.pinned)
+      terminal.status = "done"
+      local refreshed = opts.finder()[1]
+      assert.are.equal(first._select_key, refreshed._select_key)
+      assert.are.equal(terminal.id, refreshed._select_key)
+      opts.on_close()
+    end)
+    Panel.panels[tab] = old_current
+    Panel.panels[foreign] = old_foreign
+    assert.is_true(ok, err)
+  end)
+
+  it("cycles status filters without closing the Snacks picker", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local find_calls = 0
+    local picker = { closed = false, id = "filter-test" }
+    function picker:find()
+      find_calls = find_calls + 1
+    end
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return picker
+        end,
+      },
+    }
+
+    local working = register({
+      id = "filter-working",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "working",
+    })
+    local idle = register({
+      id = "filter-idle",
+      tool = { name = "claude" },
+      cwd = "/tmp/project",
+      status = "idle",
+    })
+    local done = register({
+      id = "filter-done",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "done",
+    })
+    local failed = register({
+      id = "filter-error",
+      tool = { name = "claude" },
+      cwd = "/tmp/project",
+      status = "error",
+    })
+
+    Picker.open(vim.tbl_map(function(terminal)
+      return {
+        id = terminal.id,
+        key = terminal.id,
+        label = terminal.tool.name .. ": " .. terminal.id,
+        terminal = terminal,
+      }
+    end, { working, idle, done, failed }))
+
+    local function ids()
+      return vim.tbl_map(function(item)
+        return item.agent.id
+      end, opts.finder())
+    end
+
+    assert.are.same({ working.id, idle.id, done.id, failed.id }, ids())
+    opts.actions.agent_filter(picker)
+    assert.matches("Open", picker.title)
+    assert.are.same({ working.id, idle.id }, ids())
+    opts.actions.agent_filter(picker)
+    assert.matches("Working", picker.title)
+    assert.are.same({ working.id }, ids())
+    opts.actions.agent_filter(picker)
+    assert.matches("Done", picker.title)
+    assert.are.same({ done.id }, ids())
+    opts.actions.agent_filter(picker)
+    assert.matches("Errors", picker.title)
+    assert.are.same({ failed.id }, ids())
+    assert.are.equal(4, find_calls)
+    opts.on_close()
   end)
 
   it("renames an agent in the Snacks picker without closing it", function()

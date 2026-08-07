@@ -27,6 +27,50 @@ describe("cli sessions", function()
     session:close()
   end)
 
+  it("disambiguates terminal buffer names for duplicate instance ids", function()
+    local tool = {
+      name = "sidekick-test",
+      cmd = { vim.o.shell, vim.o.shellcmdflag, "exit 0" },
+      config = {},
+    }
+    local id = tostring(vim.uv.hrtime())
+    local first = Session.new({
+      tool = tool,
+      backend = "terminal",
+      id = "duplicate-buffer-first-" .. id,
+      cwd = vim.fn.getcwd(),
+      instance_id = "same-instance",
+      hidden = true,
+    })
+    local second = Session.new({
+      tool = tool,
+      backend = "terminal",
+      id = "duplicate-buffer-second-" .. id,
+      cwd = vim.fn.getcwd(),
+      instance_id = "same-instance",
+      hidden = true,
+    })
+
+    local first_name, second_name, first_started, second_started
+    local ok, err = pcall(function()
+      first:start()
+      second:start()
+      first_started = first.started
+      second_started = second.started
+      first_name = vim.api.nvim_buf_get_name(first.buf)
+      second_name = vim.api.nvim_buf_get_name(second.buf)
+    end)
+    first:close()
+    second:close()
+
+    assert.is_true(ok, err)
+    assert.is_true(first_started)
+    assert.is_true(second_started)
+    assert.are_not.equal(first_name, second_name)
+    assert.matches("^sidekick://agent/same%-instance", first_name)
+    assert.matches("^sidekick://agent/same%-instance", second_name)
+  end)
+
   it("gives new agents of the same tool unique session ids", function()
     local first = Session.new({ tool = "codex", backend = "terminal" })
     local second = Session.new({ tool = "codex", backend = "terminal" })

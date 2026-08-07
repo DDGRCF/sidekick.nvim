@@ -72,6 +72,43 @@ local bo = {
   filetype = "sidekick_terminal",
 }
 
+---@param session sidekick.cli.Terminal
+---@return string
+local function buffer_name(session)
+  local id = session.instance_id or session.id or session.buf
+  return ("sidekick://agent/%s"):format(tostring(id))
+end
+
+---@param name string
+---@param buf integer
+---@return boolean
+local function buffer_name_exists(name, buf)
+  for _, existing in ipairs(vim.api.nvim_list_bufs()) do
+    if existing ~= buf and vim.api.nvim_buf_is_valid(existing) and vim.api.nvim_buf_get_name(existing) == name then
+      return true
+    end
+  end
+  return false
+end
+
+---@param session sidekick.cli.Terminal
+---@return string
+local function unique_buffer_name(session)
+  local base = buffer_name(session)
+  if not session.buf or not buffer_name_exists(base, session.buf) then
+    return base
+  end
+
+  local suffix = tostring(session.buf)
+  local name = ("%s-%s"):format(base, suffix)
+  local attempt = 1
+  while buffer_name_exists(name, session.buf) do
+    attempt = attempt + 1
+    name = ("%s-%s-%d"):format(base, suffix, attempt)
+  end
+  return name
+end
+
 ---@param session_id string
 function M.get(session_id)
   return M.terminals[session_id]
@@ -244,6 +281,8 @@ function M:start()
     end
   end
 
+  local agent_buffer_name = unique_buffer_name(self)
+
   local ready = assert(vim.uv.new_timer())
   local ready_start = vim.uv.hrtime()
   local ready_init ---@type integer?
@@ -336,6 +375,13 @@ function M:start()
     else
       Util.error(("Failed to run `%s`"):format(table.concat(self.tool.cmd, " ")))
     end
+    self:close()
+    return
+  end
+  local ok, err = pcall(vim.api.nvim_buf_set_name, self.buf, agent_buffer_name)
+  if not ok then
+    close()
+    Util.error(("Failed to name `%s`: %s"):format(table.concat(self.tool.cmd, " "), tostring(err)))
     self:close()
     return
   end

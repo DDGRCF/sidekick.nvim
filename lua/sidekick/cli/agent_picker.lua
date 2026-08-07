@@ -6,6 +6,14 @@ local M = {}
 local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
 local PREVIEW_CACHE_MAX = 64
 local RENAME_ICON = "󰏫"
+local FILTERS = {
+  { name = "all", label = "All" },
+  { name = "open", label = "Open" },
+  { name = "working", label = "Working" },
+  { name = "done", label = "Done" },
+  { name = "error", label = "Errors" },
+  { name = "pinned", label = "Pinned" },
+}
 
 local function agent_title(item, terminal)
   local title = terminal.title
@@ -15,6 +23,34 @@ local function agent_title(item, terminal)
   return vim.trim(tostring(title):gsub("[%c\r\n]+", " "):gsub("%s+", " "))
 end
 
+---@param id string
+---@return boolean active, boolean pinned
+local function panel_state(id)
+  local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+  if not p then
+    return false, false
+  end
+  return p.active == id, p.pinned and p.pinned[id] == true or false
+end
+
+---@param agent table
+---@param filter string
+---@return boolean
+local function matches_filter(agent, filter)
+  if filter == "all" then
+    return true
+  elseif filter == "open" then
+    return agent.status ~= "done" and agent.status ~= "error"
+  elseif filter == "working" then
+    return agent.status == "starting" or agent.status == "working" or agent.status == "waiting"
+  elseif filter == "done" or filter == "error" then
+    return agent.status == filter
+  elseif filter == "pinned" then
+    return agent.pinned == true
+  end
+  return true
+end
+
 local function enrich(item, git)
   local t = item.terminal
   local project = vim.fn.fnamemodify(t.cwd or "", ":t")
@@ -22,6 +58,7 @@ local function enrich(item, git)
   local branch = metadata.branch or ""
   local changed = metadata.changed_files or {}
   local title = agent_title(item, t)
+  local active, pinned = panel_state(item.id)
   return {
     id = item.id,
     instance_id = t.instance_id,
@@ -35,6 +72,8 @@ local function enrich(item, git)
     backend = t.mux_backend or t.backend or "terminal",
     branch = branch,
     changed_files = vim.deepcopy(changed),
+    active = active,
+    pinned = pinned,
     search = table.concat({
       item.label,
       title,
@@ -43,6 +82,8 @@ local function enrich(item, git)
       "%" .. project,
       branch,
       table.concat(changed, " "),
+      active and "active" or "",
+      pinned and "pinned" or "",
     }, " "),
   }
 end
@@ -345,7 +386,29 @@ local function snacks(items, Snacks)
   local preview_timer
   local preview_generation = 0
   local refresh_pending = false
+  local filter_index = 1
   local renaming ---@type {agent:table,find:function,prompt:string|nil,title:string,pattern:string,search:string}|nil
+  local function current_filter()
+    return FILTERS[filter_index]
+  end
+  local function update_filter_title()
+    if not picker or picker.closed then
+      return
+    end
+    picker.title = ("Sidekick Agents · %s"):format(current_filter().label)
+    if picker.update_titles then
+      picker:update_titles()
+    end
+  end
+  local function filter_agents(agents)
+    local filter = current_filter().name
+    if filter == "all" then
+      return agents
+    end
+    return vim.tbl_filter(function(agent)
+      return matches_filter(agent, filter)
+    end, agents)
+  end
   local function refresh()
     if refresh_pending or not picker or picker.closed then
       return
@@ -456,11 +519,11 @@ local function snacks(items, Snacks)
   end
   picker = Snacks.picker.pick({
     source = "sidekick_agents",
-    title = "Sidekick Agents",
+    title = "Sidekick Agents · All",
     finder = function()
       return vim.tbl_map(function(agent)
-        return { text = agent.search, agent = agent }
-      end, M.items(items, refresh))
+        return { text = agent.search, _select_key = agent.id, agent = agent }
+      end, filter_agents(M.items(items, refresh)))
     end,
     format = function(item)
       local t = resolve(item.agent)
@@ -470,6 +533,12 @@ local function snacks(items, Snacks)
       local icon = tool_icon(agent.tool)
       local tool_hl = tool_highlight(agent.tool)
       local ret = {}
+      if agent.active then
+        ret[#ret + 1] = { "◆ ", "SidekickCliTabSelected" }
+      end
+      if agent.pinned then
+        ret[#ret + 1] = { "󰐃 ", "Special" }
+      end
       local agent_marker = agent_icon()
       if agent_marker ~= "" then
         ret[#ret + 1] = { agent_marker .. " ", "SidekickCliInstalled" }
@@ -558,6 +627,14 @@ local function snacks(items, Snacks)
         end
         reopen(picker)
       end,
+      agent_filter = function(picker)
+        if renaming then
+          return
+        end
+        filter_index = filter_index % #FILTERS + 1
+        update_filter_title()
+        picker:find({ refresh = true })
+      end,
       agent_cleanup = function(picker)
         picker:close()
         vim.schedule(function()
@@ -573,6 +650,7 @@ local function snacks(items, Snacks)
           ["<c-p>"] = { "agent_pin", mode = { "n", "i" }, desc = "pin/unpin agent" },
           ["<c-r>"] = { "agent_rename", mode = { "n", "i" }, desc = "rename agent" },
           ["<c-x>"] = { "agent_close", mode = { "n", "i" }, desc = "close agent" },
+          ["<a-t>"] = { "agent_filter", mode = { "n", "i" }, desc = "cycle agent filter" },
           ["<c-d>"] = { "agent_cleanup", mode = { "n", "i" }, desc = "clean completed agents" },
         },
       },
@@ -595,7 +673,7 @@ local function snacks(items, Snacks)
       vim.api.nvim_create_augroup("sidekick_agent_picker_" .. tostring(picker.id or vim.uv.hrtime()), { clear = true })
     vim.api.nvim_create_autocmd("User", {
       group = group,
-      pattern = "SidekickCliStatus",
+      pattern = { "SidekickCliStatus", "SidekickCliActivate", "SidekickCliPanel" },
       callback = refresh,
     })
   end
