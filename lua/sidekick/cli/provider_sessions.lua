@@ -273,6 +273,22 @@ local function session_id(provider, path, session_root)
   return value.sessionId
 end
 
+local function claude_session_path(id, session_root)
+  if type(id) ~= "string" or not id:match("^[%w%-]+$") or type(session_root) ~= "string" then
+    return
+  end
+  local matches = {}
+  for _, extension in ipairs({ "jsonl", "json" }) do
+    for _, path in ipairs(vim.fn.globpath(session_root, "**/" .. id .. "." .. extension, false, true)) do
+      if session_id("claude", path, session_root) == id then
+        matches[vim.fs.normalize(path)] = true
+      end
+    end
+  end
+  local paths = vim.tbl_keys(matches)
+  return #paths == 1 and paths[1] or nil
+end
+
 local function allowed(provider, path, session_root, tool, cwd)
   path = vim.fs.normalize(path)
   session_root = session_root or M.roots[provider]
@@ -312,6 +328,90 @@ local function valid_id(provider, id)
     return type(id) == "string" and #id >= 8 and #id <= 128 and id:match("^[0-9A-Za-z%-]+$") ~= nil
   end
   return type(id) == "string" and id ~= ""
+end
+
+local function exact_command_id(provider, id)
+  return valid_id(provider, id) and id:sub(1, 1) ~= "-" and not id:find("[%c%s]") and id or nil
+end
+
+local function command_value(cmd, flag)
+  local args = type(cmd) == "table" and cmd or vim.split(cmd or "", "%s+")
+  for i, arg in ipairs(args) do
+    arg = type(arg) == "string" and arg:gsub("^['\"]", ""):gsub("['\"]$", "") or arg
+    if arg == flag then
+      local value = args[i + 1]
+      return type(value) == "string" and value:gsub("^['\"]", ""):gsub("['\"]$", "") or nil
+    end
+    local value = type(arg) == "string" and arg:match("^" .. vim.pesc(flag) .. "=(.+)$") or nil
+    if value then
+      return value
+    end
+  end
+end
+
+local function command_has(cmd, flag)
+  local args = type(cmd) == "table" and cmd or vim.split(cmd or "", "%s+")
+  for _, arg in ipairs(args) do
+    if type(arg) == "string" then
+      arg = arg:gsub("^['\"]", ""):gsub("['\"]$", "")
+      if arg == flag or arg:find("^" .. vim.pesc(flag) .. "=") then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function process_session_id(session)
+  local ids = {}
+  local disabled = false
+  local function inspect(cmd)
+    if command_has(cmd, "--no-session-persistence") then
+      disabled = true
+    end
+    local id = exact_command_id("claude", command_value(cmd, "--session-id"))
+    if id then
+      ids[id] = true
+    end
+  end
+
+  local tool = session.tool
+  local tool_cmd = tool and tool.cmd
+  inspect(tool_cmd)
+  if disabled then
+    return
+  end
+
+  -- The command-line id is authoritative and avoids a full process-table
+  -- scan for Sidekick-managed sessions.
+  local direct = exact_command_id("claude", command_value(tool_cmd, "--session-id"))
+  if direct then
+    return direct
+  end
+
+  -- A native fork intentionally has no new id in its command line. Its
+  -- transcript is discovered below, so do not scan every descendant's args.
+  local native_fork = command_has(tool_cmd, "--fork-session")
+  if
+    not native_fork
+    and session.pids
+    and #session.pids > 0
+    and type(tool) == "table"
+    and type(tool.is_proc) == "function"
+  then
+    local procs = Procs.new()
+    for _, root_pid in ipairs(session.pids) do
+      for _, pid in ipairs(Procs.pids(root_pid)) do
+        local proc = procs:get(pid)
+        if proc and tool:is_proc(proc) then
+          inspect(proc.cmd)
+        end
+      end
+    end
+  end
+
+  local found = vim.tbl_keys(ids)
+  return #found == 1 and found[1] or nil
 end
 
 local function valid_database(path)
@@ -573,9 +673,20 @@ function M.capture(provider, session)
   if provider == "crush" then
     return crush_capture(session, root(provider, session.tool, session.cwd))
   end
+  local session_root = root(provider, session.tool, session.cwd)
+  if provider == "claude" then
+    local id = process_session_id(session)
+    if id then
+      local data = { managed = true }
+      local path = claude_session_path(id, session_root)
+      if path then
+        data.path = path
+      end
+      return { id = id, provider = provider, resumable = true, data = data }
+    end
+  end
   local found = {}
   local scanned = {}
-  local session_root = root(provider, session.tool, session.cwd)
   local function scan(pid)
     if scanned[pid] then
       return
@@ -658,6 +769,19 @@ end
 function M.verify(provider, conversation, tool, cwd)
   local path = conversation.data and conversation.data.path
   local session_root = root(provider, tool, cwd)
+  if provider == "claude" and not path then
+    path = claude_session_path(conversation.id, session_root)
+    if path then
+      conversation.data = vim.deepcopy(conversation.data or {})
+      conversation.data.path = path
+    end
+  end
+  if provider == "claude" and not path and conversation.data and conversation.data.managed == true then
+    -- Sidekick assigns this id before Claude creates its transcript. The
+    -- managed id is authoritative during that short startup window; the
+    -- post-launch capture still has to observe the conversation itself.
+    return valid_id(provider, conversation.id)
+  end
   if provider == "opencode" then
     return valid_id(provider, conversation.id) and opencode_has(conversation.id)
   elseif provider == "grok" then

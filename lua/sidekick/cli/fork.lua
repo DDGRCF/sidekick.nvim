@@ -105,7 +105,7 @@ function M.ready(tool, source, opts)
     if opts and opts.capture == false then
       return false, "an exact conversation id is not available yet", "pending"
     end
-    local ok, captured = pcall(Resume.capture, source)
+    local ok, captured = pcall(Resume.capture, source, { require_current = true })
     conversation = ok and captured or nil
     if not ok then
       Util.debug("CLI fork conversation capture failed", captured)
@@ -298,7 +298,7 @@ function M.start(source, opts)
     return Util.warn(reason)
   end
 
-  local conversation = Resume.capture(source)
+  local conversation = Resume.capture(source, { require_current = true })
   if not valid_conversation(tool, conversation) then
     return Util.warn(("Cannot fork `%s`: no exact resumable conversation id is available"):format(tool.name))
   end

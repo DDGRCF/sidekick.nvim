@@ -129,4 +129,37 @@ describe("cli conversation resume", function()
 
     assert.are.equal("new", current.id)
   end)
+
+  it("does not use an unverified cached conversation for an exact capture", function()
+    local current = Resume.capture({
+      tool = tool({
+        capture = function()
+          return nil
+        end,
+      }),
+      conversation = { id = "cached", provider = "agent", resumable = true },
+      pids = {},
+    }, { require_current = true })
+
+    assert.is_nil(current)
+  end)
+
+  it("keeps a provider-assigned conversation available before its file exists", function()
+    local current = Resume.capture({
+      tool = tool({
+        capture = function()
+          return nil
+        end,
+      }),
+      conversation = {
+        id = "managed",
+        provider = "agent",
+        resumable = true,
+        data = { managed = true },
+      },
+      pids = {},
+    }, { require_current = true })
+
+    assert.are.equal("managed", current.id)
+  end)
 end)

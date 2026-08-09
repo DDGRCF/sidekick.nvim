@@ -100,6 +100,37 @@ describe("cli sessions", function()
     end
   end)
 
+  it("assigns an exact session id to new Claude sessions", function()
+    local Managed = require("sidekick.cli.managed_sessions")
+    local session = Session.new({ tool = "claude", backend = "terminal" })
+
+    assert.are.equal("claude", session.conversation.provider)
+    assert.is_true(session.conversation.resumable)
+    assert.is_true(Managed.valid_id(session.conversation.id))
+    assert.are.same({ "claude", "--session-id", session.conversation.id }, session.tool.cmd)
+
+    session:close()
+  end)
+
+  it("keeps an explicit Claude session id authoritative during capture", function()
+    local Managed = require("sidekick.cli.managed_sessions")
+    local tool = Config.get_tool("claude")
+    local id = Managed.uuid("claude-capture")
+    local conversation =
+      tool.config.resume.capture(tool:clone({ cmd = { "claude", "--session-id", id } }), { pids = {} })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("claude", conversation.provider)
+    assert.is_true(conversation.resumable)
+  end)
+
+  it("does not invent Claude ids for continue or non-persistent sessions", function()
+    local adapter = Config.get_tool("claude").config.resume
+
+    assert.is_nil(adapter.prepare({ cmd = { "claude", "--continue" } }))
+    assert.is_nil(adapter.prepare({ cmd = { "claude", "--no-session-persistence" } }))
+  end)
+
   it("keeps the legacy tool/cwd id available for discovery", function()
     local sid = Session.sid({ tool = "codex", cwd = "/tmp/project" })
     local instance = Session.sid({ tool = "codex", cwd = "/tmp/project", instance_id = "12345678" })

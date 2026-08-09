@@ -15,8 +15,9 @@ local function call(fn, ...)
 end
 
 ---@param session sidekick.cli.Session
+---@param opts? {require_current?:boolean}
 ---@return sidekick.cli.Conversation?
-function M.capture(session)
+function M.capture(session, opts)
   local attached = session
   session = logical(attached)
   local adapter = session.tool.config.resume
@@ -50,6 +51,17 @@ function M.capture(session)
       conversation = require("sidekick.cli.session").set_conversation(session, conversation)
       return vim.deepcopy(conversation)
     end
+  end
+  if opts and opts.require_current then
+    -- Provider discovery is authoritative for external sessions. A managed
+    -- session is the exception: its exact id was assigned to the command
+    -- before it started, so the cached metadata remains authoritative while
+    -- the provider creates its transcript file.
+    local cached = session.conversation or attached.conversation
+    if cached and cached.data and cached.data.managed == true then
+      return vim.deepcopy(cached)
+    end
+    return
   end
   if session.conversation or attached.conversation then
     return vim.deepcopy(session.conversation or attached.conversation)

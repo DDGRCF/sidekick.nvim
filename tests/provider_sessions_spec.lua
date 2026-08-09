@@ -103,6 +103,103 @@ describe("cli provider sessions", function()
     vim.fn.delete(root, "rf")
   end)
 
+  it("captures and verifies an open Claude session file", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd4"
+    local path = root .. "/-tmp-project/" .. id .. ".jsonl"
+    vim.fn.mkdir(vim.fs.dirname(path), "p")
+    local file = assert(io.open(path, "wb"))
+    file:write(vim.json.encode({ sessionId = id }) .. "\n")
+    file:flush()
+    local old_root = Provider.roots.claude
+    Provider.roots.claude = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("claude", { pids = { vim.fn.getpid() } })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("claude", conversation.provider)
+    assert.is_true(Provider.verify("claude", conversation))
+    local without_path = { id = id, provider = "claude", resumable = true }
+    assert.is_true(Provider.verify("claude", without_path))
+    assert.are.equal(path, without_path.data.path)
+    file:close()
+    Provider.roots.claude = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("captures an explicit Claude session id before its transcript is open", function()
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd7"
+    local conversation = Provider.capture("claude", {
+      tool = { cmd = { "claude", "--session-id", id } },
+      pids = {},
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("claude", conversation.provider)
+    assert.is_true(conversation.resumable)
+    assert.is_true(Provider.verify("claude", conversation))
+  end)
+
+  it("ignores session ids from non-Claude descendant processes", function()
+    local Procs = require("sidekick.cli.procs")
+    local old_new, old_pids = Procs.new, Procs.pids
+    local claude_id = "019fd4cb-881f-74a2-bb84-571584e30dd8"
+    local processes = {
+      [101] = { cmd = "claude --session-id " .. claude_id },
+      [102] = { cmd = "helper --session-id 019fd4cb-881f-74a2-bb84-571584e30dd9" },
+    }
+    Procs.new = function()
+      return {
+        get = function(_, pid)
+          return processes[pid]
+        end,
+      }
+    end
+    Procs.pids = function()
+      return { 101, 102 }
+    end
+
+    local conversation = Provider.capture("claude", {
+      tool = {
+        cmd = { "claude" },
+        is_proc = function(_, proc)
+          return proc.cmd:match("^claude%s") ~= nil
+        end,
+      },
+      pids = { 101 },
+    })
+
+    Procs.new, Procs.pids = old_new, old_pids
+    assert.are.equal(claude_id, conversation.id)
+  end)
+
+  it("does not guess between multiple Claude session files", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local first = "019fd4cb-881f-74a2-bb84-571584e30dd5"
+    local second = "019fd4cb-881f-74a2-bb84-571584e30dd6"
+    local first_path = root .. "/-tmp-project/" .. first .. ".jsonl"
+    local second_path = root .. "/-tmp-project/" .. second .. ".jsonl"
+    vim.fn.mkdir(vim.fs.dirname(first_path), "p")
+    local first_file = assert(io.open(first_path, "wb"))
+    first_file:write(vim.json.encode({ sessionId = first }) .. "\n")
+    first_file:flush()
+    local second_file = assert(io.open(second_path, "wb"))
+    second_file:write(vim.json.encode({ sessionId = second }) .. "\n")
+    second_file:flush()
+    local old_root = Provider.roots.claude
+    Provider.roots.claude = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("claude", { pids = { vim.fn.getpid() } })
+
+    assert.is_nil(conversation)
+    first_file:close()
+    second_file:close()
+    Provider.roots.claude = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
   it("captures and verifies an open Antigravity conversation database", function()
     local state_root = vim.fn.tempname()
     local root = state_root .. "/conversations"

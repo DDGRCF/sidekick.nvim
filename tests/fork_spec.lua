@@ -191,6 +191,21 @@ describe("cli conversation fork", function()
     end
   end)
 
+  it("does not carry Claude's managed id into a fork command", function()
+    local config = assert(loadfile("sk/cli/claude.lua"))()
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd4"
+    local tool = {
+      name = "claude",
+      cmd = { "claude", "--session-id", id },
+      config = config,
+    }
+
+    local cmd, mode = Fork.command(tool, { provider = "claude", id = id, resumable = true })
+
+    assert.are.same({ "claude", "--resume", id, "--fork-session" }, cmd)
+    assert.are.equal("exact", mode)
+  end)
+
   it("does not advertise unsupported Crush conversation forks", function()
     local config = assert(loadfile("sk/cli/crush.lua"))()
     local available, reason = Fork.available({
