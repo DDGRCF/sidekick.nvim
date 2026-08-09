@@ -19,6 +19,7 @@ local version = 1
 ---@field conversation? sidekick.cli.Conversation
 ---@field forked_from? sidekick.cli.ForkInfo
 ---@field status? sidekick.cli.ActivityStatus
+---@field restore_blocked? boolean defer automatic retries while a provider writer conflict remains
 
 ---@class sidekick.cli.WorkspaceState
 ---@field version integer
@@ -32,6 +33,24 @@ end
 
 local function logical(t)
   return t.parent or t
+end
+
+---@param reason? string
+---@return boolean
+local function resume_blocked(reason)
+  return reason == "active_writer" or reason == "writer_unknown"
+end
+
+---@param tool string
+---@param reason? string
+---@return string
+local function blocked_message(tool, reason)
+  if reason == "active_writer" then
+    return ("CLI tool `%s` already has an active conversation writer; skipping resume"):format(tool)
+  end
+  return ("CLI tool `%s` writer state could not be confirmed (flock is unavailable or failed); skipping resume"):format(
+    tool
+  )
 end
 
 ---@return sidekick.cli.WorkspaceState
@@ -113,11 +132,32 @@ local function restore_agent(saved, discovered)
       return nil, ("invalid saved agent field `%s`"):format(field)
     end
   end
+  if saved.restore_blocked then
+    -- A writer conflict must not cause another provider process to start on
+    -- every automatic restore. Recheck the provider-owned state, though, so
+    -- a lock released after the previous restore can recover automatically.
+    local tool = Config.tools()[saved.tool]
+    if not tool or not saved.conversation then
+      return nil, nil, "blocked"
+    end
+    local ready, reason = Resume.preflight(tool, saved)
+    if not ready and resume_blocked(reason) then
+      return nil, blocked_message(saved.tool, reason), "blocked"
+    end
+    -- Either the writer is free or this is no longer a writer-state failure;
+    -- allow the normal restore path to decide whether the conversation is
+    -- otherwise resumable.
+    saved.restore_blocked = nil
+  end
   for _, terminal in pairs(require("sidekick.cli.terminal").terminals) do
     if matches(terminal, saved) then
       if not terminal.closed and terminal:is_running() then
         local tool = Config.tools()[saved.tool]
-        if saved.conversation and (not tool or Resume.verify(tool, terminal, saved) == false) then
+        local verified, reason = tool and saved.conversation and Resume.verify(tool, terminal, saved)
+        if saved.conversation and (not tool or verified == false) then
+          if resume_blocked(reason) then
+            return nil, blocked_message(saved.tool, reason), "blocked"
+          end
           return nil, "attached terminal conversation does not match the saved workspace"
         end
         return terminal, nil, "attached"
@@ -130,8 +170,12 @@ local function restore_agent(saved, discovered)
       local terminal = as_terminal(session)
       if terminal and terminal:is_running() then
         local tool = Config.tools()[saved.tool]
-        if saved.conversation and (not tool or Resume.verify(tool, terminal, saved) == false) then
+        local verified, reason = tool and saved.conversation and Resume.verify(tool, terminal, saved)
+        if saved.conversation and (not tool or verified == false) then
           terminal:close()
+          if resume_blocked(reason) then
+            return nil, blocked_message(saved.tool, reason), "blocked"
+          end
           return nil, "live multiplexer session conversation could not be verified"
         end
         return terminal, nil, "mux"
@@ -148,7 +192,11 @@ local function restore_agent(saved, discovered)
   if not cmd then
     return nil, ("CLI tool `%s` has no exact resumable conversation id"):format(saved.tool), mode
   end
-  if not Resume.preflight(tool, saved) then
+  local preflight, preflight_reason = Resume.preflight(tool, saved)
+  if not preflight then
+    if resume_blocked(preflight_reason) then
+      return nil, blocked_message(saved.tool, preflight_reason), "blocked"
+    end
     return nil, ("CLI tool `%s` could not verify the saved conversation id"):format(saved.tool)
   end
   if vim.fn.isdirectory(saved.cwd) ~= 1 then
@@ -175,8 +223,12 @@ local function restore_agent(saved, discovered)
     end
     return nil, ("failed to start native `%s` resume command"):format(saved.tool)
   end
-  if Resume.verify(tool, terminal, saved) == false then
+  local verified, verify_reason = Resume.verify(tool, terminal, saved)
+  if verified == false then
     terminal:close()
+    if resume_blocked(verify_reason) then
+      return nil, blocked_message(saved.tool, verify_reason), "blocked"
+    end
     return nil, ("native `%s` resume verification failed"):format(saved.tool)
   end
   return terminal, nil, mode
@@ -232,6 +284,9 @@ local function validate(saved)
     end
     if keys[agent.key] then
       return "duplicate agent key"
+    end
+    if agent.restore_blocked ~= nil and type(agent.restore_blocked) ~= "boolean" then
+      return "invalid restore_blocked flag"
     end
     if agent.forked_from ~= nil then
       if
@@ -326,9 +381,23 @@ function M.restore(opts)
     end
     return { restored = 0, failed = {}, modes = {} }
   end
+  local cleared_blocks = false
+  local blocked_before = {}
+  for _, agent in ipairs(saved.agents or {}) do
+    blocked_before[agent.key] = agent.restore_blocked == true
+  end
+  if not silent then
+    for _, agent in ipairs(saved.agents or {}) do
+      if agent.restore_blocked then
+        agent.restore_blocked = nil
+        cleared_blocks = true
+      end
+    end
+  end
   M.restoring = true
   local original = vim.api.nvim_get_current_tabpage()
   local restored, restore_modes = {}, {}
+  local blocked_agents = {}
   local ok, result = xpcall(function()
     Session.setup()
     local discovered = Session.sessions()
@@ -340,6 +409,8 @@ function M.restore(opts)
         restored[agent.key] = terminal
         restore_modes[agent.key] = mode
         modes[mode] = (modes[mode] or 0) + 1
+      elseif agent_ok and mode == "blocked" then
+        blocked_agents[agent.key] = true
       else
         if mode == "unsupported" and lacks_exact_conversation(agent) then
           discarded[agent.key] = true
@@ -355,6 +426,23 @@ function M.restore(opts)
     -- These entries can never be resumed after the process has exited. Persist
     -- their removal before restoring panels so they cannot fail on every startup.
     local discarded_ok = discard_agents(saved, discarded, silent)
+
+    local block_state_changed = cleared_blocks
+    for _, agent in ipairs(saved.agents or {}) do
+      if blocked_before[agent.key] ~= (agent.restore_blocked == true) then
+        block_state_changed = true
+      end
+      if blocked_agents[agent.key] and not agent.restore_blocked then
+        agent.restore_blocked = true
+        block_state_changed = true
+      end
+    end
+    if block_state_changed then
+      local blocks_ok, blocks_err = Util.set_state(state_key, saved)
+      if not blocks_ok and not silent then
+        Util.error("Failed to persist blocked Sidekick agents: " .. tostring(blocks_err))
+      end
+    end
 
     local panel_failures = {}
     local claimed, used = {}, {}
@@ -388,10 +476,11 @@ function M.restore(opts)
       end
     end
     local restored_count = vim.tbl_count(restored)
+    local blocked_count = vim.tbl_count(blocked_agents)
     if not silent then
       if #failed == 0 and restored_count > 0 then
         Util.info(("Restored %d Sidekick agent conversation(s)"):format(restored_count))
-      elseif #failed > 0 then
+      elseif #failed > 0 or blocked_count > 0 then
         local lines = { ("Restored %d agent(s); %d failed:"):format(restored_count, #failed) }
         for _, failure in ipairs(failed) do
           lines[#lines + 1] = ("- %s (%s): %s"):format(
@@ -400,13 +489,18 @@ function M.restore(opts)
             failure.error
           )
         end
+        if blocked_count > 0 then
+          lines[#lines + 1] = ("- %d agent(s) skipped to avoid a duplicate provider writer; automatic retry is deferred"):format(
+            blocked_count
+          )
+        end
         Util.warn(lines)
       end
       if #panel_failures > 0 then
         Util.warn(("%d Sidekick panel(s) could not be restored"):format(#panel_failures))
       end
     end
-    M.partial = #failed > 0 or #panel_failures > 0 or not discarded_ok
+    M.partial = #failed > 0 or blocked_count > 0 or #panel_failures > 0 or not discarded_ok
     return { restored = restored_count, failed = failed, modes = modes, panel_failures = panel_failures }
   end, debug.traceback)
   M.restoring = false

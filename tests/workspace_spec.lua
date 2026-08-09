@@ -2,6 +2,7 @@
 
 local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
+local Resume = require("sidekick.cli.resume")
 local Session = require("sidekick.cli.session")
 local Terminal = require("sidekick.cli.terminal")
 local Util = require("sidekick.util")
@@ -319,5 +320,63 @@ describe("cli workspace", function()
 
     assert.are.equal(0, result.restored)
     assert.is_false(Workspace.restoring)
+  end)
+
+  it("blocks repeated automatic resumes after an active writer conflict", function()
+    local tab = vim.api.nvim_get_current_tabpage()
+    local original_workspace_id = vim.t[tab].sidekick_workspace_id
+    local cwd = vim.fn.getcwd()
+    local preflight = Resume.preflight
+    local calls = 0
+    Resume.preflight = function()
+      calls = calls + 1
+      return false, "active_writer"
+    end
+
+    Util.set_state("cli-workspace", {
+      version = 1,
+      saved_at = os.time(),
+      agents = {
+        {
+          key = "blocked-agent",
+          tool = "codex",
+          cwd = cwd,
+          backend = "terminal",
+          instance_id = "agent0001",
+          conversation = { provider = "codex", id = "conversation-42", resumable = true },
+        },
+      },
+      panels = {
+        {
+          tab = { id = "blocked-panel", cwd = cwd },
+          order = { "blocked-agent" },
+          pinned = {},
+          layout = "right",
+          sizes = {},
+        },
+      },
+    })
+    vim.t[tab].sidekick_workspace_id = "blocked-panel"
+    Session.sessions = function()
+      return {}
+    end
+    vim.fn.executable = function(cmd)
+      return cmd == "codex" and 1 or executable(cmd)
+    end
+
+    local first = Workspace.restore({ silent = true })
+    local saved = Util.get_state("cli-workspace")
+    local second = Workspace.restore({ silent = true })
+
+    Resume.preflight = preflight
+    vim.t[tab].sidekick_workspace_id = original_workspace_id
+    assert.are.equal(0, first.restored)
+    assert.are.equal(0, #first.failed)
+    assert.is_true(saved.agents[1].restore_blocked)
+    assert.are.equal(0, second.restored)
+    assert.are.equal(0, #second.failed)
+    -- The second automatic restore only rechecks the provider-owned writer
+    -- state; it does not start another resume process.
+    assert.are.equal(2, calls)
   end)
 end)

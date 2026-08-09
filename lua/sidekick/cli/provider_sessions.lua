@@ -101,6 +101,59 @@ local function root(provider, tool, cwd)
   return M.roots[provider]
 end
 
+---@param id string
+---@param tool? sidekick.cli.Tool
+---@param cwd? string
+---@return string?
+local function codex_writer_lock(id, tool, cwd)
+  local session_root = root("codex", tool, cwd)
+  local home = session_root and vim.fs.dirname(session_root) or nil
+  return home and vim.fs.joinpath(home, "thread-writer-locks", id .. ".lock") or nil
+end
+
+---@param path string
+---@return boolean? held
+local function lock_held(path)
+  -- Codex uses an advisory lock on an empty per-thread file. Checking only
+  -- for the file is not enough: stale lock files can survive a crash.
+  -- `flock -n` lets us distinguish a live writer from that stale file.
+  if vim.fn.executable("flock") ~= 1 then
+    return
+  end
+  local ok, result = pcall(function()
+    return vim.system({ "flock", "-n", path, "-c", "true" }, { text = true }):wait()
+  end)
+  if not ok or type(result) ~= "table" then
+    return
+  end
+  if result.code == 0 then
+    return false
+  elseif result.code == 1 then
+    return true
+  end
+end
+
+---@param id string
+---@param tool? sidekick.cli.Tool
+---@param cwd? string
+---@return "active"|"free"|"unknown"
+function M.codex_writer_status(id, tool, cwd)
+  if type(id) ~= "string" or id == "" or not id:match("^[%w%-]+$") then
+    return "unknown"
+  end
+  local path = codex_writer_lock(id, tool, cwd)
+  if not path or not vim.uv.fs_stat(path) then
+    return "free"
+  end
+  local held = lock_held(path)
+  if held == true then
+    return "active"
+  elseif held == false then
+    return "free"
+  end
+  return "unknown"
+end
+
 local function read_prefix(path)
   local file = io.open(path, "rb")
   if not file then
@@ -431,6 +484,15 @@ local function output(session)
     end
   end
   return ""
+end
+
+---@param session sidekick.cli.Terminal
+---@return "active_writer"?
+local function codex_resume_error(session)
+  local text = output(session)
+  if text:find("already has an active writer", 1, true) then
+    return "active_writer"
+  end
 end
 
 local function output_ids(provider, session)
@@ -820,9 +882,14 @@ function M.adapter(provider, args)
         return false
       end
       local matched = false
+      local resume_error
       local timeout = math.max(1000, require("sidekick.config").cli.workspace.resume_timeout_ms)
       local started = vim.uv.now()
       vim.wait(timeout, function()
+        resume_error = provider == "codex" and codex_resume_error(terminal) or nil
+        if resume_error then
+          return true
+        end
         if terminal.closed or not terminal:is_running() then
           return true
         end
@@ -837,9 +904,20 @@ function M.adapter(provider, args)
         end
         return matched
       end, 50)
+      if resume_error then
+        return false, resume_error
+      end
       return matched
     end,
     preflight = function(tool, conversation, saved)
+      if provider == "codex" then
+        local writer = M.codex_writer_status(conversation.id, tool, saved and saved.cwd)
+        if writer == "active" then
+          return false, "active_writer"
+        elseif writer == "unknown" then
+          return false, "writer_unknown"
+        end
+      end
       return M.verify(provider, conversation, tool, saved and saved.cwd)
     end,
   }

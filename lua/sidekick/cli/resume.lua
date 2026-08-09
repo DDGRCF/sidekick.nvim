@@ -7,9 +7,9 @@ local function logical(session)
 end
 
 local function call(fn, ...)
-  local ok, ret = pcall(fn, ...)
+  local ok, ret, reason = pcall(fn, ...)
   if ok then
-    return ret
+    return ret, reason
   end
   Util.debug("CLI resume adapter failed", ret)
 end
@@ -113,7 +113,7 @@ end
 ---@param tool sidekick.cli.Tool
 ---@param terminal sidekick.cli.Terminal
 ---@param saved sidekick.cli.WorkspaceAgent
----@return boolean?
+---@return boolean?,string?
 function M.verify(tool, terminal, saved)
   local adapter = tool.config.resume
   if type(adapter) == "table" and not vim.islist(adapter) and type(adapter.verify) == "function" then
@@ -124,10 +124,12 @@ end
 
 ---@param tool sidekick.cli.Tool
 ---@param saved sidekick.cli.WorkspaceAgent
+---@return boolean,string?
 function M.preflight(tool, saved)
   local adapter = tool.config.resume
   if type(adapter) == "table" and not vim.islist(adapter) and type(adapter.preflight) == "function" then
-    return call(adapter.preflight, tool, saved.conversation, saved) == true
+    local ok, reason = call(adapter.preflight, tool, saved.conversation, saved)
+    return ok == true, reason
   end
   return false
 end

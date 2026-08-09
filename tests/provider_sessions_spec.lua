@@ -200,6 +200,100 @@ describe("cli provider sessions", function()
     vim.fn.delete(root, "rf")
   end)
 
+  it("blocks Codex resume while another process holds the thread writer lock", function()
+    local home = vim.fn.tempname()
+    local locks = home .. "/thread-writer-locks"
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd6"
+    vim.fn.mkdir(locks, "p")
+    local lock = assert(io.open(locks .. "/" .. id .. ".lock", "w"))
+    lock:close()
+
+    local old_system = vim.system
+    local old_executable = vim.fn.executable
+    local command
+    vim.system = function(cmd)
+      command = cmd
+      return {
+        wait = function()
+          return { code = 1 }
+        end,
+      }
+    end
+    vim.fn.executable = function(name)
+      return name == "flock" and 1 or old_executable(name)
+    end
+
+    local tool = { env = { CODEX_HOME = home } }
+    local adapter = Provider.adapter("codex", { "resume" })
+    local ok, reason = adapter.preflight(tool, { id = id }, { cwd = home })
+
+    vim.system = old_system
+    vim.fn.executable = old_executable
+    vim.fn.delete(home, "rf")
+    assert.is_false(ok)
+    assert.are.equal("active_writer", reason)
+    assert.are.same({ "flock", "-n", locks .. "/" .. id .. ".lock", "-c", "true" }, command)
+  end)
+
+  it("does not treat a stale Codex writer lock file as active", function()
+    local home = vim.fn.tempname()
+    local locks = home .. "/thread-writer-locks"
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd7"
+    vim.fn.mkdir(locks, "p")
+    local lock = assert(io.open(locks .. "/" .. id .. ".lock", "w"))
+    lock:close()
+
+    local old_system = vim.system
+    local old_executable = vim.fn.executable
+    vim.system = function()
+      return {
+        wait = function()
+          return { code = 0 }
+        end,
+      }
+    end
+    vim.fn.executable = function(name)
+      return name == "flock" and 1 or old_executable(name)
+    end
+    local status = Provider.codex_writer_status(id, { env = { CODEX_HOME = home } }, home)
+    vim.system = old_system
+    vim.fn.executable = old_executable
+    vim.fn.delete(home, "rf")
+
+    assert.are.equal("free", status)
+  end)
+
+  it("reports a Codex active-writer bootstrap failure to workspace restore", function()
+    local home = vim.fn.tempname()
+    local root = home .. "/sessions"
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd8"
+    local path = root .. "/rollout.jsonl"
+    vim.fn.mkdir(root, "p")
+    local file = assert(io.open(path, "wb"))
+    file:write(vim.json.encode({ type = "session_meta", payload = { id = id } }) .. "\n")
+    file:flush()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "thread/resume failed: already has an active writer" })
+
+    local terminal = {
+      buf = buf,
+      cwd = home,
+      closed = false,
+      tool = { env = { CODEX_HOME = home } },
+      is_running = function()
+        return true
+      end,
+    }
+    local adapter = Provider.adapter("codex", { "resume" })
+    local ok, reason = adapter.verify(terminal.tool, terminal, { id = id, data = { path = path } })
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+    file:close()
+    vim.fn.delete(home, "rf")
+    assert.is_false(ok)
+    assert.are.equal("active_writer", reason)
+  end)
+
   it("captures and verifies an open Antigravity conversation database", function()
     local state_root = vim.fn.tempname()
     local root = state_root .. "/conversations"

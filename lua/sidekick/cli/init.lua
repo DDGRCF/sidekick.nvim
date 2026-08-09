@@ -37,8 +37,8 @@ local M = {}
 ---@field env? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):table<string,string>?
 ---@field capture? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):sidekick.cli.Conversation|string?
 ---@field command? fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
----@field preflight? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean
----@field verify? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean?
+---@field preflight? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean,string?
+---@field verify? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean?,string?
 
 ---@class sidekick.cli.ForkAdapter
 ---@field args? string[]
