@@ -48,6 +48,37 @@ describe("cli activity", function()
     assert.are.equal("error", t.status)
   end)
 
+  it("refreshes activity timestamps for repeated status updates", function()
+    local old_now = vim.uv.now
+    local now = 100
+    vim.uv.now = function()
+      now = now + 1
+      return now
+    end
+    local t = terminal("working")
+
+    Activity.set(t, "working")
+    local first = t.last_activity
+    Activity.set(t, "working")
+    local second = t.last_activity
+
+    vim.uv.now = old_now
+    assert.are.equal(101, first)
+    assert.are.equal(102, second)
+  end)
+
+  it("tracks unread output until the agent is acknowledged", function()
+    local t = terminal("working")
+    t._sidekick_working = true
+
+    Activity.output(t, "finished work")
+
+    assert.is_true(Activity.unread(t))
+    Activity.ack(t)
+    assert.is_false(Activity.unread(t))
+    Activity.close(t)
+  end)
+
   it("acknowledges a completed agent when it is selected", function()
     local t = terminal("done")
     t._sidekick_working = true

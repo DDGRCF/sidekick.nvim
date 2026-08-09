@@ -1,9 +1,9 @@
 ---@module 'luassert'
 
-local Config = require("sidekick.config")
-local Picker = require("sidekick.cli.agent_picker")
 local Cli = require("sidekick.cli")
+local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
+local Picker = require("sidekick.cli.agent_picker")
 local Usage = require("sidekick.cli.agent_usage")
 
 describe("cli agent picker", function()
@@ -123,6 +123,41 @@ describe("cli agent picker", function()
     assert.is_true(focused)
   end)
 
+  it("offers a mark-read action in the native picker", function()
+    Config.cli.agent_picker.provider = "native"
+    local calls = 0
+    local actions
+    vim.ui.select = function(items, _, cb)
+      calls = calls + 1
+      if calls == 1 then
+        cb(items[1])
+      else
+        actions = items
+        cb(items[2])
+      end
+    end
+
+    local terminal = register({
+      id = "native-unread",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "done",
+      _sidekick_unread = true,
+    })
+
+    Picker.open({
+      {
+        id = terminal.id,
+        key = terminal.id,
+        label = "Agent with unread output",
+        terminal = terminal,
+      },
+    })
+
+    assert.are.equal("Mark output read", actions[2].label)
+    assert.is_false(terminal._sidekick_unread)
+  end)
+
   it("uses Snacks for searchable metadata and output preview", function()
     Config.cli.agent_picker.provider = "snacks"
     local opts
@@ -188,6 +223,7 @@ describe("cli agent picker", function()
     local with_icon = opts.format(found)
     assert.are.same({ "C ", "SidekickCliToolCodex" }, with_icon[2])
     assert.are.equal("Identifier", with_icon[3][2])
+    terminal._sidekick_unread = true
     local lines
     local preview_buf = vim.api.nvim_create_buf(false, true)
     local preview_win = vim.api.nvim_open_win(preview_buf, false, {
@@ -217,11 +253,18 @@ describe("cli agent picker", function()
     assert.are.equal(1, directory_icon_calls)
     local winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
     assert.matches("Status:", winbar)
+    assert.matches("NEW", winbar)
     assert.matches("done", winbar)
     assert.matches("Directory:", winbar)
     assert.matches("/tmp/project", winbar)
     assert.matches("Backend:", winbar)
     assert.matches("terminal", winbar)
+    opts.actions.agent_mark_read({
+      selected = function()
+        return {}
+      end,
+    }, found)
+    assert.is_false(terminal._sidekick_unread)
     assert.is_true(vim.wait(100, function()
       local context = Usage.get(terminal)
       return context and context.percent == 9
@@ -277,12 +320,14 @@ describe("cli agent picker", function()
       Panel.panels[tab] = { active = "another-agent", pinned = {} }
       Panel.panels[foreign] = { active = terminal.id, pinned = { [terminal.id] = true } }
 
-      Picker.open({ {
-        id = terminal.id,
-        key = terminal.id,
-        label = "Codex: Panel state",
-        terminal = terminal,
-      } })
+      Picker.open({
+        {
+          id = terminal.id,
+          key = terminal.id,
+          label = "Codex: Panel state",
+          terminal = terminal,
+        },
+      })
 
       local first = opts.finder()[1]
       assert.is_false(first.agent.active)
@@ -338,6 +383,7 @@ describe("cli agent picker", function()
       tool = { name = "claude" },
       cwd = "/tmp/project",
       status = "error",
+      _sidekick_unread = true,
     })
 
     Picker.open(vim.tbl_map(function(terminal)
@@ -368,7 +414,13 @@ describe("cli agent picker", function()
     opts.actions.agent_filter(picker)
     assert.matches("Errors", picker.title)
     assert.are.same({ failed.id }, ids())
-    assert.are.equal(4, find_calls)
+    opts.actions.agent_filter(picker)
+    assert.matches("New", picker.title)
+    assert.are.same({ failed.id }, ids())
+    opts.actions.agent_filter(picker)
+    assert.matches("Attention", picker.title)
+    assert.are.same({ failed.id }, ids())
+    assert.are.equal(6, find_calls)
     opts.on_close()
   end)
 
@@ -427,12 +479,14 @@ describe("cli agent picker", function()
       callback()
     end
 
-    Picker.open({ {
-      id = terminal.id,
-      key = terminal.id,
-      label = "Codex: Before rename",
-      terminal = terminal,
-    } })
+    Picker.open({
+      {
+        id = terminal.id,
+        key = terminal.id,
+        label = "Codex: Before rename",
+        terminal = terminal,
+      },
+    })
     local item = opts.finder()[1]
     picker.item = item
     opts.actions.agent_rename(picker, item)

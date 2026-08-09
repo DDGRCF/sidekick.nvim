@@ -24,6 +24,15 @@ M.commands = {
     update = function()
       require("sidekick.nes").update()
     end,
+    next = function()
+      require("sidekick.nes").next()
+    end,
+    prev = function()
+      require("sidekick.nes").prev()
+    end,
+    review = function()
+      require("sidekick.nes").review()
+    end,
     clear = function()
       require("sidekick.nes").clear()
     end,

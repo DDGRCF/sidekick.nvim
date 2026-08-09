@@ -15,6 +15,19 @@ local M = {}
 ---@field title? string
 ---@field status? sidekick.cli.ActivityStatus
 ---@field active? boolean Whether this is the active agent in the current native tabpage
+---@field unread? boolean Whether the agent has output that has not been viewed
+---@field last_activity? integer Timestamp of the last activity in milliseconds
+
+---@class sidekick.cli.Summary
+---@field total integer
+---@field active integer
+---@field starting integer
+---@field working integer
+---@field waiting integer
+---@field done integer
+---@field error integer
+---@field unread integer
+---@field attention integer Sessions that need user attention
 
 local status = {} ---@type table<integer, sidekick.lsp.Status>
 local cli_sessions = {} ---@type table<string, sidekick.cli.Status>
@@ -39,6 +52,8 @@ local function update_cli_status()
       title = session.title,
       status = session.status,
       active = require("sidekick.cli.panel").active() == session,
+      unread = session._sidekick_unread == true,
+      last_activity = session.last_activity,
     }
   end
 end
@@ -103,6 +118,8 @@ function M.setup()
       "SidekickCliAttach",
       "SidekickCliDetach",
       "SidekickCliStatus",
+      "SidekickCliActivity",
+      "SidekickCliAttention",
       "SidekickCliTitle",
     },
     callback = update_cli_status,
@@ -122,6 +139,39 @@ function M.cli()
     cli_last_update = now
   end
   return vim.tbl_values(cli_sessions)
+end
+
+--- Get an aggregate view of attached CLI activity.
+---@return sidekick.cli.Summary
+function M.summary()
+  local ret = {
+    total = 0,
+    active = 0,
+    starting = 0,
+    working = 0,
+    waiting = 0,
+    done = 0,
+    error = 0,
+    unread = 0,
+    attention = 0,
+  }
+  for _, item in ipairs(M.cli()) do
+    ret.total = ret.total + 1
+    if item.active then
+      ret.active = ret.active + 1
+    end
+    local state = item.status or "idle"
+    if ret[state] ~= nil then
+      ret[state] = ret[state] + 1
+    end
+    if item.unread then
+      ret.unread = ret.unread + 1
+    end
+    if item.unread or state == "waiting" or state == "error" then
+      ret.attention = ret.attention + 1
+    end
+  end
+  return ret
 end
 
 return M

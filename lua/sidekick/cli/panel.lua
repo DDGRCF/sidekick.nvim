@@ -472,6 +472,27 @@ local function status_icon(t)
   return escape(status_icon_text(t))
 end
 
+local function attention_text(t)
+  if Config.cli.win.tabs.show_attention == false or t._sidekick_unread ~= true then
+    return ""
+  end
+  local icon = Config.ui.icons.unread
+  return type(icon) == "string" and vim.trim(icon) or "•"
+end
+
+local function attention(t)
+  return escape(attention_text(t))
+end
+
+local function priority(t, pinned)
+  return pinned
+    or t._sidekick_unread == true
+    or t.status == "starting"
+    or t.status == "working"
+    or t.status == "waiting"
+    or t.status == "error"
+end
+
 local function click(action, p, id)
   local token = #M.clicks + 1
   M.clicks[token] = { action = action, id = id, tab = p.tab }
@@ -489,7 +510,12 @@ end
 ---@param title_value? string
 local function tab_width(p, t, left_separator, right_separator, title_value)
   local marker = agent_marker_text()
-  local text = " " .. (marker ~= "" and (marker .. " ") or "") .. agent_icon_text(t) .. status_icon_text(t) .. ": "
+  local text = " "
+    .. (marker ~= "" and (marker .. " ") or "")
+    .. agent_icon_text(t)
+    .. status_icon_text(t)
+    .. ": "
+    .. (attention_text(t) ~= "" and (attention_text(t) .. " ") or "")
     .. (title_value or title_text(t))
   if p.pinned[t.id] then
     text = text .. " 󰐃"
@@ -501,54 +527,160 @@ local function tab_width(p, t, left_separator, right_separator, title_value)
   return vim.api.nvim_strwidth(left_separator .. text .. right_separator)
 end
 
----@param items {id:string,t:sidekick.cli.Terminal,width:integer}[]
----@param left integer
----@param right integer
----@param hidden_left integer
----@param hidden_right integer
-local function range_width(items, left, right, hidden_left, hidden_right)
-  local width = vim.api.nvim_strwidth(truncation_marker(hidden_left))
-    + vim.api.nvim_strwidth(truncation_marker(hidden_right))
-  for i = left, right do
-    width = width + items[i].width
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,priority:boolean}[]
+---@param visible table<integer,boolean>
+---@param width_field? string
+---@return integer
+local function visible_width(items, visible, width_field)
+  local width, hidden = 0, 0
+  for index, item in ipairs(items) do
+    if visible[index] then
+      if hidden > 0 then
+        width = width + vim.api.nvim_strwidth(truncation_marker(hidden))
+        hidden = 0
+      end
+      width = width + item[width_field or "width"]
+    else
+      hidden = hidden + 1
+    end
+  end
+  if hidden > 0 then
+    width = width + vim.api.nvim_strwidth(truncation_marker(hidden))
   end
   return width
 end
 
----@param items {id:string,t:sidekick.cli.Terminal,width:integer}[]
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,priority:boolean}[]
 ---@param active integer
 ---@param available integer
----@return integer left, integer right, integer hidden_left, integer hidden_right
+---@return table<integer,boolean>
 local function visible_range(items, active, available)
-  local left, right = 1, #items
-  local hidden_left, hidden_right = 0, 0
-  while range_width(items, left, right, hidden_left, hidden_right) > available do
-    local can_left = left < active
-    local can_right = right > active
-    if not can_left and not can_right then
+  local has_priority = false
+  for index, item in ipairs(items) do
+    if index ~= active and item.priority then
+      has_priority = true
       break
     end
+  end
 
-    local left_width = can_left and range_width(items, left + 1, right, hidden_left + 1, hidden_right) or nil
-    local right_width = can_right and range_width(items, left, right - 1, hidden_left, hidden_right + 1) or nil
-    if left_width and right_width then
-      if left_width <= right_width then
+  -- Keep the established contiguous layout when there is no attention state
+  -- to surface. This avoids making quiet tabs jump around as the panel width
+  -- changes, while the priority path below can deliberately surface work
+  -- that would otherwise be hidden behind an overflow marker.
+  if not has_priority then
+    local left, right, hidden_left, hidden_right = 1, #items, 0, 0
+    local function range_width()
+      local width = vim.api.nvim_strwidth(truncation_marker(hidden_left))
+        + vim.api.nvim_strwidth(truncation_marker(hidden_right))
+      for index = left, right do
+        width = width + items[index].width
+      end
+      return width
+    end
+    while range_width() > available do
+      local can_left = left < active
+      local can_right = right > active
+      if not can_left and not can_right then
+        break
+      end
+      local left_width
+      if can_left then
+        left_width = vim.api.nvim_strwidth(truncation_marker(hidden_left + 1))
+          + vim.api.nvim_strwidth(truncation_marker(hidden_right))
+        for index = left + 1, right do
+          left_width = left_width + items[index].width
+        end
+      end
+      local right_width
+      if can_right then
+        right_width = vim.api.nvim_strwidth(truncation_marker(hidden_left))
+          + vim.api.nvim_strwidth(truncation_marker(hidden_right + 1))
+        for index = left, right - 1 do
+          right_width = right_width + items[index].width
+        end
+      end
+      if left_width and right_width then
+        if left_width <= right_width then
+          left, hidden_left = left + 1, hidden_left + 1
+        else
+          right, hidden_right = right - 1, hidden_right + 1
+        end
+      elseif left_width then
         left, hidden_left = left + 1, hidden_left + 1
       else
         right, hidden_right = right - 1, hidden_right + 1
       end
-    elseif left_width then
-      left, hidden_left = left + 1, hidden_left + 1
-    else
-      right, hidden_right = right - 1, hidden_right + 1
     end
+    if range_width() > available then
+      left, right, hidden_left, hidden_right = active, active, 0, 0
+    end
+    local visible = {}
+    for index = left, right do
+      visible[index] = true
+    end
+    return visible
   end
 
-  -- Keep the active tab visible even when the markers themselves do not fit.
-  if range_width(items, left, right, hidden_left, hidden_right) > available then
-    return active, active, 0, 0
+  local visible = { [active] = true }
+  local candidates = {}
+  for index, item in ipairs(items) do
+    if index ~= active then
+      candidates[#candidates + 1] = {
+        index = index,
+        priority = item.priority == true,
+        distance = math.abs(index - active),
+      }
+    end
   end
-  return left, right, hidden_left, hidden_right
+  table.sort(candidates, function(a, b)
+    if a.priority ~= b.priority then
+      return a.priority
+    end
+    if a.distance ~= b.distance then
+      return a.distance < b.distance
+    end
+    return a.index < b.index
+  end)
+
+  for _, candidate in ipairs(candidates) do
+    visible[candidate.index] = true
+    if visible_width(items, visible, "min_width") > available then
+      visible[candidate.index] = nil
+    end
+  end
+  return visible
+end
+
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,priority:boolean}[]
+---@param visible table<integer,boolean>
+---@param available integer
+---@param titles table<string,string>
+---@param suffixes table<string,string>
+---@return table<integer,string>
+local function compact_titles(items, visible, available, titles, suffixes)
+  local values = {}
+  if visible_width(items, visible) <= available then
+    for index, item in ipairs(items) do
+      if visible[index] then
+        values[index] = titles[item.id]
+      end
+    end
+    return values
+  end
+
+  local remaining = math.max(0, available - visible_width(items, visible, "min_width"))
+  local visible_count = vim.tbl_count(visible)
+  for index, item in ipairs(items) do
+    if visible[index] then
+      local desired = vim.api.nvim_strwidth(titles[item.id])
+      local share = visible_count > 0 and math.floor(remaining / visible_count) or 0
+      local width = math.min(desired, share)
+      values[index] = title_text(item.t, width, suffixes[item.id])
+      remaining = math.max(0, remaining - vim.api.nvim_strwidth(values[index]))
+      visible_count = visible_count - 1
+    end
+  end
+  return values
 end
 
 ---@param p sidekick.cli.Panel
@@ -574,6 +706,9 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
   end
   parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_icon(t))
   parts[#parts + 1] = ("%%#SidekickCliStatus%s#%s"):format(state, status_icon(t))
+  if attention_text(t) ~= "" then
+    parts[#parts + 1] = ("%%#SidekickCliAttention#%s "):format(attention(t))
+  end
   parts[#parts + 1] = ("%%#%s#: %s%s "):format(tool_hl, title(t, title_value), p.pinned[t.id] and " 󰐃" or "")
   parts[#parts + 1] = "%T"
   if Config.cli.win.tabs.show_close then
@@ -601,7 +736,7 @@ function M.render(p)
   clean(p)
   local parts = {} ---@type string[]
   local left_separator, right_separator = separators()
-  local items = {} ---@type {id:string,t:sidekick.cli.Terminal,width:integer}[]
+  local items = {} ---@type {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,priority:boolean}[]
   for _, id in ipairs(p.order) do
     local t = terminal(id)
     if t then
@@ -609,6 +744,8 @@ function M.render(p)
         id = id,
         t = t,
         width = 0,
+        min_width = 0,
+        priority = priority(t, p.pinned[id] == true),
       }
     end
   end
@@ -617,6 +754,7 @@ function M.render(p)
   for _, item in ipairs(items) do
     titles[item.id] = title_text(item.t, nil, suffixes[item.id])
     item.width = tab_width(p, item.t, left_separator, right_separator, titles[item.id])
+    item.min_width = tab_width(p, item.t, left_separator, right_separator, "")
   end
 
   local active = 1
@@ -626,24 +764,26 @@ function M.render(p)
       break
     end
   end
-  local first, last, hidden_left, hidden_right = 1, 0, 0, 0
+  local visible = {}
   local available
-  local active_title
+  local title_values = {}
   if #items > 0 then
     available = math.max(1, vim.api.nvim_win_get_width(p.win) - vim.api.nvim_strwidth("+ "))
-    first, last, hidden_left, hidden_right = visible_range(items, active, available)
-    if first == active and last == active and items[active].width > available then
-      local t = items[active].t
-      local fixed_width = tab_width(p, t, left_separator, right_separator, "")
-      active_title = title_text(t, math.max(0, available - fixed_width), suffixes[items[active].id])
+    visible = visible_range(items, active, available)
+    title_values = compact_titles(items, visible, available, titles, suffixes)
+  end
+  local hidden = 0
+  for index, item in ipairs(items) do
+    if visible[index] then
+      parts[#parts + 1] = render_truncation(hidden, p)
+      hidden = 0
+      local title_value = title_values[index] ~= nil and title_values[index] or titles[item.id]
+      parts[#parts + 1] = render_tab(p, item.t, left_separator, right_separator, title_value)
+    else
+      hidden = hidden + 1
     end
   end
-  parts[#parts + 1] = render_truncation(hidden_left, p)
-  for i = first, last do
-    local title_value = i == active and (active_title or titles[items[i].id]) or titles[items[i].id]
-    parts[#parts + 1] = render_tab(p, items[i].t, left_separator, right_separator, title_value)
-  end
-  parts[#parts + 1] = render_truncation(hidden_right, p)
+  parts[#parts + 1] = render_truncation(hidden, p)
   parts[#parts + 1] = "%="
   parts[#parts + 1] = click("new", p)
   parts[#parts + 1] = "%#SidekickCliTab#+ %T"
@@ -949,14 +1089,14 @@ function M.close_panel()
   M.hide()
 end
 
----@return {id:string,label:string,key:string,terminal:sidekick.cli.Terminal}[]
+---@return {id:string,label:string,key:string,terminal:sidekick.cli.Terminal,unread:boolean}[]
 function M.picker_items()
   local p = panel()
   if not p then
     return {}
   end
   clean(p)
-  local items = {} ---@type {id:string,label:string,key:string}[]
+  local items = {} ---@type {id:string,label:string,key:string,unread:boolean}[]
   local tab_items = {} ---@type {id:string,t:sidekick.cli.Terminal}[]
   for _, id in ipairs(p.order) do
     local t = terminal(id)
@@ -968,7 +1108,9 @@ function M.picker_items()
   for _, item in ipairs(tab_items) do
     local t = item.t
     local status = status_icon(t)
-    local prefix = agent_marker()
+    -- The installed marker is useful beside the activity icon in the panel,
+    -- but becomes a confusing spacer when activity icons are disabled.
+    local prefix = Config.cli.win.tabs.show_status == false and "" or agent_marker()
     prefix = prefix ~= "" and (prefix .. " ") or ""
     prefix = prefix .. agent_icon(t) .. (status ~= "" and (" " .. status) or "")
     items[#items + 1] = {
@@ -976,6 +1118,7 @@ function M.picker_items()
       label = ("%s: %s"):format(prefix, title_text(t, nil, suffixes[item.id])),
       key = agent_key(t),
       terminal = t,
+      unread = t._sidekick_unread == true,
     }
   end
   History.sort(items, "agents", function(item)

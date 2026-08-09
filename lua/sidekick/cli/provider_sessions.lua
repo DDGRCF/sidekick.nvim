@@ -12,7 +12,14 @@ M.roots = {
 
 local function env_value(tool, name)
   local value
-  for _, env in ipairs({ tool and tool.config and tool.config.env, tool and tool.env }) do
+  local envs = {}
+  if tool and tool.config and tool.config.env then
+    envs[#envs + 1] = tool.config.env
+  end
+  if tool and tool.env then
+    envs[#envs + 1] = tool.env
+  end
+  for _, env in ipairs(envs) do
     if type(env) == "table" and env[name] ~= nil then
       value = env[name]
     end

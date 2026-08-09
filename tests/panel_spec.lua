@@ -139,6 +139,38 @@ describe("cli agent panel", function()
     assert.matches("SidekickCliStatusDone", line)
   end)
 
+  it("shows an attention marker for unread agent output", function()
+    local old_attention = Config.cli.win.tabs.show_attention
+    local codex = fake("unread", "codex", "Unread output")
+    Panel.show(codex)
+    codex._sidekick_unread = true
+    Config.cli.win.tabs.show_attention = true
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    Config.cli.win.tabs.show_attention = old_attention
+    assert.matches("SidekickCliAttention", line)
+  end)
+
+  it("keeps priority agents visible when tabs overflow", function()
+    local first = fake("priority-one", "codex", "Working agent", "working")
+    local second = fake("quiet-two", "codex", "Quiet two")
+    local third = fake("quiet-three", "codex", "Quiet three")
+    local fourth = fake("active-four", "codex", "Active agent")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.show(third)
+    Panel.show(fourth)
+    Panel.resize({ width = 50 })
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    assert.matches("Work", line)
+    assert.matches("Activ", line)
+    assert.matches("SidekickCliStatusWorking", line)
+    assert.matches("SidekickCliTabSelected", line)
+  end)
+
   it("uses tool highlights only for the active agent tab", function()
     local codex = fake("codex-1", "codex", "Implement panel")
     local claude = fake("claude-1", "claude", "Review panel")

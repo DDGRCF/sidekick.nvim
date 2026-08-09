@@ -58,6 +58,29 @@ describe("cli provider sessions", function()
     vim.fn.delete(home, "rf")
   end)
 
+  it("uses CODEX_HOME from the configured tool environment", function()
+    local home = vim.fn.tempname()
+    local root = home .. "/sessions"
+    vim.fn.mkdir(root, "p")
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd5"
+    local path = root .. "/rollout-conversation.jsonl"
+    local file = assert(io.open(path, "wb"))
+    file:write(vim.json.encode({ type = "session_meta", payload = { id = id } }) .. "\n")
+    file:flush()
+
+    local tool = { config = { env = { CODEX_HOME = home } } }
+    local conversation = Provider.capture("codex", {
+      pids = { vim.fn.getpid() },
+      cwd = home,
+      tool = tool,
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.is_true(Provider.verify("codex", conversation, tool, home))
+    file:close()
+    vim.fn.delete(home, "rf")
+  end)
+
   it("reads Codex session metadata larger than the prefix buffer", function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")

@@ -1,3 +1,4 @@
+local Activity = require("sidekick.cli.activity")
 local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
 local Usage = require("sidekick.cli.agent_usage")
@@ -6,12 +7,20 @@ local M = {}
 local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
 local PREVIEW_CACHE_MAX = 64
 local RENAME_ICON = "󰏫"
+
+local function unread_icon()
+  local icon = Config.ui.icons.unread
+  return type(icon) == "string" and vim.trim(icon) or "•"
+end
+
 local FILTERS = {
   { name = "all", label = "All" },
   { name = "open", label = "Open" },
   { name = "working", label = "Working" },
   { name = "done", label = "Done" },
   { name = "error", label = "Errors" },
+  { name = "new", label = "New" },
+  { name = "attention", label = "Attention" },
   { name = "pinned", label = "Pinned" },
 }
 
@@ -45,6 +54,10 @@ local function matches_filter(agent, filter)
     return agent.status == "starting" or agent.status == "working" or agent.status == "waiting"
   elseif filter == "done" or filter == "error" then
     return agent.status == filter
+  elseif filter == "new" then
+    return agent.unread == true
+  elseif filter == "attention" then
+    return agent.unread == true or agent.status == "waiting" or agent.status == "error"
   elseif filter == "pinned" then
     return agent.pinned == true
   end
@@ -74,6 +87,7 @@ local function enrich(item, git)
     changed_files = vim.deepcopy(changed),
     active = active,
     pinned = pinned,
+    unread = t._sidekick_unread == true,
     search = table.concat({
       item.label,
       title,
@@ -83,6 +97,7 @@ local function enrich(item, git)
       branch,
       table.concat(changed, " "),
       active and "active" or "",
+      t._sidekick_unread and "unread" or "",
       pinned and "pinned" or "",
     }, " "),
   }
@@ -164,6 +179,7 @@ local function preview_metadata(item, terminal, Snacks)
   local context = terminal and Usage.get(terminal)
   return {
     status = status,
+    unread = terminal and terminal._sidekick_unread == true,
     status_hl = "SidekickCliStatus" .. (terminal and status:gsub("^%l", string.upper) or "Error"),
     status_icon = status_icon,
     directory_icon = directory_icon,
@@ -211,6 +227,9 @@ local function preview_winbar(metadata)
     highlight(metadata.status_hl, metadata.status),
     "  ",
   }
+  if metadata.unread then
+    vim.list_extend(ret, { highlight("SidekickCliAttention", "NEW"), "  " })
+  end
   if metadata.context then
     local context = metadata.context
     local text = ("Context: %s"):format(count(context.used))
@@ -539,6 +558,9 @@ local function snacks(items, Snacks)
       if agent.pinned then
         ret[#ret + 1] = { "󰐃 ", "Special" }
       end
+      if agent.unread then
+        ret[#ret + 1] = { unread_icon() .. " ", "SidekickCliAttention" }
+      end
       local agent_marker = agent_icon()
       if agent_marker ~= "" then
         ret[#ret + 1] = { agent_marker .. " ", "SidekickCliInstalled" }
@@ -635,6 +657,15 @@ local function snacks(items, Snacks)
         update_filter_title()
         picker:find({ refresh = true })
       end,
+      agent_mark_read = function(picker, item)
+        for _, agent in ipairs(selected(picker, item)) do
+          local terminal = resolve(agent)
+          if terminal then
+            Activity.read(terminal)
+          end
+        end
+        refresh()
+      end,
       agent_cleanup = function(picker)
         picker:close()
         vim.schedule(function()
@@ -651,6 +682,7 @@ local function snacks(items, Snacks)
           ["<c-r>"] = { "agent_rename", mode = { "n", "i" }, desc = "rename agent" },
           ["<c-x>"] = { "agent_close", mode = { "n", "i" }, desc = "close agent" },
           ["<a-t>"] = { "agent_filter", mode = { "n", "i" }, desc = "cycle agent filter" },
+          ["<c-a>"] = { "agent_mark_read", mode = { "n", "i" }, desc = "mark agent output read" },
           ["<c-d>"] = { "agent_cleanup", mode = { "n", "i" }, desc = "clean completed agents" },
         },
       },
@@ -673,7 +705,7 @@ local function snacks(items, Snacks)
       vim.api.nvim_create_augroup("sidekick_agent_picker_" .. tostring(picker.id or vim.uv.hrtime()), { clear = true })
     vim.api.nvim_create_autocmd("User", {
       group = group,
-      pattern = { "SidekickCliStatus", "SidekickCliActivate", "SidekickCliPanel" },
+      pattern = { "SidekickCliStatus", "SidekickCliAttention", "SidekickCliActivate", "SidekickCliPanel" },
       callback = refresh,
     })
   end
@@ -696,7 +728,7 @@ local function native(items)
     prompt = "Select agent:",
     kind = "sidekick_agent",
     format_item = function(item)
-      return item.label
+      return (item.unread and (unread_icon() .. " ") or "") .. item.label
     end,
   }, function(item)
     if not item or not resolve(item) then
@@ -729,6 +761,17 @@ local function native(items)
       },
       { label = "Clean completed agents", action = M.cleanup },
     }
+    if item.unread then
+      table.insert(actions, 2, {
+        label = "Mark output read",
+        action = function()
+          local terminal = resolve(item)
+          if terminal then
+            Activity.read(terminal)
+          end
+        end,
+      })
+    end
     vim.ui.select(actions, {
       prompt = item.label .. ":",
       kind = "sidekick_agent_action",

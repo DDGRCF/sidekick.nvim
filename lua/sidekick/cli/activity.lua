@@ -6,15 +6,52 @@ local M = {}
 ---@alias sidekick.cli.ActivityStatus "idle"|"starting"|"working"|"waiting"|"done"|"error"
 ---@alias sidekick.cli.ActivityEventType "input"|"output"|"ready"|"exit"
 
+local function is_focused(terminal)
+  if type(terminal.is_focused) ~= "function" then
+    return false
+  end
+  local ok, focused = pcall(terminal.is_focused, terminal)
+  return ok and focused == true
+end
+
+local function set_unread(terminal, unread)
+  unread = unread == true
+  if terminal._sidekick_unread == unread then
+    return
+  end
+  terminal._sidekick_unread = unread
+  Util.emit("SidekickCliAttention", {
+    id = terminal.id,
+    unread = unread,
+  })
+  local ok, Panel = pcall(require, "sidekick.cli.panel")
+  if ok then
+    Panel.refresh(terminal.id)
+  end
+end
+
+local function mark_unread(terminal)
+  if not is_focused(terminal) then
+    set_unread(terminal, true)
+  end
+end
+
 ---@param terminal sidekick.cli.Terminal
 ---@param status sidekick.cli.ActivityStatus
 ---@param data? table
 function M.set(terminal, status, data)
+  terminal.last_activity = vim.uv.now()
   if terminal.status == status then
+    Util.emit("SidekickCliActivity", {
+      id = terminal.id,
+      last_activity = terminal.last_activity,
+    })
     return
   end
   terminal.status = status
-  terminal.last_activity = vim.uv.now()
+  if status == "waiting" or status == "done" or status == "error" then
+    mark_unread(terminal)
+  end
   Util.emit(
     "SidekickCliStatus",
     vim.tbl_extend("force", {
@@ -134,6 +171,7 @@ function M.output(terminal, output)
   if not terminal._sidekick_working then
     return
   end
+  mark_unread(terminal)
   if not event(terminal, "output", { data = output }) then
     M.set(terminal, "working")
     complete_later(terminal)
@@ -142,11 +180,17 @@ end
 
 ---@param terminal sidekick.cli.Terminal
 function M.ack(terminal)
+  M.read(terminal)
   if terminal.status == "done" then
     terminal._sidekick_working = false
     stop_timer(terminal)
     M.set(terminal, "idle")
   end
+end
+
+---@param terminal sidekick.cli.Terminal
+function M.read(terminal)
+  set_unread(terminal, false)
 end
 
 ---@param terminal sidekick.cli.Terminal
@@ -161,6 +205,12 @@ end
 ---@param terminal sidekick.cli.Terminal
 function M.close(terminal)
   stop_timer(terminal)
+end
+
+---@param terminal sidekick.cli.Terminal
+---@return boolean
+function M.unread(terminal)
+  return terminal._sidekick_unread == true
 end
 
 return M

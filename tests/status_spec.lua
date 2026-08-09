@@ -68,4 +68,46 @@ describe("status handler", function()
     Status.attach(client)
     assert.are.equal(Status.on_status, handlers.didChangeStatus)
   end)
+
+  it("summarizes CLI activity and attention", function()
+    local Session = require("sidekick.cli.session")
+    local Panel = require("sidekick.cli.panel")
+    local original_attached = Session.attached
+    local original_active = Panel.active
+    local working = {
+      id = "summary-working",
+      tool = { name = "codex" },
+      cwd = "/tmp",
+      status = "working",
+      _sidekick_unread = true,
+    }
+    local waiting = {
+      id = "summary-waiting",
+      tool = { name = "claude" },
+      cwd = "/tmp",
+      status = "waiting",
+    }
+    Session.attached = function()
+      return { working, waiting }
+    end
+    Panel.active = function()
+      return working
+    end
+
+    local summary = Status.summary()
+
+    Session.attached = original_attached
+    Panel.active = original_active
+    assert.are.same({
+      total = 2,
+      active = 1,
+      starting = 0,
+      working = 1,
+      waiting = 1,
+      done = 0,
+      error = 0,
+      unread = 1,
+      attention = 2,
+    }, summary)
+  end)
 end)

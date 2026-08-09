@@ -26,6 +26,7 @@ local Util = require("sidekick.util")
 ---@field last_activity? integer
 ---@field activity_timer? uv.uv_timer_t
 ---@field _sidekick_working? boolean
+---@field _sidekick_unread? boolean
 local M = {}
 M.__index = M
 M.priority = 100

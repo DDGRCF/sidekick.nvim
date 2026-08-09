@@ -262,6 +262,10 @@ local defaults = {
       inline = "words",
       show = "always",
     },
+    review = {
+      -- show a compact progress summary for active suggestions
+      summary = true,
+    },
     signs = true, -- show signs for next edit suggestions
     jumplist = true, -- add an entry to the jumplist
   },
@@ -314,6 +318,7 @@ local defaults = {
         max_name_length = 28,
         show_close = true,
         show_status = true, -- show the agent activity icon
+        show_attention = true, -- show an unread output marker
         show_cwd = false, -- include the agent working directory in the title
         ---@type "thin"|"thick"|"slant"|"slope"|"padded_slant"|"padded_slope"|{left:string,right:string}
         separator_style = "thin",
@@ -324,8 +329,8 @@ local defaults = {
           starting = "◌",
           working = "●",
           waiting = "◐",
-          done = "●",
-          error = "●",
+          done = "✓",
+          error = "!",
         },
       },
       --- CLI Tool Keymaps (default mode is `t`)
@@ -458,6 +463,7 @@ local defaults = {
       external_started  = "󰖪 ",
       terminal_attached = " ",
       terminal_started  = " ",
+      unread            = "• ",
     },
   },
   debug = false, -- enable debug logging
@@ -525,6 +531,53 @@ require("sidekick.nes").have()
 ```lua
 ---@return boolean jumped
 require("sidekick.nes").jump()
+```
+
+</td></tr>
+<tr><td><code>:Sidekick nes next</code> Jump to the next active edit hunk, wrapping at the end.</td><td>
+
+
+```lua
+---@return boolean jumped
+require("sidekick.nes").next()
+```
+
+</td></tr>
+<tr><td><code>:Sidekick nes prev</code> Jump to the previous active edit hunk, wrapping at the beginning.</td><td>
+
+
+```lua
+---@return boolean jumped
+require("sidekick.nes").prev()
+```
+
+</td></tr>
+<tr><td><code>:Sidekick nes review</code> Show a compact summary of active edit hunks.</td><td>
+
+
+```lua
+---@return boolean shown
+require("sidekick.nes").review()
+```
+
+</td></tr>
+<tr><td> </td><td>
+
+
+```lua
+---@param buf? integer
+---@return sidekick.NesReviewItem[]
+require("sidekick.nes").review_items(buf)
+```
+
+</td></tr>
+<tr><td> </td><td>
+
+
+```lua
+---@param buf? integer
+---@return {edits:integer,hunks:integer,current:integer?}
+require("sidekick.nes").summary(buf)
 ```
 
 </td></tr>
@@ -629,7 +682,7 @@ require("sidekick.cli").move(opts)
 
 
 ```lua
----@param opts? {name?:string,focus?:boolean}
+---@param opts? {name?:string,focus?:boolean,cwd?:string}
 require("sidekick.cli").new(opts)
 ```
 
@@ -691,7 +744,7 @@ require("sidekick.cli").resize(opts)
 
 
 ```lua
----@param opts? sidekick.cli.Select|{cb:nil}|{focus?:boolean}
+---@param opts? sidekick.cli.Select|{cb:nil}|{focus?:boolean,cwd?:string}
 ---@overload fun(cb:fun(state?:sidekick.cli.State))
 require("sidekick.cli").select(opts)
 ```

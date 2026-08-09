@@ -27,6 +27,10 @@ local defaults = {
       inline = "words",
       show = "always",
     },
+    review = {
+      -- show a compact progress summary for active suggestions
+      summary = true,
+    },
     signs = true, -- show signs for next edit suggestions
     jumplist = true, -- add an entry to the jumplist
   },
@@ -79,6 +83,7 @@ local defaults = {
         max_name_length = 28,
         show_close = true,
         show_status = true, -- show the agent activity icon
+        show_attention = true, -- show an unread output marker
         show_cwd = false, -- include the agent working directory in the title
         ---@type "thin"|"thick"|"slant"|"slope"|"padded_slant"|"padded_slope"|{left:string,right:string}
         separator_style = "thin",
@@ -89,8 +94,8 @@ local defaults = {
           starting = "◌",
           working = "●",
           waiting = "◐",
-          done = "●",
-          error = "●",
+          done = "✓",
+          error = "!",
         },
       },
       --- CLI Tool Keymaps (default mode is `t`)
@@ -227,6 +232,7 @@ local defaults = {
       external_started  = "󰖪 ",
       terminal_attached = " ",
       terminal_started  = " ",
+      unread            = "• ",
     },
   },
   debug = false, -- enable debug logging
@@ -292,7 +298,6 @@ function M.setup(opts)
     M.validate("cli.mux.backend", { "tmux", "zellij" })
     M.validate("cli.mux.create", { "terminal", "window", "split" })
     M.validate("nes.diff.show", { "always", "cursor" })
-
   end)
 end
 
@@ -358,6 +363,7 @@ function M.set_hl()
     DiffAdd = "DiffText",
     DiffDelete = "DiffDelete",
     Sign = "Special",
+    NesSummary = "Special",
     Chat = "NormalFloat",
     CliMissing = "DiagnosticError",
     CliAttached = "Special",
@@ -370,6 +376,7 @@ function M.set_hl()
     CliStatusWaiting = "DiagnosticHint",
     CliStatusDone = "DiagnosticOk",
     CliStatusError = "DiagnosticError",
+    CliAttention = "DiagnosticInfo",
     CliTool = "Special",
     CliToolAider = "Type",
     CliToolAmazonQ = "DiagnosticWarn",
