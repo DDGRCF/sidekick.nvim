@@ -277,6 +277,80 @@ describe("cli provider sessions", function()
     vim.fn.delete(root, "rf")
   end)
 
+  it("does not guess between multiple Crush sessions in one database", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local first = "019fe6a3-e835-7772-8959-fd1213bf1392"
+    local second = "019fe6a3-e835-7772-8959-fd1213bf1393"
+    local path = root .. "/crush.db"
+    local file = sqlite(path, "sessions", { first, second })
+    local cli = assert(io.open(root .. "/crush", "wb"))
+    cli:write(
+      '#!/bin/sh\nprintf \'%s\\n\' \'[{"id":"abcdef1234567890","uuid":"',
+      first,
+      '"},{"id":"1234567890abcdef","uuid":"',
+      second,
+      "\"}]'\n"
+    )
+    cli:close()
+    vim.fn.setfperm(root .. "/crush", "rwx------")
+    local old_path = vim.env.PATH
+    vim.env.PATH = root .. ":" .. old_path
+    local old_root = Provider.roots.crush
+    Provider.roots.crush = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("crush", {
+      pids = { vim.fn.getpid() },
+      tool = { cmd = { "crush" } },
+    })
+
+    assert.is_nil(conversation)
+
+    file:close()
+    vim.env.PATH = old_path
+    Provider.roots.crush = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("discovers Crush data_directory from project configuration", function()
+    local project = vim.fn.tempname()
+    local data_dir = project .. "/custom-data"
+    local bin = project .. "/bin"
+    vim.fn.mkdir(data_dir, "p")
+    vim.fn.mkdir(bin, "p")
+    local config = assert(io.open(project .. "/crush.json", "wb"))
+    config:write(vim.json.encode({ options = { data_directory = "custom-data" } }))
+    config:close()
+
+    local id = "019fe6a3-e835-7772-8959-fd1213bf1394"
+    local path = data_dir .. "/crush.db"
+    local file = sqlite(path, "sessions", { id })
+    local cli = assert(io.open(bin .. "/crush", "wb"))
+    cli:write('#!/bin/sh\nprintf \'%s\\n\' \'[{"id":"abcdef1234567890","uuid":"', id, "\"}]'\n")
+    cli:close()
+    vim.fn.setfperm(bin .. "/crush", "rwx------")
+    local old_path = vim.env.PATH
+    vim.env.PATH = bin .. ":" .. old_path
+    local old_root = Provider.roots.crush
+    Provider.roots.crush = vim.fs.normalize(project .. "/other-data")
+    local tool = { cmd = { "crush" } }
+
+    local conversation = Provider.capture("crush", {
+      pids = { vim.fn.getpid() },
+      cwd = project,
+      tool = tool,
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal(vim.fs.normalize(path), conversation.data.path)
+    assert.is_true(Provider.verify("crush", conversation, tool, project))
+
+    file:close()
+    vim.env.PATH = old_path
+    Provider.roots.crush = old_root
+    vim.fn.delete(project, "rf")
+  end)
+
   it("captures and structurally verifies an OpenCode session id", function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")

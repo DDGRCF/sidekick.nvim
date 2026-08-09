@@ -627,8 +627,9 @@ snapshot explicitly. Exact provider conversation IDs can be supplied by a tool's
 `resume` adapter. Antigravity, Claude, Codex, Cursor, Crush, Grok Build, and OpenCode include exact discovery adapters;
 Copilot, Pi, and Qwen receive a Sidekick-managed UUID at launch so multiple agents of the same type
 can be restored without relying on a provider's “latest conversation” shortcut.
-Crush resumes with its exact session UUID; its current CLI does not expose a native conversation-fork API,
-so Sidekick keeps fork unavailable instead of cloning or reusing the parent session.
+Crush resumes with its exact session UUID when the running process exposes it or its data directory contains
+one session; ambiguous databases are left unavailable instead of guessing. Its current CLI does not expose
+a native conversation-fork API, so Sidekick keeps fork unavailable instead of cloning or reusing the parent session.
 If no stable ID is available, Sidekick reports that agent as failed instead of
 substituting a latest session or interactive browser.
 

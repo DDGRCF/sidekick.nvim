@@ -3,6 +3,7 @@ local Util = require("sidekick.util")
 
 local M = {}
 local crush_default_root = vim.fs.normalize(vim.fn.expand("~/.local/share/crush"))
+local crush_config_data_dir
 
 M.roots = {
   antigravity = vim.fs.normalize(vim.fn.expand("~/.gemini/antigravity-cli/conversations")),
@@ -92,7 +93,10 @@ local function root(provider, tool, cwd)
       return vim.fs.joinpath(home, "sessions")
     end
   elseif provider == "crush" then
-    return command_data_dir(tool, cwd) or resolve_path(env_value(tool, "CRUSH_GLOBAL_DATA"), cwd) or M.roots.crush
+    return command_data_dir(tool, cwd)
+      or resolve_path(env_value(tool, "CRUSH_GLOBAL_DATA"), cwd)
+      or (crush_config_data_dir and crush_config_data_dir(tool, cwd))
+      or M.roots.crush
   end
   return M.roots[provider]
 end
@@ -105,6 +109,60 @@ local function read_prefix(path)
   local data = file:read(128 * 1024)
   file:close()
   return data
+end
+
+crush_config_data_dir = function(tool, cwd)
+  cwd = vim.fs.normalize(cwd or vim.fn.getcwd())
+  local checked = {}
+
+  local function read_data_dir(path)
+    path = resolve_path(path, cwd)
+    if not path or checked[path] then
+      return
+    end
+    checked[path] = true
+    local data = read_prefix(path)
+    if not data then
+      return
+    end
+
+    local ok, config = pcall(vim.json.decode, data)
+    if ok and type(config) == "table" then
+      local options = type(config.options) == "table" and config.options or {}
+      if type(options.data_directory) == "string" and options.data_directory ~= "" then
+        return resolve_path(options.data_directory, cwd)
+      end
+    end
+
+    -- Crush accepts JSON configuration with comments. Keep this fallback
+    -- deliberately narrow: a malformed or dynamic value simply means that
+    -- discovery remains conservative instead of executing configuration code.
+    local value = data:match('"options"%s*:%s*{.-"data_directory"%s*:%s*"([^"\\]*)"')
+    return value and resolve_path(value, cwd) or nil
+  end
+
+  local dir = cwd
+  while true do
+    local data_dir = read_data_dir(vim.fs.joinpath(dir, ".crush.json"))
+      or read_data_dir(vim.fs.joinpath(dir, "crush.json"))
+    if data_dir then
+      return data_dir
+    end
+    local parent = vim.fs.dirname(dir)
+    if not parent or parent == dir then
+      break
+    end
+    dir = parent
+  end
+
+  local global_config = env_value(tool, "CRUSH_GLOBAL_CONFIG")
+  local data_dir = read_data_dir(global_config)
+  if data_dir then
+    return data_dir
+  end
+
+  local config_home = resolve_path(env_value(tool, "XDG_CONFIG_HOME") or "~/.config", cwd)
+  return read_data_dir(config_home and vim.fs.joinpath(config_home, "crush", "crush.json"))
 end
 
 local function read_first_line(path)
@@ -390,7 +448,7 @@ local function crush_process_id(proc)
   if type(env) == "table" and valid_id("crush", env.CRUSH_SESSION_ID) then
     return env.CRUSH_SESSION_ID
   end
-  local cmd = proc.cmd or ""
+  local cmd = proc and proc.cmd or ""
   return cmd:match("%-%-session=([^%s]+)") or cmd:match("%-%-session%s+([^%s]+)") or cmd:match("%-s%s+([^%s]+)")
 end
 
@@ -436,7 +494,10 @@ local function crush_capture(session, session_root)
         candidates[resolved] = path
       end
     end
-    if vim.tbl_isempty(explicit) and #paths == 1 then
+    -- Without a provider-owned current-session id, only accept the
+    -- unambiguous case. The first row is global to the data directory and
+    -- cannot identify which of several live Crush clients owns the terminal.
+    if vim.tbl_isempty(explicit) and #paths == 1 and #items == 1 then
       local latest = crush_session_id(items[1])
       if latest then
         candidates[latest] = path

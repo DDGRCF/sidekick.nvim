@@ -40,6 +40,7 @@ describe("cli conversation fork", function()
       emit = Util.emit,
       error = Util.error,
       warn = Util.warn,
+      now = vim.uv.now,
       new_timer = vim.uv.new_timer,
       schedule_wrap = vim.schedule_wrap,
     }
@@ -120,6 +121,11 @@ describe("cli conversation fork", function()
     vim.schedule_wrap = function(fn)
       return fn
     end
+    local fake_now = 0
+    vim.uv.now = function()
+      fake_now = fake_now + 1000
+      return fake_now
+    end
     vim.uv.new_timer = function()
       local timer = { closed = false }
       function timer:is_closing()
@@ -145,6 +151,7 @@ describe("cli conversation fork", function()
       Util.emit = old.emit
       Util.error = old.error
       Util.warn = old.warn
+      vim.uv.now = old.now
       vim.uv.new_timer = old.new_timer
       vim.schedule_wrap = old.schedule_wrap
     end

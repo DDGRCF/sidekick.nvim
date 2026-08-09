@@ -210,8 +210,7 @@ end
 ---@param expected sidekick.cli.Conversation
 ---@param tool sidekick.cli.Tool
 ---@param after_start? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation:sidekick.cli.Conversation,source:sidekick.cli.Terminal):boolean,string?
----@param wait_for_new? boolean
-local function verify_child(source, terminal, expected, tool, after_start, wait_for_new)
+local function verify_child(source, terminal, expected, tool, after_start)
   local timeout = math.max(1000, Config.cli.workspace.resume_timeout_ms)
   local started = vim.uv.now()
   local timer = vim.uv.new_timer()
@@ -243,7 +242,7 @@ local function verify_child(source, terminal, expected, tool, after_start, wait_
     local conversation = Resume.capture(terminal)
     if conversation and conversation.provider == expected.provider and type(conversation.id) == "string" then
       if conversation.id == expected.id then
-        if not wait_for_new or vim.uv.now() - started >= timeout then
+        if vim.uv.now() - started >= timeout then
           return finish(false, "provider reused the source conversation id")
         end
         timer:start(250, 0, vim.schedule_wrap(check))
@@ -345,7 +344,7 @@ function M.start(source, opts)
 
     local adapter = adapter_for(tool)
     local after_start = type(adapter) == "table" and not vim.islist(adapter) and adapter.after_start or nil
-    verify_child(source, terminal, conversation, tool, after_start, after_start ~= nil)
+    verify_child(source, terminal, conversation, tool, after_start)
     return terminal
   end
 
