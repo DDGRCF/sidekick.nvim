@@ -1239,10 +1239,6 @@ function M.move(value)
     local was_focused = valid(p.win) and vim.api.nvim_get_current_win() == p.win
     M.hide()
     M.show(active, was_focused)
-  else
-    vim.schedule(function()
-      require("sidekick.cli").new()
-    end)
   end
 end
 

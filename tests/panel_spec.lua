@@ -846,7 +846,7 @@ describe("cli agent panel", function()
     assert.are.equal("float", Panel.layout())
   end)
 
-  it("opens the new-agent picker when moving layout without an agent", function()
+  it("does not start a new agent when moving layout without an agent", function()
     local old_cli = package.loaded["sidekick.cli"]
     local calls = 0
     package.loaded["sidekick.cli"] = {
@@ -855,13 +855,15 @@ describe("cli agent panel", function()
       end,
     }
 
-    Panel.move("float")
-    vim.wait(100, function()
-      return calls > 0
+    local ok, err = pcall(function()
+      Panel.move("float")
+      assert.are.equal(0, calls)
     end)
 
     package.loaded["sidekick.cli"] = old_cli
-    assert.are.equal(1, calls)
+    if not ok then
+      error(err)
+    end
   end)
 
   it("rejects invalid resize dimensions without changing the panel", function()
