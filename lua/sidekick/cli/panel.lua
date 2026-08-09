@@ -33,6 +33,10 @@ M.clicks = {} ---@type table<integer, {action:string,id?:string,tab?:integer}>
 M.synced_keys = {} ---@type table<integer, table<string, string>>
 M.did_setup = false
 
+local activity_blink_ms = 1000 -- one-second phases keep the working marker readable
+local activity_blink_timer
+local activity_blink_on = true
+
 local function valid(win)
   return win and vim.api.nvim_win_is_valid(win) or false
 end
@@ -99,6 +103,63 @@ end
 
 local function terminal(id)
   return id and require("sidekick.cli.terminal").get(id) or nil
+end
+
+local function stop_activity_blink()
+  local timer = activity_blink_timer
+  activity_blink_timer = nil
+  activity_blink_on = true
+  if timer and not timer:is_closing() then
+    timer:stop()
+    timer:close()
+  end
+end
+
+local function has_visible_working_tab()
+  if Config.cli.win.tabs.enabled == false or Config.cli.win.tabs.show_status == false then
+    return false
+  end
+  for _, p in pairs(M.panels) do
+    if valid(p.win) then
+      for _, id in ipairs(p.order) do
+        local t = terminal(id)
+        if t and t.status == "working" then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+local function update_activity_blink()
+  if not has_visible_working_tab() then
+    stop_activity_blink()
+    return
+  end
+  if activity_blink_timer then
+    return
+  end
+  local timer = vim.uv.new_timer()
+  if not timer then
+    return
+  end
+  activity_blink_on = true
+  activity_blink_timer = timer
+  timer:start(activity_blink_ms, activity_blink_ms, function()
+    vim.schedule(function()
+      if activity_blink_timer ~= timer then
+        return
+      end
+      if not has_visible_working_tab() then
+        stop_activity_blink()
+        M.refresh()
+        return
+      end
+      activity_blink_on = not activity_blink_on
+      M.refresh()
+    end)
+  end)
 end
 
 local function usable(id)
@@ -434,8 +495,6 @@ local function agent_icon(t)
 end
 
 local tool_highlights = {
-  aider = "SidekickCliToolAider",
-  amazon_q = "SidekickCliToolAmazonQ",
   antigravity = "SidekickCliToolAntigravity",
   claude = "SidekickCliToolClaude",
   codex = "SidekickCliToolCodex",
@@ -465,7 +524,11 @@ local function status_icon_text(t)
   if Config.cli.win.tabs.show_status == false then
     return ""
   end
-  return Config.cli.win.tabs.status[t.status or "idle"] or "○"
+  local status = t.status or "idle"
+  if status == "working" and not activity_blink_on then
+    return Config.cli.win.tabs.status.idle or "○"
+  end
+  return Config.cli.win.tabs.status[status] or "○"
 end
 
 local function status_icon(t)
@@ -801,6 +864,7 @@ end
 ---@param id? string
 function M.refresh(_)
   M.clicks = {}
+  update_activity_blink()
   for tab, p in pairs(M.panels) do
     if not vim.api.nvim_tabpage_is_valid(tab) then
       M.panels[tab] = nil
@@ -933,12 +997,14 @@ function M.hide(t)
         hide_panel(p)
       end
     end
+    update_activity_blink()
     return
   end
   local p = panel()
   if p and valid(p.win) then
     hide_panel(p)
   end
+  update_activity_blink()
 end
 
 ---@param t? sidekick.cli.Terminal

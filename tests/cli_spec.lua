@@ -10,6 +10,35 @@ local State = require("sidekick.cli.state")
 local Workspace = require("sidekick.cli.workspace")
 
 describe("cli routing", function()
+  it("opens a fork picker when no active agent is selected", function()
+    local Panel = require("sidekick.cli.panel")
+    local AgentPicker = require("sidekick.cli.agent_picker")
+    local original_active = Panel.active
+    local original_items = Panel.picker_items
+    local original_open = AgentPicker.open
+    local items = { { id = "live-agent" } }
+    local opened
+
+    Panel.active = function()
+      return nil
+    end
+    Panel.picker_items = function()
+      return items
+    end
+    AgentPicker.open = function(value, opts)
+      opened = { items = value, opts = opts }
+    end
+
+    Cli.fork()
+
+    Panel.active = original_active
+    Panel.picker_items = original_items
+    AgentPicker.open = original_open
+
+    assert.are.same(items, opened.items)
+    assert.is_true(opened.opts.fork)
+  end)
+
   it("captures the cwd before opening the new-agent picker", function()
     local original_tools = Config.tools
     local original_attach = State.attach

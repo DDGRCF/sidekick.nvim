@@ -104,10 +104,15 @@ describe("cli provider sessions", function()
   end)
 
   it("captures and verifies an open Antigravity conversation database", function()
-    local root = vim.fn.tempname()
+    local state_root = vim.fn.tempname()
+    local root = state_root .. "/conversations"
     vim.fn.mkdir(root, "p")
     local id = "b98bb537-9e1f-4780-8fb4-2f4f0a3b9712"
     local path = root .. "/" .. id .. ".db"
+    vim.fn.mkdir(state_root .. "/cache", "p")
+    local metadata = assert(io.open(state_root .. "/cache/conversation_metadata.json", "wb"))
+    metadata:write(vim.json.encode({ conversations = { [id] = { summary = { ProjectID = "project-42" } } } }))
+    metadata:flush()
     local file = assert(io.open(path, "wb"))
     file:write("not a database")
     file:flush()
@@ -129,11 +134,13 @@ describe("cli provider sessions", function()
 
     assert.are.equal(id, conversation.id)
     assert.are.equal("antigravity", conversation.provider)
+    assert.are.equal("project-42", conversation.data.project_id)
     assert.is_true(Provider.verify("antigravity", conversation))
 
     file:close()
+    metadata:close()
     Provider.roots.antigravity = old_root
-    vim.fn.delete(root, "rf")
+    vim.fn.delete(state_root, "rf")
   end)
 
   it("captures and verifies the Grok session id rendered by its process", function()
@@ -159,6 +166,114 @@ describe("cli provider sessions", function()
     vim.api.nvim_buf_delete(buf, { force = true })
     file:close()
     Provider.roots.grok = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("captures UUID-shaped Grok session ids from newer clients", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local id = "019fe6a3-e835-7772-8959-fd1213bf1391"
+    local path = root .. "/grok.db"
+    local file = sqlite(path, "sessions", { id })
+    local buf = buffer({ "Grok Code", "Session ID: " .. id })
+    local old_root = Provider.roots.grok
+    Provider.roots.grok = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("grok", {
+      pids = { vim.fn.getpid() },
+      buf = buf,
+      tool = { cmd = { "grok" } },
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.is_true(Provider.verify("grok", conversation))
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+    file:close()
+    Provider.roots.grok = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("captures Grok Build sessions from their UUID directory", function()
+    local root = vim.fn.tempname()
+    local id = "019fe6a3-e835-7772-8959-fd1213bf1391"
+    local path = root .. "/sessions/%2Ftmp%2Fproject/" .. id .. "/updates.jsonl"
+    vim.fn.mkdir(vim.fs.dirname(path), "p")
+    local file = assert(io.open(path, "wb"))
+    file:write("{}\n")
+    file:flush()
+    local buf = buffer({ "Grok Build", "Session ID: " .. id })
+    local old_root = Provider.roots.grok
+    Provider.roots.grok = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("grok", {
+      pids = { vim.fn.getpid() },
+      buf = buf,
+      cwd = "/tmp/project",
+      tool = { cmd = { "grok" } },
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.is_true(Provider.verify("grok", conversation))
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+    file:close()
+    Provider.roots.grok = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("captures a Cursor chat store opened by the running agent", function()
+    local root = vim.fn.tempname()
+    local workspace = root .. "/workspace"
+    local id = "019fe6a3-e835-7772-8959-fd1213bf1392"
+    local path = workspace .. "/" .. id .. "/store.db"
+    vim.fn.mkdir(vim.fs.dirname(path), "p")
+    local file = sqlite(path, "messages", { id })
+    local old_root = Provider.roots.cursor
+    Provider.roots.cursor = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("cursor", {
+      pids = { vim.fn.getpid() },
+      tool = { cmd = { "cursor-agent" } },
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("cursor", conversation.provider)
+    assert.is_true(Provider.verify("cursor", conversation))
+
+    file:close()
+    Provider.roots.cursor = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("captures and verifies an open Crush session database", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local id = "019fe6a3-e835-7772-8959-fd1213bf1392"
+    local path = root .. "/crush.db"
+    local file = sqlite(path, "sessions", { id })
+    local cli = assert(io.open(root .. "/crush", "wb"))
+    cli:write('#!/bin/sh\nprintf \'%s\\n\' \'[{"id":"abcdef1234567890","uuid":"', id, '","title":"Review"}]\'\n')
+    cli:close()
+    vim.fn.setfperm(root .. "/crush", "rwx------")
+    local old_path = vim.env.PATH
+    vim.env.PATH = root .. ":" .. old_path
+    local old_root = Provider.roots.crush
+    Provider.roots.crush = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("crush", {
+      pids = { vim.fn.getpid() },
+      tool = { cmd = { "crush" } },
+    })
+
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("crush", conversation.provider)
+    assert.are.equal(vim.fs.normalize(path), conversation.data.path)
+    assert.is_true(Provider.verify("crush", conversation))
+
+    file:close()
+    vim.env.PATH = old_path
+    Provider.roots.crush = old_root
     vim.fn.delete(root, "rf")
   end)
 

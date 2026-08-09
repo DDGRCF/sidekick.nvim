@@ -17,6 +17,7 @@ local version = 1
 ---@field instance_id string
 ---@field title? string
 ---@field conversation? sidekick.cli.Conversation
+---@field forked_from? sidekick.cli.ForkInfo
 ---@field status? sidekick.cli.ActivityStatus
 
 ---@class sidekick.cli.WorkspaceState
@@ -58,6 +59,7 @@ function M.snapshot()
         instance_id = t.instance_id,
         title = t.title or session.title,
         conversation = Resume.capture(t),
+        forked_from = vim.deepcopy(t.forked_from or session.forked_from),
         status = t.status,
       }
     end
@@ -163,6 +165,7 @@ local function restore_agent(saved, discovered)
     instance_id = saved.instance_id,
     title = saved.title,
     conversation = saved.conversation,
+    forked_from = saved.forked_from,
     hidden = true,
   })
   local terminal = as_terminal(session)
@@ -229,6 +232,18 @@ local function validate(saved)
     end
     if keys[agent.key] then
       return "duplicate agent key"
+    end
+    if agent.forked_from ~= nil then
+      if
+        type(agent.forked_from) ~= "table"
+        or type(agent.forked_from.provider) ~= "string"
+        or agent.forked_from.provider == ""
+        or type(agent.forked_from.id) ~= "string"
+        or agent.forked_from.id == ""
+        or (agent.forked_from.title ~= nil and type(agent.forked_from.title) ~= "string")
+      then
+        return "invalid fork source"
+      end
     end
     keys[agent.key] = true
   end

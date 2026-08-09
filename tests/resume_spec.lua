@@ -70,10 +70,21 @@ describe("cli conversation resume", function()
     assert.are.equal("exact", mode)
   end)
 
-  it("uses exact native ids for Grok and OpenCode", function()
+  it("uses exact native ids for Grok Build and OpenCode", function()
     for _, case in ipairs({
-      { name = "grok", id = "a1b2c3d4e5f6", file = "sk/cli/grok.lua" },
-      { name = "opencode", id = "ses_1234567890abcdefghijklmnop", file = "sk/cli/opencode.lua" },
+      { name = "grok", id = "a1b2c3d4e5f6", args = { "--resume" }, file = "sk/cli/grok.lua" },
+      {
+        name = "crush",
+        id = "019fe6a3-e835-7772-8959-fd1213bf1392",
+        args = { "--session" },
+        file = "sk/cli/crush.lua",
+      },
+      {
+        name = "opencode",
+        id = "ses_1234567890abcdefghijklmnop",
+        args = { "--session" },
+        file = "sk/cli/opencode.lua",
+      },
     }) do
       local config = assert(loadfile(case.file))()
       local cmd, mode = Resume.command({ name = case.name, cmd = config.cmd, config = config }, {
@@ -81,7 +92,7 @@ describe("cli conversation resume", function()
       })
 
       local expected = vim.deepcopy(config.cmd)
-      vim.list_extend(expected, { "--session", case.id })
+      vim.list_extend(expected, { unpack(case.args), case.id })
       assert.are.same(expected, cmd)
       assert.are.equal("exact", mode)
     end

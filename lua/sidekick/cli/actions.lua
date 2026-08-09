@@ -53,6 +53,14 @@ function M.buffers(t)
   picker("buffers", t)
 end
 
+---@param t sidekick.cli.Terminal
+function M.fork(t)
+  vim.cmd.stopinsert()
+  vim.schedule(function()
+    require("sidekick.cli").fork({ source = t, focus = true })
+  end)
+end
+
 function M.prev()
   panel().cycle(-1)
 end

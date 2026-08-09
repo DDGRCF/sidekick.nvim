@@ -3,7 +3,9 @@ return {
   cmd = { "crush" },
   is_proc = "\\<crush\\>",
   keys = {
-    prompt = { "<a-p>", "prompt" }
+    prompt = { "<a-p>", "prompt" },
   },
-  url = "https://github.com/charmbracelet/crush"
+  -- Crush exposes exact session resume, but no native conversation fork API.
+  resume = require("sidekick.cli.provider_sessions").adapter("crush", { "--session" }),
+  url = "https://github.com/charmbracelet/crush",
 }

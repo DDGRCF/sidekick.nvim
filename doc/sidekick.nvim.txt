@@ -35,7 +35,7 @@ FEATURES                                *sidekick.nvim-sidekick.nvim-features*
     - **Statusline Integration**: Shows Copilot LSP’s status, request progress, and preview text in your statusline.
 - **Integrated AI CLI Terminal**
     - **Direct Access to AI CLIs**: Interact with your favorite AI command-line tools without leaving Neovim.
-    - **Pre-configured for Popular Tools**: Out-of-the-box support for Claude, Gemini, Grok, Codex, Copilot CLI, and more.
+    - **Pre-configured for Popular Tools**: Out-of-the-box support for Claude, Gemini, Grok Build, Codex, Copilot CLI, and more.
     - **Context-Aware Prompts**: Automatically include file content, cursor position, and diagnostics in your prompts.
     - **Prompt Library**: A library of pre-defined prompts for common tasks like explaining code, fixing issues, or writing tests.
     - **Session Persistence**: Keep your CLI sessions alive with `tmux` and `zellij` integration.
@@ -335,8 +335,6 @@ Default settings ~
         --- For default configs, see https://github.com/folke/sidekick.nvim/tree/main/sk/cli
         ---@type table<string, sidekick.cli.Config|{}>
         tools = {
-          aider    = {},
-          amazon_q = {},
           claude   = {},
           codex    = {},
           copilot  = {},
@@ -631,14 +629,8 @@ which ones are installed.
   -----------------------------------------------------------------------------------
   Tool                  Description   Installation
   --------------------- ------------- -----------------------------------------------
-  aider                 AI pair       pip install aider-chat or
-                        programmer    pipx install aider-chat
-
-  amazon_q              Amazon Q      Install guide
-                        Developer     
-
   claude                Claude Code   See Claude Code docs
-                        CLI           
+                        CLI
 
   codex                 OpenAI Codex  See OpenAI docs
                         CLI           
@@ -655,7 +647,8 @@ which ones are installed.
   gemini                Google Gemini See repo
                         CLI           
 
-  grok                  xAI Grok CLI  See repo
+  grok                  Grok Build    See https://x.ai/cli
+                        CLI
 
   opencode              OpenCode CLI  npm install -g opencode
 

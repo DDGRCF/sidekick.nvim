@@ -158,6 +158,32 @@ describe("cli sessions", function()
     Util.del_state(parent.mux_session)
   end)
 
+  it("skips managed session preparation for provider-native forks", function()
+    local prepared = false
+    local session = Session.new({
+      tool = {
+        name = "fork-agent",
+        cmd = { "true" },
+        config = {
+          resume = {
+            prepare = function()
+              prepared = true
+              return {
+                cmd = { "true", "--managed" },
+                conversation = { provider = "fork-agent", id = "managed", resumable = true },
+              }
+            end,
+          },
+        },
+      },
+      backend = "terminal",
+      skip_resume_prepare = true,
+    })
+
+    session:close()
+    assert.is_false(prepared)
+  end)
+
   it("rolls back a hidden terminal when its cwd no longer exists", function()
     local Terminal = require("sidekick.cli.terminal")
     local cwd = vim.fn.tempname() .. "/missing"

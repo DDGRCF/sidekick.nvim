@@ -5,6 +5,13 @@ return {
   url = "https://github.com/anthropics/claude-code",
   usage = require("sidekick.cli.agent_usage").claude,
   resume = require("sidekick.cli.provider_sessions").adapter("claude", { "--resume" }),
+  fork = {
+    command = function(tool, conversation)
+      local cmd = vim.deepcopy(tool.cmd)
+      vim.list_extend(cmd, { "--resume", conversation.id, "--fork-session" })
+      return cmd
+    end,
+  },
   continue = { "--continue" },
   format = function(text)
     local Text = require("sidekick.text")

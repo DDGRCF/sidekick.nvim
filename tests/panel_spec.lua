@@ -139,6 +139,73 @@ describe("cli agent panel", function()
     assert.matches("SidekickCliStatusDone", line)
   end)
 
+  it("uses the green diagnostic highlight for working and done tabs", function()
+    Config.set_hl()
+
+    local working = vim.api.nvim_get_hl(0, { name = "SidekickCliStatusWorking", link = true })
+    local done = vim.api.nvim_get_hl(0, { name = "SidekickCliStatusDone", link = true })
+
+    assert.are.equal("DiagnosticOk", working.link)
+    assert.are.equal("DiagnosticOk", done.link)
+  end)
+
+  it("slowly blinks working markers and stops when work is done", function()
+    local old_new_timer = vim.uv.new_timer
+    local old_schedule = vim.schedule
+    local old_show_status = Config.cli.win.tabs.show_status
+    local timer_callback
+    local timer = { closed = false }
+    function timer:is_closing()
+      return self.closed
+    end
+    function timer:stop() end
+    function timer:close()
+      self.closed = true
+    end
+    function timer:start(delay, interval, callback)
+      self.delay = delay
+      self.interval = interval
+      timer_callback = callback
+    end
+
+    vim.uv.new_timer = function()
+      return timer
+    end
+    vim.schedule = function(callback)
+      callback()
+    end
+    Config.cli.win.tabs.show_status = true
+    local codex = fake("blink", "codex", "Blinking agent", "working")
+
+    local ok, err = pcall(function()
+      Panel.show(codex)
+      local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+      local status = Config.cli.win.tabs.status
+
+      assert.are.equal(1000, timer.delay)
+      assert.are.equal(1000, timer.interval)
+      assert.is_not_nil(timer_callback)
+      assert.is_not_nil(Panel.render(p):find(status.working, 1, true))
+
+      timer_callback()
+      assert.is_not_nil(Panel.render(p):find(status.idle, 1, true))
+
+      codex.status = "done"
+      Panel.refresh()
+      assert.is_true(timer.closed)
+      assert.is_not_nil(Panel.render(p):find(status.done, 1, true))
+    end)
+
+    codex.status = "done"
+    pcall(Panel.refresh)
+    Config.cli.win.tabs.show_status = old_show_status
+    vim.schedule = old_schedule
+    vim.uv.new_timer = old_new_timer
+    if not ok then
+      error(err)
+    end
+  end)
+
   it("shows an attention marker for unread agent output", function()
     local old_attention = Config.cli.win.tabs.show_attention
     local codex = fake("unread", "codex", "Unread output")

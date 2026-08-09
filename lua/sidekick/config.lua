@@ -109,6 +109,7 @@ local defaults = {
         hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the agent container" },
         hide_ctrl_z   = { "<c-z>", "blur"      , mode = "nt", desc = "go back to the previous window without hiding the agent container" },
         prompt        = { "<c-p>", "prompt"    , mode = "t" , desc = "insert prompt or context" },
+        agent_fork_t  = { "<a-f>", "fork"       , mode = "t" , desc = "fork the current agent conversation" },
         stopinsert    = { "<c-q>", "stopinsert", mode = "t" , desc = "enter normal mode" },
         normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter normal mode" },
         agent_prev    = { "<s-h>"       , "prev"            , mode = "n", desc = "previous agent" },
@@ -118,6 +119,7 @@ local defaults = {
         agent_move_l  = { "[B"          , "move_prev"       , mode = "n", desc = "move agent tab left" },
         agent_move_r  = { "]B"          , "move_next"       , mode = "n", desc = "move agent tab right" },
         agent_pick    = { "<leader>bj"  , "pick"            , mode = "n", desc = "pick an agent" },
+        agent_fork    = { "<leader>bf"  , "fork"            , mode = "n", desc = "fork the current agent conversation" },
         agent_back    = { "<leader>bb"  , "previous"        , mode = "n", desc = "previously active agent" },
         agent_back_bt = { "<leader>`"   , "previous"        , mode = "n", desc = "previously active agent" },
         agent_pin     = { "<leader>bp"  , "pin"             , mode = "n", desc = "pin agent" },
@@ -169,8 +171,6 @@ local defaults = {
     -- stylua: ignore
     ---@type table<string, sidekick.cli.Config|{}>
     tools = {
-      aider       = {},
-      amazon_q    = {},
       antigravity = {},
       claude      = {},
       codex       = {},
@@ -233,6 +233,7 @@ local defaults = {
       terminal_attached = " ",
       terminal_started  = " ",
       unread            = "• ",
+      fork              = "↗ ",
     },
   },
   debug = false, -- enable debug logging
@@ -372,14 +373,12 @@ function M.set_hl()
     CliUnavailable = "DiagnosticError",
     CliStatusIdle = "Comment",
     CliStatusStarting = "DiagnosticInfo",
-    CliStatusWorking = "DiagnosticWarn",
+    CliStatusWorking = "DiagnosticOk",
     CliStatusWaiting = "DiagnosticHint",
     CliStatusDone = "DiagnosticOk",
     CliStatusError = "DiagnosticError",
     CliAttention = "DiagnosticInfo",
     CliTool = "Special",
-    CliToolAider = "Type",
-    CliToolAmazonQ = "DiagnosticWarn",
     CliToolAntigravity = "Special",
     CliToolClaude = "Constant",
     CliToolCodex = "String",

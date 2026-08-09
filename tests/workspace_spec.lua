@@ -1,11 +1,11 @@
 ---@module 'luassert'
 
+local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
 local Session = require("sidekick.cli.session")
 local Terminal = require("sidekick.cli.terminal")
 local Util = require("sidekick.util")
 local Workspace = require("sidekick.cli.workspace")
-local Config = require("sidekick.config")
 
 describe("cli workspace", function()
   local terminal
@@ -68,6 +68,7 @@ describe("cli workspace", function()
       backend = "terminal",
       tool = { name = "codex", config = { resume = { "resume" } } },
       title = "Workspace agent",
+      forked_from = { provider = "codex", id = "parent-conversation", title = "Parent agent" },
       status = "done",
       conversation = { provider = "codex", id = "conversation-1", resumable = true },
       buf = vim.api.nvim_create_buf(false, true),
@@ -87,6 +88,7 @@ describe("cli workspace", function()
     assert.are.equal(1, state.version)
     assert.are.equal(1, #state.agents)
     assert.are.equal("conversation-1", state.agents[1].conversation.id)
+    assert.are.same(terminal.forked_from, state.agents[1].forked_from)
     assert.are.equal("codex workspace-agent", state.panels[1].active)
     assert.is_true(state.panels[1].pinned["codex workspace-agent"])
   end)

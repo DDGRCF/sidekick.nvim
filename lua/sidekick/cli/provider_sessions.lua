@@ -2,12 +2,15 @@ local Procs = require("sidekick.cli.procs")
 local Util = require("sidekick.util")
 
 local M = {}
+local crush_default_root = vim.fs.normalize(vim.fn.expand("~/.local/share/crush"))
 
 M.roots = {
   antigravity = vim.fs.normalize(vim.fn.expand("~/.gemini/antigravity-cli/conversations")),
   codex = vim.fs.normalize(vim.fn.expand("~/.codex/sessions")),
   claude = vim.fs.normalize(vim.fn.expand("~/.claude/projects")),
   grok = vim.fs.normalize(vim.fn.expand("~/.grok")),
+  cursor = vim.fs.normalize(vim.fn.expand("~/.cursor/chats")),
+  crush = crush_default_root,
 }
 
 local function env_value(tool, name)
@@ -39,12 +42,57 @@ local function resolve_path(path, cwd)
   return vim.fs.normalize(absolute and path or vim.fs.joinpath(cwd or vim.fn.getcwd(), path))
 end
 
+local function command_data_dir(tool, cwd)
+  local cmd = tool and tool.cmd
+  if type(cmd) ~= "table" then
+    return
+  end
+  for i, arg in ipairs(cmd) do
+    if arg == "--data-dir" or arg == "-D" then
+      return resolve_path(cmd[i + 1], cwd)
+    end
+    local value = type(arg) == "string" and arg:match("^%-%-data%-dir=(.+)$")
+    if value then
+      return resolve_path(value, cwd)
+    end
+  end
+end
+
+local function crush_roots(tool, cwd, session_root)
+  local ret = {}
+  local seen = {}
+  local function add(path)
+    if type(path) ~= "string" or path == "" then
+      return
+    end
+    path = vim.fs.normalize(path)
+    if not seen[path] then
+      seen[path] = true
+      ret[#ret + 1] = path
+    end
+  end
+
+  add(session_root)
+  add(command_data_dir(tool, cwd))
+  add(resolve_path(env_value(tool, "CRUSH_GLOBAL_DATA"), cwd))
+  add(M.roots.crush)
+  add(vim.fs.joinpath(cwd or vim.fn.getcwd(), ".crush"))
+  return ret
+end
+
 local function root(provider, tool, cwd)
-  if provider == "codex" then
+  if provider == "grok" then
+    local home = resolve_path(env_value(tool, "GROK_HOME"), cwd)
+    if home then
+      return home
+    end
+  elseif provider == "codex" then
     local home = resolve_path(env_value(tool, "CODEX_HOME"), cwd)
     if home then
       return vim.fs.joinpath(home, "sessions")
     end
+  elseif provider == "crush" then
+    return command_data_dir(tool, cwd) or resolve_path(env_value(tool, "CRUSH_GLOBAL_DATA"), cwd) or M.roots.crush
   end
   return M.roots[provider]
 end
@@ -83,6 +131,41 @@ local function read_first_line(path)
   return bytes < 2 * 1024 * 1024 and table.concat(parts) or nil
 end
 
+local function is_grok_id(id)
+  if type(id) ~= "string" then
+    return false
+  end
+  if #id == 12 then
+    return id:match("^[0-9a-fA-F]+$") ~= nil
+  end
+  local lengths = { 8, 4, 4, 4, 12 }
+  local parts = vim.split(id, "-", { plain = true })
+  if #parts ~= #lengths then
+    return false
+  end
+  for i, part in ipairs(parts) do
+    if #part ~= lengths[i] or part:match("^[0-9a-fA-F]+$") == nil then
+      return false
+    end
+  end
+  return true
+end
+
+local function grok_session_id(path, session_root)
+  session_root = session_root or M.roots.grok
+  if not session_root then
+    return
+  end
+  path = vim.fs.normalize(path)
+  session_root = vim.fs.normalize(session_root)
+  local prefix = session_root .. "/sessions/"
+  if path:sub(1, #prefix) ~= prefix then
+    return
+  end
+  local id = path:sub(#prefix + 1):match("^[^/]+/([^/]+)/")
+  return is_grok_id(id) and id or nil
+end
+
 local function valid_antigravity(path)
   local data = read_prefix(path)
   return data
@@ -91,9 +174,31 @@ local function valid_antigravity(path)
     and data:find("CREATE TABLE", 1, true) ~= nil
 end
 
-local function session_id(provider, path)
+local function antigravity_project_id(id)
+  local root = vim.fs.dirname(M.roots.antigravity or "")
+  if not root or root == "." then
+    return
+  end
+  local data = read_prefix(vim.fs.joinpath(root, "cache", "conversation_metadata.json"))
+  if not data then
+    return
+  end
+  local ok, metadata = pcall(vim.json.decode, data)
+  if not ok or type(metadata) ~= "table" then
+    return
+  end
+  local entry = metadata.conversations and metadata.conversations[id]
+  local project_id = entry and entry.summary and entry.summary.ProjectID
+  return type(project_id) == "string" and project_id:match("^[%w_.%-]+$") and project_id or nil
+end
+
+local function session_id(provider, path, session_root)
   if provider == "antigravity" then
     return vim.fs.basename(path):match("^([%w%-]+)%.db$")
+  elseif provider == "grok" then
+    return grok_session_id(path, session_root)
+  elseif provider == "cursor" then
+    return vim.fs.basename(vim.fs.dirname(path))
   end
   local line = read_first_line(path)
   if not line then
@@ -110,18 +215,31 @@ local function session_id(provider, path)
   return value.sessionId
 end
 
-local function allowed(provider, path, session_root)
+local function allowed(provider, path, session_root, tool, cwd)
   path = vim.fs.normalize(path)
   session_root = session_root or M.roots[provider]
+  if provider == "crush" then
+    for _, candidate in ipairs(crush_roots(tool, cwd, session_root)) do
+      if path == vim.fs.joinpath(candidate, "crush.db") then
+        return true
+      end
+    end
+    return false
+  end
   if provider == "grok" then
-    return session_root and path == session_root .. "/grok.db"
+    return (session_root and path == session_root .. "/grok.db") or grok_session_id(path, session_root) ~= nil
+  end
+  if provider == "cursor" then
+    return session_root
+      and path:sub(1, #session_root + 1) == session_root .. "/"
+      and path:match("/[^/]+/store%.db$") ~= nil
   end
   local extension = provider == "antigravity" and "%.db$" or "%.jsonl?$"
   return session_root and path:sub(1, #session_root + 1) == session_root .. "/" and path:match(extension)
 end
 
 local function database_path(provider, path)
-  if provider ~= "grok" then
+  if provider ~= "grok" and provider ~= "cursor" then
     return path
   end
   return path:gsub("%-wal$", ""):gsub("%-shm$", "")
@@ -129,9 +247,11 @@ end
 
 local function valid_id(provider, id)
   if provider == "grok" then
-    return type(id) == "string" and #id == 12 and id:match("^[0-9a-f]+$") ~= nil
+    return is_grok_id(id)
   elseif provider == "opencode" then
     return type(id) == "string" and #id >= 8 and #id <= 128 and id:match("^ses_[0-9A-Za-z]+$") ~= nil
+  elseif provider == "crush" then
+    return type(id) == "string" and #id >= 8 and #id <= 128 and id:match("^[0-9A-Za-z%-]+$") ~= nil
   end
   return type(id) == "string" and id ~= ""
 end
@@ -157,10 +277,12 @@ end
 
 local function output_ids(provider, session)
   local found = {}
-  local pattern = provider == "grok" and "[0-9a-f]+" or "ses_[0-9A-Za-z]+"
-  for id in output(session):gmatch(pattern) do
-    if valid_id(provider, id) then
-      found[id] = true
+  local patterns = provider == "grok" and { "[0-9a-fA-F][0-9a-fA-F%-]+" } or { "ses_[0-9A-Za-z]+" }
+  for _, pattern in ipairs(patterns) do
+    for id in output(session):gmatch(pattern) do
+      if valid_id(provider, id) then
+        found[id] = true
+      end
     end
   end
   return found
@@ -225,7 +347,122 @@ local function opencode_active(session)
   return #ids == 1 and ids[1] or nil
 end
 
-local function proc_paths(pid)
+local proc_paths
+
+local function crush_sessions(tool, data_dir)
+  if type(data_dir) ~= "string" or data_dir == "" then
+    return {}
+  end
+  local executable = tool and tool.cmd and tool.cmd[1] or "crush"
+  if vim.fn.executable(executable) ~= 1 then
+    return {}
+  end
+  local lines = Util.exec({ executable, "--data-dir", data_dir, "session", "list", "--json" }, { notify = false })
+  local ok, sessions = pcall(vim.json.decode, table.concat(lines or {}, "\n"))
+  return ok and type(sessions) == "table" and sessions or {}
+end
+
+local function crush_session_id(item)
+  if type(item) ~= "table" then
+    return
+  end
+  local id = item.uuid or item.id
+  return valid_id("crush", id) and id or nil
+end
+
+local function crush_resolve(items, id)
+  if not valid_id("crush", id) then
+    return
+  end
+  local matches = {}
+  for _, item in ipairs(items) do
+    local uuid = crush_session_id(item)
+    local hash = type(item) == "table" and item.id
+    if uuid == id or hash == id or (type(hash) == "string" and hash:sub(1, #id) == id) then
+      matches[#matches + 1] = uuid
+    end
+  end
+  return #matches == 1 and matches[1] or nil
+end
+
+local function crush_process_id(proc)
+  local env = proc and proc.env or nil
+  if type(env) == "table" and valid_id("crush", env.CRUSH_SESSION_ID) then
+    return env.CRUSH_SESSION_ID
+  end
+  local cmd = proc.cmd or ""
+  return cmd:match("%-%-session=([^%s]+)") or cmd:match("%-%-session%s+([^%s]+)") or cmd:match("%-s%s+([^%s]+)")
+end
+
+local function crush_capture(session, session_root)
+  local found = {}
+  local explicit = {}
+  local scanned = {}
+  local procs = Procs.new()
+  local function scan(pid)
+    if scanned[pid] then
+      return
+    end
+    scanned[pid] = true
+    local proc = procs:get(pid)
+    local id = crush_process_id(proc)
+    if id then
+      explicit[id] = true
+    end
+    for _, path in ipairs(proc_paths(pid)) do
+      path = database_path("crush", path)
+      if allowed("crush", path, session_root, session.tool, session.cwd) then
+        found[path] = true
+      end
+    end
+  end
+  for _, root_pid in ipairs(session.pids or {}) do
+    for _, pid in ipairs(Procs.pids(root_pid)) do
+      scan(pid)
+    end
+  end
+
+  local paths = vim.tbl_keys(found)
+  if #paths == 0 then
+    return
+  end
+
+  local candidates = {}
+  for _, path in ipairs(paths) do
+    local items = crush_sessions(session.tool, vim.fs.dirname(path))
+    for id in pairs(explicit) do
+      local resolved = crush_resolve(items, id) or (valid_id("crush", id) and id or nil)
+      if resolved then
+        candidates[resolved] = path
+      end
+    end
+    if vim.tbl_isempty(explicit) and #paths == 1 then
+      local latest = crush_session_id(items[1])
+      if latest then
+        candidates[latest] = path
+      end
+    end
+  end
+
+  local ids = vim.tbl_keys(candidates)
+  if #ids ~= 1 then
+    return
+  end
+  local id = ids[1]
+  local path = candidates[id]
+  return {
+    id = id,
+    provider = "crush",
+    resumable = true,
+    data = { path = path },
+  }
+end
+
+local function crush_has(tool, data_dir, id)
+  return crush_resolve(crush_sessions(tool, data_dir), id) == id
+end
+
+proc_paths = function(pid)
   local ret = {}
   local fd = "/proc/" .. pid .. "/fd"
   local scan = vim.uv.fs_scandir(fd)
@@ -251,7 +488,7 @@ local function proc_paths(pid)
   return ret
 end
 
----@param provider "antigravity"|"codex"|"claude"|"grok"|"opencode"
+---@param provider "antigravity"|"codex"|"claude"|"grok"|"opencode"|"cursor"|"crush"
 ---@param session sidekick.cli.Session
 ---@return sidekick.cli.Conversation?
 function M.capture(provider, session)
@@ -272,6 +509,9 @@ function M.capture(provider, session)
     end
     return
   end
+  if provider == "crush" then
+    return crush_capture(session, root(provider, session.tool, session.cwd))
+  end
   local found = {}
   local scanned = {}
   local session_root = root(provider, session.tool, session.cwd)
@@ -286,7 +526,7 @@ function M.capture(provider, session)
         if provider == "grok" then
           found[path] = path
         else
-          local id = session_id(provider, path)
+          local id = session_id(provider, path, session_root)
           if id then
             found[id] = path
           end
@@ -300,8 +540,27 @@ function M.capture(provider, session)
     end
   end
   if provider == "grok" then
+    local candidates = {}
+    for path in pairs(found) do
+      local id = session_id(provider, path, session_root)
+      if id then
+        candidates[id] = path
+      end
+    end
+    local candidate_ids = vim.tbl_keys(candidates)
+    if #candidate_ids == 1 then
+      local id = candidate_ids[1]
+      return {
+        id = id,
+        provider = provider,
+        resumable = true,
+        data = { path = candidates[id] },
+      }
+    elseif #candidate_ids > 1 then
+      return
+    end
     local paths = vim.tbl_keys(found)
-    if #paths ~= 1 or not valid_database(paths[1]) then
+    if #paths ~= 1 or paths[1] ~= session_root .. "/grok.db" or not valid_database(paths[1]) then
       return
     end
     local path = paths[1]
@@ -325,11 +584,13 @@ function M.capture(provider, session)
     id = ids[1],
     provider = provider,
     resumable = true,
-    data = { path = found[ids[1]] },
+    data = vim.tbl_extend("force", { path = found[ids[1]] }, {
+      project_id = provider == "antigravity" and antigravity_project_id(ids[1]) or nil,
+    }),
   }
 end
 
----@param provider "antigravity"|"codex"|"claude"|"grok"|"opencode"
+---@param provider "antigravity"|"codex"|"claude"|"grok"|"opencode"|"cursor"|"crush"
 ---@param conversation sidekick.cli.Conversation
 ---@param tool? sidekick.cli.Tool
 ---@param cwd? string
@@ -339,20 +600,29 @@ function M.verify(provider, conversation, tool, cwd)
   if provider == "opencode" then
     return valid_id(provider, conversation.id) and opencode_has(conversation.id)
   elseif provider == "grok" then
+    local path_id = type(path) == "string" and session_id(provider, path, session_root) or nil
     return type(path) == "string"
-      and allowed(provider, path)
+      and allowed(provider, path, session_root, tool, cwd)
       and vim.uv.fs_stat(path) ~= nil
       and valid_id(provider, conversation.id)
+      and (path_id == conversation.id or (path == session_root .. "/grok.db" and valid_database(path)))
+  elseif provider == "crush" then
+    return type(path) == "string"
+      and allowed(provider, path, session_root, tool, cwd)
+      and vim.uv.fs_stat(path) ~= nil
       and valid_database(path)
+      and valid_id(provider, conversation.id)
+      and crush_has(tool, vim.fs.dirname(path), conversation.id)
   end
   return type(path) == "string"
     and allowed(provider, path, session_root)
     and vim.uv.fs_stat(path) ~= nil
-    and session_id(provider, path) == conversation.id
+    and (provider ~= "cursor" or valid_database(path))
+    and session_id(provider, path, session_root) == conversation.id
     and (provider ~= "antigravity" or valid_antigravity(path))
 end
 
----@param provider "antigravity"|"codex"|"claude"|"grok"|"opencode"
+---@param provider "antigravity"|"codex"|"claude"|"grok"|"opencode"|"cursor"|"crush"
 ---@param args string[]
 function M.adapter(provider, args)
   return {

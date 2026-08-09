@@ -17,7 +17,7 @@ without leaving your editor.
 
 - **💬 Integrated AI CLI Terminal**
   - 🚀 **Direct Access to AI CLIs**: Interact with your favorite AI command-line tools without leaving Neovim.
-  - 📦 **Pre-configured for Popular Tools**: Out-of-the-box support for Antigravity, Claude, Grok, Codex, Copilot CLI, and more.
+  - 📦 **Pre-configured for Popular Tools**: Out-of-the-box support for Antigravity, Claude, Grok Build, Codex, Copilot CLI, and more.
   - ✨ **Context-Aware Prompts**: Automatically include file content, cursor position, and diagnostics in your prompts.
   - 📝 **Prompt Library**: A library of pre-defined prompts for common tasks like explaining code, fixing issues, or writing tests.
   - 🔄 **Session Persistence**: Keep your CLI sessions alive with `tmux` and `zellij` integration.
@@ -343,6 +343,7 @@ local defaults = {
         hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the agent container" },
         hide_ctrl_z   = { "<c-z>", "blur"      , mode = "nt", desc = "go back to the previous window without hiding the agent container" },
         prompt        = { "<c-p>", "prompt"    , mode = "t" , desc = "insert prompt or context" },
+        agent_fork_t  = { "<a-f>", "fork"       , mode = "t" , desc = "fork the current agent conversation" },
         stopinsert    = { "<c-q>", "stopinsert", mode = "t" , desc = "enter normal mode" },
         normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter normal mode" },
         agent_prev    = { "<s-h>"       , "prev"            , mode = "n", desc = "previous agent" },
@@ -352,6 +353,7 @@ local defaults = {
         agent_move_l  = { "[B"          , "move_prev"       , mode = "n", desc = "move agent tab left" },
         agent_move_r  = { "]B"          , "move_next"       , mode = "n", desc = "move agent tab right" },
         agent_pick    = { "<leader>bj"  , "pick"            , mode = "n", desc = "pick an agent" },
+        agent_fork    = { "<leader>bf"  , "fork"            , mode = "n", desc = "fork the current agent conversation" },
         agent_back    = { "<leader>bb"  , "previous"        , mode = "n", desc = "previously active agent" },
         agent_back_bt = { "<leader>`"   , "previous"        , mode = "n", desc = "previously active agent" },
         agent_pin     = { "<leader>bp"  , "pin"             , mode = "n", desc = "pin agent" },
@@ -402,8 +404,6 @@ local defaults = {
     --- For default configs, see https://github.com/folke/sidekick.nvim/tree/main/sk/cli
     ---@type table<string, sidekick.cli.Config|{}>
     tools = {
-      aider       = {},
-      amazon_q    = {},
       antigravity = {},
       claude      = {},
       codex       = {},
@@ -464,6 +464,7 @@ local defaults = {
       terminal_attached = " ",
       terminal_started  = " ",
       unread            = "• ",
+      fork              = "↗ ",
     },
   },
   debug = false, -- enable debug logging
@@ -623,9 +624,11 @@ tmux/zellij session; if the process is gone, it starts the tool's native resume 
 in a new terminal. A failed or unsupported resume is reported and never replaced with a
 metadata-only tab. Use `:Sidekick cli workspace save|restore|status|clear` to manage the
 snapshot explicitly. Exact provider conversation IDs can be supplied by a tool's
-`resume` adapter. Antigravity, Claude, Codex, Grok, and OpenCode include exact discovery adapters;
+`resume` adapter. Antigravity, Claude, Codex, Cursor, Crush, Grok Build, and OpenCode include exact discovery adapters;
 Copilot, Pi, and Qwen receive a Sidekick-managed UUID at launch so multiple agents of the same type
 can be restored without relying on a provider's “latest conversation” shortcut.
+Crush resumes with its exact session UUID; its current CLI does not expose a native conversation-fork API,
+so Sidekick keeps fork unavailable instead of cloning or reusing the parent session.
 If no stable ID is available, Sidekick reports that agent as failed instead of
 substituting a latest session or interactive browser.
 
@@ -656,6 +659,15 @@ require("sidekick.cli").close(opts)
 ---@param opts? sidekick.cli.Show
 ---@overload fun(name: string)
 require("sidekick.cli").focus(opts)
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli fork</code> Fork the active agent's native conversation into a new independent agent.</td><td>
+
+
+```lua
+---@param opts? sidekick.cli.ForkOpts
+require("sidekick.cli").fork(opts)
 ```
 
 </td></tr>
@@ -944,15 +956,13 @@ Sidekick preconfigures popular AI CLIs. Run `:checkhealth sidekick` to see which
 
 | Tool                                                        | Description          | Installation                                                                                                           |
 | ----------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [`aider`](https://github.com/Aider-AI/aider)                | AI pair programmer   | `pip install aider-chat` or `pipx install aider-chat`                                                                  |
-| [`amazon_q`](https://github.com/aws/amazon-q-developer-cli) | Amazon Q Developer   | [Install guide](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-getting-started-installing.html) |
 | [`antigravity`](https://antigravity.google/download#antigravity-cli) | Google Antigravity CLI | `curl -fsSL https://antigravity.google/cli/install.sh \| bash`                                              |
 | [`claude`](https://github.com/anthropics/claude-code)       | Claude Code CLI      | [See Claude Code docs](https://code.claude.com/docs/en/overview#get-started)
 | [`codex`](https://github.com/openai/codex)                  | OpenAI Codex CLI     | See [OpenAI docs](https://github.com/openai/codex)                                                                     |
 | [`copilot`](https://github.com/github/copilot-cli)          | GitHub Copilot CLI   | `npm install -g @githubnext/github-copilot-cli`                                                                        |
 | [`crush`](https://github.com/charmbracelet/crush)           | Charm's AI assistant | See [installation](https://github.com/charmbracelet/crush)                                                             |
 | [`cursor`](https://cursor.com/cli)                          | Cursor CLI agent     | See [Cursor docs](https://cursor.com/cli)                                                                              |
-| [`grok`](https://github.com/superagent-ai/grok-cli)         | xAI Grok CLI         | See [repo](https://github.com/superagent-ai/grok-cli)                                                                  |
+| [`grok`](https://github.com/xai-org/grok-build)              | Grok Build CLI       | `curl -fsSL https://x.ai/cli/install.sh \| bash`                                                                       |
 | [`opencode`](https://github.com/anomalyco/opencode)        | OpenCode CLI         | `npm install -g opencode`                                                                                              |
 | [`qwen`](https://github.com/QwenLM/qwen-code)               | Alibaba Qwen Code    | See [repo](https://github.com/QwenLM/qwen-code)                                                                        |
 

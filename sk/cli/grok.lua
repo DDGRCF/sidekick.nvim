@@ -2,6 +2,13 @@
 return {
   cmd = { "grok" },
   is_proc = "\\<grok\\>",
-  url = "https://github.com/superagent-ai/grok-cli",
-  resume = require("sidekick.cli.provider_sessions").adapter("grok", { "--session" }),
+  url = "https://github.com/xai-org/grok-build",
+  resume = require("sidekick.cli.provider_sessions").adapter("grok", { "--resume" }),
+  fork = {
+    command = function(tool, conversation)
+      local cmd = vim.deepcopy(tool.cmd)
+      vim.list_extend(cmd, { "--resume", conversation.id, "--fork-session" })
+      return cmd
+    end,
+  },
 }

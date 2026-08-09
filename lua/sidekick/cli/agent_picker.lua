@@ -1,7 +1,9 @@
 local Activity = require("sidekick.cli.activity")
 local Config = require("sidekick.config")
+local Fork = require("sidekick.cli.fork")
 local Panel = require("sidekick.cli.panel")
 local Usage = require("sidekick.cli.agent_usage")
+local Util = require("sidekick.util")
 
 local M = {}
 local preview_cache = {} ---@type table<string,{at:number,output?:string,pending?:boolean,ready?:boolean,waiter?:fun()}>
@@ -72,6 +74,8 @@ local function enrich(item, git)
   local changed = metadata.changed_files or {}
   local title = agent_title(item, t)
   local active, pinned = panel_state(item.id)
+  local forkable, fork_reason, fork_status = Fork.ready(t.tool, t, { capture = false })
+  local forked_from = vim.deepcopy(t.forked_from)
   return {
     id = item.id,
     instance_id = t.instance_id,
@@ -88,6 +92,10 @@ local function enrich(item, git)
     active = active,
     pinned = pinned,
     unread = t._sidekick_unread == true,
+    forkable = forkable,
+    fork_reason = fork_reason,
+    fork_status = fork_status,
+    forked_from = forked_from,
     search = table.concat({
       item.label,
       title,
@@ -99,6 +107,9 @@ local function enrich(item, git)
       active and "active" or "",
       t._sidekick_unread and "unread" or "",
       pinned and "pinned" or "",
+      forkable and "forkable" or "",
+      fork_status == "pending" and "fork-pending" or "",
+      forked_from and ("forked-from " .. (forked_from.title or forked_from.id)) or "",
     }, " "),
   }
 end
@@ -177,6 +188,10 @@ local function preview_metadata(item, terminal, Snacks)
     or Config.ui.icons.external_attached
   local backend_icon = configured_icon(backend_source, ">_")
   local context = terminal and Usage.get(terminal)
+  local forkable = item.forkable
+  local fork_reason = item.fork_reason
+  local fork_status = item.fork_status
+  local forked_from = item.forked_from
   return {
     status = status,
     unread = terminal and terminal._sidekick_unread == true,
@@ -187,6 +202,10 @@ local function preview_metadata(item, terminal, Snacks)
     directory = vim.fn.fnamemodify(item.cwd, ":p:~"),
     backend = item.backend,
     context = context,
+    forkable = forkable,
+    fork_reason = fork_reason,
+    fork_status = fork_status,
+    forked_from = forked_from,
   }
 end
 
@@ -254,6 +273,24 @@ local function preview_winbar(metadata)
     " ",
     highlight("Identifier", metadata.backend),
   })
+  if metadata.forked_from then
+    vim.list_extend(ret, {
+      "  ",
+      highlight("Special", "Forked from:"),
+      " ",
+      highlight("Title", metadata.forked_from.title or metadata.forked_from.id),
+    })
+  else
+    local status = metadata.fork_status or (metadata.forkable and "ready" or "unavailable")
+    local status_hl = status == "ready" and "DiagnosticOk" or status == "pending" and "DiagnosticWarn" or "Comment"
+    local status_text = status == "ready" and "ready" or status == "pending" and "pending" or "unavailable"
+    vim.list_extend(ret, {
+      "  ",
+      highlight("Special", "Fork:"),
+      " ",
+      highlight(status_hl, status_text),
+    })
+  end
   return table.concat(ret)
 end
 
@@ -400,7 +437,8 @@ local function reopen(picker)
   end)
 end
 
-local function snacks(items, Snacks)
+---@param opts? {fork?:boolean}
+local function snacks(items, Snacks, opts)
   local picker, group
   local preview_timer
   local preview_generation = 0
@@ -410,11 +448,15 @@ local function snacks(items, Snacks)
   local function current_filter()
     return FILTERS[filter_index]
   end
+  local function picker_title()
+    local prefix = opts and opts.fork and "Fork Agent" or "Sidekick Agents"
+    return ("%s · %s"):format(prefix, current_filter().label)
+  end
   local function update_filter_title()
     if not picker or picker.closed then
       return
     end
-    picker.title = ("Sidekick Agents · %s"):format(current_filter().label)
+    picker.title = picker_title()
     if picker.update_titles then
       picker:update_titles()
     end
@@ -456,8 +498,6 @@ local function snacks(items, Snacks)
     return type(icon) == "string" and vim.trim(icon) or ""
   end
   local tool_highlights = {
-    aider = "SidekickCliToolAider",
-    amazon_q = "SidekickCliToolAmazonQ",
     antigravity = "SidekickCliToolAntigravity",
     claude = "SidekickCliToolClaude",
     codex = "SidekickCliToolCodex",
@@ -532,13 +572,20 @@ local function snacks(items, Snacks)
   end
   local function confirm(picker, item)
     picker:close()
-    if item and item.agent and resolve(item.agent) then
-      Panel.select(item.agent.id, true)
+    local terminal = item and item.agent and resolve(item.agent)
+    if not terminal then
+      return
     end
+    if opts and opts.fork then
+      return vim.schedule(function()
+        require("sidekick.cli").fork({ source = terminal, focus = true })
+      end)
+    end
+    Panel.select(item.agent.id, true)
   end
   picker = Snacks.picker.pick({
     source = "sidekick_agents",
-    title = "Sidekick Agents · All",
+    title = picker_title(),
     finder = function()
       return vim.tbl_map(function(agent)
         return { text = agent.search, _select_key = agent.id, agent = agent }
@@ -554,6 +601,9 @@ local function snacks(items, Snacks)
       local ret = {}
       if agent.active then
         ret[#ret + 1] = { "◆ ", "SidekickCliTabSelected" }
+      end
+      if agent.forked_from then
+        ret[#ret + 1] = { "↗ ", "Special" }
       end
       if agent.pinned then
         ret[#ret + 1] = { "󰐃 ", "Special" }
@@ -623,6 +673,20 @@ local function snacks(items, Snacks)
           confirm(picker, item)
         end
       end,
+      agent_fork = function(picker, item)
+        local agents = selected(picker, item)
+        if #agents ~= 1 then
+          return Util.warn("Select exactly one agent to fork")
+        end
+        local terminal = resolve(agents[1])
+        if not terminal then
+          return Util.warn("The selected agent is no longer available")
+        end
+        picker:close()
+        vim.schedule(function()
+          require("sidekick.cli").fork({ source = terminal, focus = true })
+        end)
+      end,
       agent_cancel = function(picker)
         if not finish_rename(false) then
           picker:norm(function()
@@ -677,6 +741,7 @@ local function snacks(items, Snacks)
       input = {
         keys = {
           ["<CR>"] = { "agent_confirm", mode = { "n", "i" }, desc = "open agent" },
+          ["<c-f>"] = { "agent_fork", mode = { "n", "i" }, desc = "fork agent conversation" },
           ["<Esc>"] = { "agent_cancel", mode = { "n", "i" }, desc = "close picker" },
           ["<c-p>"] = { "agent_pin", mode = { "n", "i" }, desc = "pin/unpin agent" },
           ["<c-r>"] = { "agent_rename", mode = { "n", "i" }, desc = "rename agent" },
@@ -705,7 +770,13 @@ local function snacks(items, Snacks)
       vim.api.nvim_create_augroup("sidekick_agent_picker_" .. tostring(picker.id or vim.uv.hrtime()), { clear = true })
     vim.api.nvim_create_autocmd("User", {
       group = group,
-      pattern = { "SidekickCliStatus", "SidekickCliAttention", "SidekickCliActivate", "SidekickCliPanel" },
+      pattern = {
+        "SidekickCliStatus",
+        "SidekickCliAttention",
+        "SidekickCliActivate",
+        "SidekickCliPanel",
+        "SidekickCliFork",
+      },
       callback = refresh,
     })
   end
@@ -723,7 +794,8 @@ function M.is_pinned(id)
   return false
 end
 
-local function native(items)
+---@param opts? {fork?:boolean}
+local function native(items, opts)
   vim.ui.select(items, {
     prompt = "Select agent:",
     kind = "sidekick_agent",
@@ -731,14 +803,27 @@ local function native(items)
       return (item.unread and (unread_icon() .. " ") or "") .. item.label
     end,
   }, function(item)
-    if not item or not resolve(item) then
+    local terminal = item and resolve(item)
+    if not terminal then
       return
+    end
+    if opts and opts.fork then
+      return require("sidekick.cli").fork({ source = terminal, focus = true })
     end
     local actions = {
       {
         label = "Open agent",
         action = function()
           Panel.select(item.id, true)
+        end,
+      },
+      {
+        label = "Fork conversation",
+        action = function()
+          local terminal = resolve(item)
+          if terminal then
+            require("sidekick.cli").fork({ source = terminal, focus = true })
+          end
         end,
       },
       {
@@ -761,6 +846,7 @@ local function native(items)
       },
       { label = "Clean completed agents", action = M.cleanup },
     }
+    local fork_action_index = 2
     if item.unread then
       table.insert(actions, 2, {
         label = "Mark output read",
@@ -771,6 +857,17 @@ local function native(items)
           end
         end,
       })
+      fork_action_index = 3
+    end
+    local forkable, fork_reason, fork_status = Fork.ready(terminal.tool, terminal)
+    if not forkable then
+      actions[fork_action_index] = {
+        label = (fork_status == "pending" and "Fork pending: " or "Fork unavailable: ")
+          .. (fork_reason or "unsupported"),
+        action = function()
+          Util.warn(fork_reason or "This agent does not support native conversation fork")
+        end,
+      }
     end
     vim.ui.select(actions, {
       prompt = item.label .. ":",
@@ -820,9 +917,13 @@ function M.items(items, on_update)
 end
 
 ---@param items? {id:string,label:string,key:string,terminal:sidekick.cli.Terminal}[]
-function M.open(items)
+---@param opts? {fork?:boolean}
+function M.open(items, opts)
   items = items or Panel.picker_items()
   if #items == 0 then
+    if opts and opts.fork then
+      return Util.warn("No live agent is available to fork")
+    end
     local cwd = require("sidekick.cli.session").cwd()
     return vim.schedule(function()
       require("sidekick.cli").new({ cwd = cwd })
@@ -832,9 +933,9 @@ function M.open(items)
   local ok, Snacks = pcall(require, "snacks")
   local use_snacks = provider ~= "native" and ok and Snacks.picker and Snacks.picker.pick
   if use_snacks then
-    return snacks(items, Snacks)
+    return snacks(items, Snacks, opts)
   end
-  return native(M.items(items))
+  return native(M.items(items), opts)
 end
 
 return M

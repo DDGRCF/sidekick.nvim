@@ -4,6 +4,7 @@ local Cli = require("sidekick.cli")
 local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
 local Picker = require("sidekick.cli.agent_picker")
+local Resume = require("sidekick.cli.resume")
 local Usage = require("sidekick.cli.agent_usage")
 
 describe("cli agent picker", function()
@@ -15,6 +16,7 @@ describe("cli agent picker", function()
   local old_panel_rename
   local old_schedule
   local old_icons
+  local old_resume_capture
   local Terminal = require("sidekick.cli.terminal")
   local registered = {}
 
@@ -34,6 +36,7 @@ describe("cli agent picker", function()
     old_panel_rename = Panel.rename
     old_schedule = vim.schedule
     old_icons = Config.cli.win.tabs.icons
+    old_resume_capture = Resume.capture
   end)
 
   after_each(function()
@@ -45,6 +48,7 @@ describe("cli agent picker", function()
     Panel.rename = old_panel_rename
     vim.schedule = old_schedule
     Config.cli.win.tabs.icons = old_icons
+    Resume.capture = old_resume_capture
     Usage.clear()
     for _, t in ipairs(registered) do
       Terminal.terminals[t.id] = nil
@@ -421,6 +425,53 @@ describe("cli agent picker", function()
     assert.matches("Attention", picker.title)
     assert.are.same({ failed.id }, ids())
     assert.are.equal(6, find_calls)
+    opts.on_close()
+  end)
+
+  it("defers fork discovery during refreshes and keeps the fork title", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local picker = { closed = false, id = "fork-filter-test" }
+    function picker:find()
+      self.find_calls = (self.find_calls or 0) + 1
+    end
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return picker
+        end,
+      },
+    }
+
+    local captures = 0
+    Resume.capture = function()
+      captures = captures + 1
+      return nil
+    end
+    local terminal = register({
+      id = "fork-filter-agent",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "working",
+    })
+
+    Picker.open({
+      {
+        id = terminal.id,
+        key = terminal.id,
+        label = "Codex: Fork filter",
+        terminal = terminal,
+      },
+    }, { fork = true })
+
+    assert.are.equal("Fork Agent · All", opts.title)
+    opts.finder()
+    assert.are.equal(0, captures)
+
+    opts.actions.agent_filter(picker)
+    assert.are.equal("Fork Agent · Open", picker.title)
+    assert.are.equal(0, captures)
     opts.on_close()
   end)
 

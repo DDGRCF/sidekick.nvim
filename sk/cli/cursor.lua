@@ -2,5 +2,11 @@
 return {
   cmd = { "cursor-agent" },
   is_proc = "\\<cursor-agent\\>",
-  url = "https://cursor.com/cli"
+  url = "https://cursor.com/cli",
+  resume = require("sidekick.cli.provider_sessions").adapter("cursor", { "--resume" }),
+  fork = {
+    prepare = function(tool, conversation, source, done)
+      return require("sidekick.cli.cursor_fork").prepare(tool, conversation, source, done)
+    end,
+  },
 }

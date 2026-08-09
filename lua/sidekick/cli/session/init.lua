@@ -21,6 +21,8 @@ M._attached = {} ---@type table<string,sidekick.cli.Session>
 ---@field instance_id? string unique agent instance id
 ---@field title? string user-facing agent title
 ---@field conversation? sidekick.cli.Conversation native CLI conversation metadata
+---@field forked_from? sidekick.cli.ForkInfo
+---@field skip_resume_prepare? boolean internal flag for provider-native fork commands
 ---@field hidden? boolean start without adding the terminal to a panel
 
 ---@class sidekick.cli.Conversation
@@ -28,6 +30,11 @@ M._attached = {} ---@type table<string,sidekick.cli.Session>
 ---@field provider? string
 ---@field resumable? boolean
 ---@field data? table<string,any> provider-owned serializable metadata
+
+---@class sidekick.cli.ForkInfo
+---@field provider string
+---@field id string
+---@field title? string
 
 ---@alias sidekick.cli.session.Opts sidekick.cli.session.State|{cwd?:string,id?:string}
 
@@ -104,12 +111,14 @@ function M.new(state)
     self.instance_id = self.instance_id or saved.instance_id
     self.title = self.title or saved.title
     self.conversation = self.conversation or saved.conversation
+    self.forked_from = self.forked_from or saved.forked_from
   end
   self.instance_id = self.instance_id or M.instance(self.id)
   local adapter = tool.config.resume
   if
     not self.started
     and not self.conversation
+    and not self.skip_resume_prepare
     and type(adapter) == "table"
     and not vim.islist(adapter)
     and type(adapter.prepare) == "function"
@@ -161,9 +170,10 @@ end
 
 ---@param session sidekick.cli.Session
 function M.persist(session)
-  if session.parent and (session.title ~= nil or session.conversation ~= nil) then
+  if session.parent and (session.title ~= nil or session.conversation ~= nil or session.forked_from ~= nil) then
     session.parent.title = session.title or session.parent.title
     session.parent.conversation = session.conversation or session.parent.conversation
+    session.parent.forked_from = session.forked_from or session.parent.forked_from
     M.persist(session.parent)
   end
   local data = {
@@ -172,6 +182,7 @@ function M.persist(session)
     instance_id = session.instance_id,
     title = session.title,
     conversation = session.conversation,
+    forked_from = session.forked_from,
   }
   Util.set_state(session.sid, data)
   if session.id and session.id ~= session.sid then
@@ -277,6 +288,8 @@ function M.attach(session)
       instance_id = session.instance_id,
       title = session.title,
       conversation = session.conversation,
+      forked_from = session.forked_from,
+      skip_resume_prepare = session.skip_resume_prepare,
       hidden = session.hidden,
     })
     session:start()

@@ -107,6 +107,11 @@ describe("commands", function()
         expected_completions = { "select", "show", "send", "switch", "sync" },
       },
       {
+        name = "includes fork in cli completions",
+        input = "cli f",
+        expected_completions = { "focus", "fork" },
+      },
+      {
         name = "returns empty for unknown command",
         input = "bogus",
         expected_completions = {},

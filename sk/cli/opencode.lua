@@ -92,5 +92,12 @@ return {
   usage = require("sidekick.cli.agent_usage").opencode,
   continue = { "--continue" },
   resume = require("sidekick.cli.provider_sessions").adapter("opencode", { "--session" }),
+  fork = {
+    command = function(tool, conversation)
+      local cmd = vim.deepcopy(tool.cmd)
+      vim.list_extend(cmd, { "--session", conversation.id, "--fork" })
+      return cmd
+    end,
+  },
   native_scroll = true,
 }

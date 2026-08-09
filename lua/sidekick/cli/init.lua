@@ -28,6 +28,7 @@ local M = {}
 ---@field status? fun(self:sidekick.cli.Tool,event:sidekick.cli.ActivityEvent):sidekick.cli.ActivityStatus? exact activity status adapter
 ---@field usage? fun(self:sidekick.cli.Tool,session:sidekick.cli.Terminal,cb:fun(value?:sidekick.cli.ContextUsage)):sidekick.cli.ContextUsage?|boolean? async context-usage adapter; return `true` when it will invoke `cb`
 ---@field resume? string[]|sidekick.cli.ResumeAdapter|fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
+---@field fork? false|string[]|sidekick.cli.ForkAdapter|fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,source:sidekick.cli.Terminal):string[]?
 ---@field continue? string[] native CLI arguments for resuming the most recent conversation
 
 ---@class sidekick.cli.ResumeAdapter
@@ -38,6 +39,13 @@ local M = {}
 ---@field command? fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
 ---@field preflight? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean
 ---@field verify? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean?
+
+---@class sidekick.cli.ForkAdapter
+---@field args? string[]
+---@field available? fun(self:sidekick.cli.Tool,source?:sidekick.cli.Terminal):boolean,string?
+---@field command? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,source?:sidekick.cli.Terminal):string[]?
+---@field after_start? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation:sidekick.cli.Conversation,source:sidekick.cli.Terminal):boolean,string?
+---@field prepare? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,source:sidekick.cli.Terminal,done:fun(cmd?:string[],reason?:string)):boolean,string?
 
 ---@class sidekick.cli.Show
 ---@field name? string
@@ -53,6 +61,11 @@ local M = {}
 
 ---@class sidekick.cli.Send: sidekick.cli.Show,sidekick.cli.Message
 ---@field submit? boolean
+
+---@class sidekick.cli.ForkOpts
+---@field source? sidekick.cli.Terminal
+---@field focus? boolean
+---@field title? string
 
 --- Keymap options similar to `vim.keymap.set` and `lazy.nvim` mappings
 ---@class sidekick.cli.Keymap: vim.keymap.set.Opts
@@ -78,11 +91,12 @@ function M.prompt(opts)
   opts = opts or {}
   opts = type(opts) == "function" and { cb = opts } or opts --[[@as sidekick.cli.Prompt]]
   local cwd = Session.cwd({ cwd = opts.cwd })
-  opts.cb = opts.cb or function(msg, text)
-    if text then
-      M.send({ msg = msg, text = text, cwd = cwd })
+  opts.cb = opts.cb
+    or function(msg, text)
+      if text then
+        M.send({ msg = msg, text = text, cwd = cwd })
+      end
     end
-  end
   require("sidekick.cli.ui.prompt").select(opts)
 end
 
@@ -125,6 +139,22 @@ function M.new(opts)
     return start(state)
   end
   require("sidekick.cli.ui.select").select({ new = true, cb = start })
+end
+
+--- Fork the active agent's native conversation into a new independent agent.
+---@param opts? sidekick.cli.ForkOpts
+function M.fork(opts)
+  opts = opts or {}
+  local Panel = require("sidekick.cli.panel")
+  local source = opts.source or Panel.active()
+  if source then
+    return require("sidekick.cli.fork").start(source, opts)
+  end
+  local items = Panel.picker_items()
+  if #items > 0 then
+    return require("sidekick.cli.agent_picker").open(items, { fork = true })
+  end
+  return Util.warn("No live agent is available to fork")
 end
 
 --- Fuzzy-select an agent tab in the current Sidekick container.
