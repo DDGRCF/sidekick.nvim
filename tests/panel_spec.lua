@@ -113,6 +113,27 @@ describe("cli agent panel", function()
     assert.is_true(vim.wo[win].winfixbuf)
   end)
 
+  it("closes duplicate splits created from the panel window", function()
+    for _, command in ipairs({ "split", "vsplit" }) do
+      local first = fake("split-one-" .. command, "codex", "One")
+      Panel.show(first)
+      local tab = vim.api.nvim_get_current_tabpage()
+      local panel_win = Panel.win(first)
+
+      vim.api.nvim_set_current_win(panel_win)
+      vim.cmd(command)
+
+      local panel_buffers = vim.tbl_filter(function(win)
+        return vim.api.nvim_win_get_buf(win) == first.buf
+      end, vim.api.nvim_tabpage_list_wins(tab))
+      assert.are.equal(1, #panel_buffers)
+      assert.are.equal(panel_win, Panel.win(first))
+
+      Panel.hide()
+      Panel.remove(first.id)
+    end
+  end)
+
   it("focuses an explicitly selected agent", function()
     local first = fake("codex-1", "codex", "Implement panel")
     local second = fake("claude-1", "claude", "Review panel")

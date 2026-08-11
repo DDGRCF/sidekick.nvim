@@ -861,6 +861,20 @@ local function refresh_panel(p)
   end
 end
 
+local function close_duplicate_window()
+  local p = panel()
+  if not p or not valid(p.win) then
+    return
+  end
+  local win = vim.api.nvim_get_current_win()
+  if win == p.win or not valid(win) then
+    return
+  end
+  if vim.api.nvim_win_get_buf(win) == vim.api.nvim_win_get_buf(p.win) then
+    pcall(vim.api.nvim_win_close, win, true)
+  end
+end
+
 ---@param id? string
 function M.refresh(_)
   M.clicks = {}
@@ -1516,6 +1530,10 @@ function M.setup()
   vim.api.nvim_create_autocmd({ "VimResized", "TabEnter" }, {
     group = Config.augroup,
     callback = refresh_activation,
+  })
+  vim.api.nvim_create_autocmd("WinNew", {
+    group = Config.augroup,
+    callback = close_duplicate_window,
   })
   vim.api.nvim_create_autocmd("WinResized", {
     group = Config.augroup,
