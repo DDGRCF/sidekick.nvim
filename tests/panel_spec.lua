@@ -134,6 +134,24 @@ describe("cli agent panel", function()
     end
   end)
 
+  it("keeps a floating window that reuses the panel buffer", function()
+    local first = fake("popup-one", "codex", "One")
+    Panel.show(first)
+    local panel_win = Panel.win(first)
+    local popup = vim.api.nvim_open_win(first.buf, true, {
+      relative = "editor",
+      width = 10,
+      height = 2,
+      row = 1,
+      col = 1,
+    })
+
+    assert.is_true(vim.api.nvim_win_is_valid(popup))
+    assert.are.equal(panel_win, Panel.win(first))
+
+    vim.api.nvim_win_close(popup, true)
+  end)
+
   it("focuses an explicitly selected agent", function()
     local first = fake("codex-1", "codex", "Implement panel")
     local second = fake("claude-1", "claude", "Review panel")

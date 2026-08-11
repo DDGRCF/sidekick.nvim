@@ -870,6 +870,9 @@ local function close_duplicate_window()
   if win == p.win or not valid(win) then
     return
   end
+  if vim.api.nvim_win_get_config(win).relative ~= "" then
+    return
+  end
   if vim.api.nvim_win_get_buf(win) == vim.api.nvim_win_get_buf(p.win) then
     pcall(vim.api.nvim_win_close, win, true)
   end
