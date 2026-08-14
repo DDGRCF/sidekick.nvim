@@ -88,7 +88,18 @@ local defaults = {
         ---@type "thin"|"thick"|"slant"|"slope"|"padded_slant"|"padded_slope"|{left:string,right:string}
         separator_style = "thin",
         --- Set per-tool icons here. Unconfigured tools use their name.
-        icons = {}, ---@type table<string, string>
+        icons = {
+          antigravity = "󱚣 ",
+          claude = "󰚩 ",
+          codex = "󱠡 ",
+          copilot = " ",
+          crush = "󰛡 ",
+          cursor = "󰅴 ",
+          grok = "󱚥 ",
+          opencode = "󰄛 ",
+          pi = "󰠭 ",
+          qwen = "󱚠 ",
+        }, ---@type table<string, string>
         status = { ---@type table<sidekick.cli.ActivityStatus, string>
           idle = "○",
           starting = "◌",

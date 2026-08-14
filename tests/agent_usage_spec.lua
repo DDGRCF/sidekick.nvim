@@ -98,12 +98,14 @@ describe("cli agent usage", function()
       vim.schedule(function()
         cb({
           code = 0,
-          stdout = vim.json.encode({ {
-            info = {
-              role = "assistant",
-              tokens = { input = 32000, output = 500, reasoning = 1000, cache = { read = 64000, write = 0 } },
+          stdout = vim.json.encode({
+            {
+              info = {
+                role = "assistant",
+                tokens = { input = 32000, output = 500, reasoning = 1000, cache = { read = 64000, write = 0 } },
+              },
             },
-          } }),
+          }),
         })
       end)
       return {}

@@ -332,9 +332,13 @@ function M.opencode(_, terminal, cb)
   if not base_url or not id then
     return
   end
-  vim.system({ "curl", "-sS", "--max-time", "1", base_url .. "/session/" .. id .. "/message" }, { text = true }, function(result)
-    cb(type(result) == "table" and result.code == 0 and M.parse_opencode(result.stdout) or nil)
-  end)
+  vim.system(
+    { "curl", "-sS", "--max-time", "1", base_url .. "/session/" .. id .. "/message" },
+    { text = true },
+    function(result)
+      cb(type(result) == "table" and result.code == 0 and M.parse_opencode(result.stdout) or nil)
+    end
+  )
   return true
 end
 
