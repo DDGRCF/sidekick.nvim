@@ -7,3 +7,7 @@
 foo.*
 node_modules
 tt.*
+.codegraph/
+.cursor/
+.omc/
+*.nvimlog

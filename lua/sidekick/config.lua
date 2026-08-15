@@ -69,6 +69,7 @@ local defaults = {
       float = {
         width = 0.9,
         height = 0.9,
+        border = "rounded",
       },
       -- Options used when layout is "left"|"bottom"|"top"|"right"
       ---@type vim.api.keyset.win_config
@@ -234,6 +235,8 @@ local defaults = {
       terminal_started  = " ",
       unread            = "• ",
       fork              = "↗ ",
+      pin               = "󰐃 ",
+      close             = " ",
     },
   },
   debug = false, -- enable debug logging
@@ -360,12 +363,21 @@ function M.set_hl()
     return vim.fn.hlexists(name) == 1 and name or fallback
   end
   local links = {
-    DiffContext = "DiffChange",
+    DiffContext = "CursorLine",
     DiffAdd = "DiffText",
     DiffDelete = "DiffDelete",
     Sign = "Special",
     NesSummary = "Special",
+    NesSummaryIcon = "Special",
+    NesSummaryCount = "Title",
+    NesSummaryMeta = "Comment",
+    NesSign = "Special",
+    NesSignAdd = "DiffAdd",
+    NesSignChange = "DiffChange",
+    NesSignDelete = "DiffDelete",
     Chat = "NormalFloat",
+    FloatBorder = available("FloatBorder", "WinSeparator"),
+    FloatTitle = available("FloatTitle", "Title"),
     CliMissing = "DiagnosticError",
     CliAttached = "Special",
     CliStarted = "DiagnosticWarn",
@@ -378,6 +390,8 @@ function M.set_hl()
     CliStatusDone = "DiagnosticOk",
     CliStatusError = "DiagnosticError",
     CliAttention = "DiagnosticInfo",
+    CliClose = "Comment",
+    CliPin = "Special",
     CliTool = "Special",
     CliToolAntigravity = "Special",
     CliToolClaude = "Constant",

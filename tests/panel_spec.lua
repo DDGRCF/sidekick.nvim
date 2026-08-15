@@ -307,6 +307,21 @@ describe("cli agent panel", function()
     Config.cli.win.tabs.icons = old
   end)
 
+  it("uses configurable pin and close icons", function()
+    local old_pin, old_close = Config.ui.icons.pin, Config.ui.icons.close
+    local codex = fake("codex-1", "codex", "Decorated panel")
+    Panel.show(codex)
+    Panel.panels[vim.api.nvim_get_current_tabpage()].pinned[codex.id] = true
+
+    Config.ui.icons.pin = "PIN"
+    Config.ui.icons.close = "CLOSE"
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    Config.ui.icons.pin, Config.ui.icons.close = old_pin, old_close
+    assert.is_not_nil(line:find("PIN", 1, true))
+    assert.is_not_nil(line:find("CLOSE", 1, true))
+  end)
+
   it("supports configurable tab separators", function()
     local old = Config.cli.win.tabs.separator_style
     local first = fake("one", "codex", "One")

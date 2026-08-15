@@ -520,6 +520,19 @@ local function agent_marker()
   return escape(agent_marker_text())
 end
 
+local function icon_text(name, fallback)
+  local icon = Config.ui.icons[name]
+  return type(icon) == "string" and vim.trim(icon) or fallback
+end
+
+local function pin_icon_text()
+  return icon_text("pin", "󰐃")
+end
+
+local function close_icon_text()
+  return icon_text("close", "")
+end
+
 local function status_icon_text(t)
   if Config.cli.win.tabs.show_status == false then
     return ""
@@ -581,11 +594,11 @@ local function tab_width(p, t, left_separator, right_separator, title_value)
     .. (attention_text(t) ~= "" and (attention_text(t) .. " ") or "")
     .. (title_value or title_text(t))
   if p.pinned[t.id] then
-    text = text .. " 󰐃"
+    text = text .. " " .. pin_icon_text()
   end
   text = text .. " "
   if Config.cli.win.tabs.show_close then
-    text = text .. " "
+    text = text .. close_icon_text() .. " "
   end
   return vim.api.nvim_strwidth(left_separator .. text .. right_separator)
 end
@@ -772,11 +785,16 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
   if attention_text(t) ~= "" then
     parts[#parts + 1] = ("%%#SidekickCliAttention#%s "):format(attention(t))
   end
-  parts[#parts + 1] = ("%%#%s#: %s%s "):format(tool_hl, title(t, title_value), p.pinned[t.id] and " 󰐃" or "")
+  parts[#parts + 1] = ("%%#%s#: %s"):format(base, title(t, title_value))
+  if p.pinned[t.id] then
+    parts[#parts + 1] = ("%%#SidekickCliPin# %s"):format(pin_icon_text())
+  end
+  parts[#parts + 1] = " "
   parts[#parts + 1] = "%T"
   if Config.cli.win.tabs.show_close then
     parts[#parts + 1] = click("close", p, t.id)
-    parts[#parts + 1] = ("%%#%s# %%T"):format(base)
+    local close_hl = selected and base or "SidekickCliClose"
+    parts[#parts + 1] = ("%%#%s#%s %%T"):format(close_hl, close_icon_text())
   end
   parts[#parts + 1] = ("%%#SidekickCliTabSeparator#%s"):format(escape(right_separator))
   return table.concat(parts)
@@ -920,6 +938,7 @@ local function open(p, buf)
       or opts.col
     opts.title = opts.title or " Sidekick Agents "
     opts.title_pos = opts.title_pos or "center"
+    opts.border = opts.border or "rounded"
   else
     opts.style = opts.style or "minimal"
     opts.split = ({ top = "above", left = "left", bottom = "below", right = "right" })[layout]

@@ -5,6 +5,11 @@ local Util = require("sidekick.util")
 local M = {}
 local SUMMARY_NS = vim.api.nvim_create_namespace("sidekick.nes.summary")
 local summary_marks = {} ---@type table<integer,{id:integer,row:integer,text:string}>
+local SIGN_HL = {
+  add = "SidekickNesSignAdd",
+  change = "SidekickNesSignChange",
+  delete = "SidekickNesSignDelete",
+}
 
 local function summary_enabled()
   return Config.nes.review and Config.nes.review.summary ~= false
@@ -12,14 +17,42 @@ end
 
 ---@param buf integer
 ---@param summary? {edits:integer,hunks:integer,current:integer?}
----@return string
-local function summary_text(buf, summary)
+---@return {icon:string,current:string,edits:string,hunks:string}
+local function summary_parts(buf, summary)
   summary = summary or Nes.summary(buf)
   local current = summary.current and ("%d/%d"):format(summary.current, summary.hunks) or tostring(summary.hunks)
   local edit_word = summary.edits == 1 and "edit" or "edits"
   local hunk_word = summary.hunks == 1 and "hunk" or "hunks"
   local icon = type(Config.ui.icons.nes) == "string" and vim.trim(Config.ui.icons.nes) or "NES"
-  return (" %s %s · %d %s · %d %s"):format(icon, current, summary.edits, edit_word, summary.hunks, hunk_word)
+  return {
+    icon = icon,
+    current = current,
+    edits = ("%d %s"):format(summary.edits, edit_word),
+    hunks = ("%d %s"):format(summary.hunks, hunk_word),
+  }
+end
+
+---@param buf integer
+---@param summary? {edits:integer,hunks:integer,current:integer?}
+---@return string
+local function summary_text(buf, summary)
+  local parts = summary_parts(buf, summary)
+  return (" %s %s · %s · %s"):format(parts.icon, parts.current, parts.edits, parts.hunks)
+end
+
+---@param buf integer
+---@param summary? {edits:integer,hunks:integer,current:integer?}
+---@return sidekick.Text
+local function summary_virt_text(buf, summary)
+  local parts = summary_parts(buf, summary)
+  return {
+    { " " .. parts.icon .. " ", "SidekickNesSummaryIcon" },
+    { parts.current, "SidekickNesSummaryCount" },
+    { " · ", "SidekickNesSummaryMeta" },
+    { parts.edits, "SidekickNesSummaryMeta" },
+    { " · ", "SidekickNesSummaryMeta" },
+    { parts.hunks, "SidekickNesSummaryMeta" },
+  }
 end
 
 ---@param edit sidekick.NesEdit
@@ -44,7 +77,7 @@ local function update_summary(edit)
   end
 
   local opts = {
-    virt_text = { { text, "SidekickNesSummary" } },
+    virt_text = summary_virt_text(buf, summary),
     virt_text_pos = "eol",
   }
   if previous then
@@ -87,9 +120,10 @@ function M.render(edit, summaries)
 
   if show_sign then
     -- Add the sign at the first position
+    local sign_hl = SIGN_HL[diff.hunks[1].kind] or "SidekickNesSign"
     Util.set_extmark(edit.buf, Config.ns, from[1], 0, {
       sign_text = Config.ui.icons.nes,
-      sign_hl_group = "SidekickSign",
+      sign_hl_group = sign_hl,
     })
   end
 

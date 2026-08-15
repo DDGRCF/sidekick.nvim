@@ -304,6 +304,7 @@ local defaults = {
       float = {
         width = 0.9,
         height = 0.9,
+        border = "rounded",
       },
       -- Options used when layout is "left"|"bottom"|"top"|"right"
       ---@type vim.api.keyset.win_config
@@ -465,6 +466,8 @@ local defaults = {
       terminal_started  = " ",
       unread            = "• ",
       fork              = "↗ ",
+      pin               = "󰐃 ",
+      close             = " ",
     },
   },
   debug = false, -- enable debug logging

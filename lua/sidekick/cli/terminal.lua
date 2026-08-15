@@ -51,7 +51,14 @@ end
 
 ---@type vim.wo
 local wo = {
-  winhighlight = "Normal:SidekickChat,NormalNC:SidekickChat,EndOfBuffer:SidekickChat,SignColumn:SidekickChat",
+  winhighlight = table.concat({
+    "Normal:SidekickChat",
+    "NormalNC:SidekickChat",
+    "EndOfBuffer:SidekickChat",
+    "SignColumn:SidekickChat",
+    "FloatBorder:SidekickFloatBorder",
+    "FloatTitle:SidekickFloatTitle",
+  }, ","),
   colorcolumn = "",
   cursorcolumn = false,
   cursorline = false,

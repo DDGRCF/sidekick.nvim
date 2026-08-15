@@ -497,6 +497,14 @@ local function snacks(items, Snacks, opts)
     local icon = Config.ui.icons.installed
     return type(icon) == "string" and vim.trim(icon) or ""
   end
+  local function pin_icon()
+    local icon = Config.ui.icons.pin
+    return type(icon) == "string" and vim.trim(icon) or "󰐃"
+  end
+  local function fork_icon()
+    local icon = Config.ui.icons.fork
+    return type(icon) == "string" and vim.trim(icon) or "↗"
+  end
   local tool_highlights = {
     antigravity = "SidekickCliToolAntigravity",
     claude = "SidekickCliToolClaude",
@@ -603,10 +611,10 @@ local function snacks(items, Snacks, opts)
         ret[#ret + 1] = { "◆ ", "SidekickCliTabSelected" }
       end
       if agent.forked_from then
-        ret[#ret + 1] = { "↗ ", "Special" }
+        ret[#ret + 1] = { fork_icon() .. " ", "Special" }
       end
       if agent.pinned then
-        ret[#ret + 1] = { "󰐃 ", "Special" }
+        ret[#ret + 1] = { pin_icon() .. " ", "SidekickCliPin" }
       end
       if agent.unread then
         ret[#ret + 1] = { unread_icon() .. " ", "SidekickCliAttention" }
