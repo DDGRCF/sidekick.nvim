@@ -487,6 +487,25 @@ describe("context module", function()
       end
     end)
 
+    it("bounds git command waits so context rendering cannot hang Neovim", function()
+      local original_system = vim.system
+      local timeout
+      vim.system = function()
+        return {
+          wait = function(_, value)
+            timeout = value
+            return { code = 0, stdout = "ok" }
+          end,
+        }
+      end
+      local ok, result = pcall(Git.run, "/tmp", { "status" })
+      vim.system = original_system
+
+      assert.is_true(ok)
+      assert.are.equal("ok", result)
+      assert.are.equal(1000, timeout)
+    end)
+
     describe("treesitter_scope", function()
       local cases = {
         {

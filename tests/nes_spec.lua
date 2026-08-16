@@ -309,3 +309,112 @@ describe("nes hunk actions", function()
     assert.are.same({ "a b c d e f g h i J" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
   end)
 end)
+
+describe("nes preview refresh", function()
+  local Preview = require("sidekick.nes.preview")
+  local Edit = require("sidekick.nes.edit")
+  local buf
+  local original_get_client
+  local original_enabled
+  local original_nes_enabled
+
+  local function preview_windows()
+    local ret = {}
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win))
+      if name:match("%[NES current%]$") then
+        ret["[NES current]"] = win
+      elseif name:match("%[NES suggested%]$") then
+        ret["[NES suggested]"] = win
+      end
+    end
+    return ret
+  end
+
+  before_each(function()
+    original_get_client = Config.get_client
+    original_enabled = Nes.enabled
+    original_nes_enabled = Config.nes.enabled
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "abcdef", "second" })
+    vim.api.nvim_set_current_buf(buf)
+    vim.lsp.util.buf_versions[buf] = 0
+    Nes.enabled = true
+    Config.nes.enabled = true
+    Config.get_client = function()
+      return { offset_encoding = "utf-16" }
+    end
+    Nes._edits = {
+      setmetatable({
+        buf = buf,
+        from = { 0, 0 },
+        to = { 0, 3 },
+        range = {
+          start = { line = 0, character = 0 },
+          ["end"] = { line = 0, character = 3 },
+        },
+        text = "XYZ",
+        textDocument = { uri = "", version = 0 },
+      }, Edit),
+    }
+  end)
+
+  after_each(function()
+    Preview.close()
+    Config.get_client = original_get_client
+    Nes.enabled = original_enabled
+    Config.nes.enabled = original_nes_enabled
+    Nes._edits = {}
+    Nes._skip_update = {}
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end)
+
+  it("refreshes preview buffers in place and keeps focus", function()
+    assert.is_true(Preview.open())
+    local before = preview_windows()
+    assert.is_not_nil(before["[NES current]"])
+    assert.is_not_nil(before["[NES suggested]"])
+    vim.api.nvim_set_current_win(before["[NES suggested]"])
+
+    for _ = 1, 5 do
+      assert.is_true(Preview.refresh())
+    end
+
+    local after = preview_windows()
+    assert.are.equal(before["[NES current]"], after["[NES current]"])
+    assert.are.equal(before["[NES suggested]"], after["[NES suggested]"])
+    assert.are.equal(before["[NES suggested]"], vim.api.nvim_get_current_win())
+    assert.are.same({ "abcdef", "second" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    assert.are.same(
+      { "XYZdef", "second" },
+      vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(after["[NES suggested]"]), 0, -1, false)
+    )
+  end)
+
+  it("does not rebuild preview windows on resize events", function()
+    assert.is_true(Preview.open())
+    local before = preview_windows()
+    for _ = 1, 5 do
+      vim.api.nvim_exec_autocmds("VimResized", {})
+    end
+    local after = preview_windows()
+    assert.are.equal(before["[NES current]"], after["[NES current]"])
+    assert.are.equal(before["[NES suggested]"], after["[NES suggested]"])
+  end)
+
+  it("does not clear edits when a preview pane emits TextChanged", function()
+    Nes.setup()
+    assert.is_true(Preview.open())
+    local before = preview_windows()
+    local suggested_buf = vim.api.nvim_win_get_buf(before["[NES suggested]"])
+    vim.api.nvim_set_current_win(before["[NES suggested]"])
+    assert.is_true(Preview.refresh())
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = suggested_buf })
+    vim.wait(150)
+
+    assert.is_true(vim.api.nvim_win_is_valid(before["[NES suggested]"]))
+    assert.are.equal(1, #Nes.get(buf))
+  end)
+end)

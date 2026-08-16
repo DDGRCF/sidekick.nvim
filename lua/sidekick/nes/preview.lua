@@ -2,7 +2,7 @@ local Config = require("sidekick.config")
 local Util = require("sidekick.util")
 
 local M = {}
-local state ---@type {source_win:integer,source_buf:integer,left_buf:integer,right_buf:integer,left_win:integer,right_win:integer,closing?:boolean,source_autocmd?:integer,win_autocmd?:integer,resize_autocmd?:integer}?
+local state ---@type {source_win:integer,source_buf:integer,left_buf:integer,right_buf:integer,left_win:integer,right_win:integer,closing?:boolean,refreshing?:boolean,source_autocmd?:integer,win_autocmd?:integer,resize_autocmd?:integer}?
 
 local function valid_buf(buf)
   return buf and vim.api.nvim_buf_is_valid(buf)
@@ -35,6 +35,7 @@ local function prepare_buffer(buf, lines, name)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
+  vim.b[buf].sidekick_nes = false
   vim.bo[buf].filetype = vim.bo[vim.api.nvim_get_current_buf()].filetype
   vim.bo[buf].modifiable = false
   pcall(vim.api.nvim_buf_set_name, buf, name)
@@ -252,21 +253,85 @@ function M.open()
 end
 
 function M.refresh()
-  if not state then
+  local current = state
+  if not current or current.refreshing then
     return false
   end
-  local source_win, source_buf = state.source_win, state.source_buf
-  if not valid_buf(source_buf) then
+  current.refreshing = true
+  local source_win, source_buf = current.source_win, current.source_buf
+  if not valid_buf(source_buf) or not valid_buf(current.left_buf) or not valid_buf(current.right_buf) then
+    current.refreshing = false
     M.close()
     return false
   end
-  if valid_win(source_win) then
-    vim.api.nvim_set_current_win(source_win)
-  else
-    vim.api.nvim_set_current_buf(source_buf)
+  if not valid_win(current.left_win) or not valid_win(current.right_win) then
+    current.refreshing = false
+    M.close()
+    return M.open()
   end
-  M.close()
-  return M.open()
+
+  local Nes = require("sidekick.nes")
+  local ok_data, edits, client = pcall(function()
+    return Nes.get(source_buf), Config.get_client(source_buf)
+  end)
+  if not ok_data then
+    current.refreshing = false
+    M.close()
+    Util.warn(("Failed to refresh NES preview: %s"):format(edits))
+    return false
+  end
+  if #edits == 0 or not client then
+    current.refreshing = false
+    M.close()
+    return false
+  end
+
+  local source_cursor = valid_win(source_win) and vim.api.nvim_win_get_cursor(source_win)
+    or { 1, 0 }
+  local current_lines = vim.api.nvim_buf_get_lines(source_buf, 0, -1, false)
+  local left_buf, right_buf = current.left_buf, current.right_buf
+  -- Buffer updates below can emit TextChanged while a preview pane is
+  -- focused. Consume that event without clearing the real NES edits.
+  Nes._skip_update[left_buf] = true
+  Nes._skip_update[right_buf] = true
+  local ok, err = pcall(function()
+    vim.bo[left_buf].modifiable = true
+    vim.bo[right_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, current_lines)
+    vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, current_lines)
+    vim.lsp.util.apply_text_edits(
+      vim.tbl_map(function(edit)
+        return { range = edit.range, newText = edit.text }
+      end, edits),
+      right_buf,
+      client.offset_encoding
+    )
+  end)
+  if valid_buf(left_buf) then
+    vim.bo[left_buf].modifiable = false
+  end
+  if valid_buf(right_buf) then
+    vim.bo[right_buf].modifiable = false
+  end
+
+  if state == current then
+    current.refreshing = false
+  end
+  if not ok then
+    M.close()
+    Util.warn(("Failed to refresh NES preview: %s"):format(err))
+    return false
+  end
+  if state ~= current then
+    return false
+  end
+
+  for _, win in ipairs({ current.left_win, current.right_win }) do
+    if valid_win(win) then
+      vim.api.nvim_win_set_cursor(win, clamp_cursor(vim.api.nvim_win_get_buf(win), source_cursor))
+    end
+  end
+  return true
 end
 
 ---Focus the source window, carrying the preview cursor back to it.

@@ -1,4 +1,5 @@
 local M = {}
+local WAIT_TIMEOUT_MS = 1000
 
 ---@param cwd string?
 ---@param args string[]
@@ -12,7 +13,10 @@ function M.run(cwd, args)
   vim.list_extend(cmd, args)
 
   local ok, result = pcall(function()
-    return vim.system(cmd, { text = true }):wait()
+    -- Context rendering runs on Neovim's main loop. Never wait forever for a
+    -- repository command (for example while another process holds a Git
+    -- lock); an unavailable context is safer than freezing the editor.
+    return vim.system(cmd, { text = true }):wait(WAIT_TIMEOUT_MS)
   end)
   if not ok or not result or result.code ~= 0 then
     return
