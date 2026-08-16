@@ -486,12 +486,13 @@ local function title(t, value)
   return escape(value or title_text(t))
 end
 
-local function agent_icon_text(t)
-  return Icons.text(t.tool.name)
+local function agent_label_text(t)
+  local icon = Icons.tool(t.tool.name)
+  return icon and (icon .. " " .. t.tool.name) or t.tool.name
 end
 
-local function agent_icon(t)
-  return escape(agent_icon_text(t))
+local function agent_label(t)
+  return escape(agent_label_text(t))
 end
 
 local function tool_highlight(t)
@@ -600,11 +601,11 @@ end
 ---@param compact? boolean
 local function tab_width(p, t, left_separator, right_separator, title_value, compact)
   local marker = compact and "" or agent_marker_text(t)
-  local icon = agent_icon_text(t)
+  local label = agent_label_text(t)
   local status = status_icon_text(t)
   local text = " "
     .. (marker ~= "" and (marker .. " ") or "")
-    .. icon
+    .. label
     .. (status ~= "" and (" " .. status) or "")
     .. ": "
     .. (attention_text(t) ~= "" and (attention_text(t) .. " ") or "")
@@ -810,7 +811,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
   if marker ~= "" then
     parts[#parts + 1] = ("%%#%s# %s "):format(marker_hl, agent_marker(t))
   end
-  parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_icon(t))
+  parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_label(t))
   if status_text ~= "" then
     parts[#parts + 1] = ("%%#%s# %s"):format(status_hl, escape(status_text))
   end
@@ -1282,7 +1283,7 @@ function M.picker_items()
     -- fallback for unconfigured tools when an activity icon is visible.
     local prefix = Config.cli.win.tabs.show_status == false and "" or agent_marker(t)
     prefix = prefix ~= "" and (prefix .. " ") or ""
-    prefix = prefix .. agent_icon(t) .. (status ~= "" and (" " .. status) or "")
+    prefix = prefix .. agent_label(t) .. (status ~= "" and (" " .. status) or "")
     items[#items + 1] = {
       id = item.id,
       label = ("%s: %s"):format(prefix, title_text(t, nil, suffixes[item.id])),

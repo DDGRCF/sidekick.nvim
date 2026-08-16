@@ -206,7 +206,7 @@ describe("cli agent panel", function()
     assert.matches("SidekickCliTabSelectedStatusDone", line)
   end)
 
-  it("renders the configured brand icon in agent tabs", function()
+  it("renders the configured brand icon alongside the tool name in agent tabs", function()
     local codex = fake("codex-icon", "codex", "Implement panel")
     Config.cli.win.tabs.icons = { codex = "C" }
     Panel.show(codex)
@@ -214,7 +214,7 @@ describe("cli agent panel", function()
     local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
 
     assert.matches("C", line)
-    assert.is_nil(line:find("codex", 1, true))
+    assert.is_not_nil(line:find("codex", 1, true))
   end)
 
   it("uses the green diagnostic highlight for working and done tabs", function()
@@ -379,7 +379,7 @@ describe("cli agent panel", function()
     assert.matches("SidekickCliTabSelectedToolClaude", line)
   end)
 
-  it("uses configured agent icons before falling back to the tool name", function()
+  it("uses configured agent icons alongside tool names", function()
     local old = Config.cli.win.tabs.icons
     local codex = fake("codex-1", "codex", "Implement panel")
     Panel.show(codex)
@@ -392,6 +392,7 @@ describe("cli agent panel", function()
     Config.cli.win.tabs.icons = { codex = "X", default = "D" }
     line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
     assert.is_not_nil(line:find("X", 1, true))
+    assert.is_not_nil(line:find("codex", 1, true))
     assert.is_nil(line:find(" D", 1, true))
     assert.is_nil(line:find(vim.trim(Config.ui.icons.installed), 1, true))
 
