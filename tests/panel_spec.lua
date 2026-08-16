@@ -393,6 +393,7 @@ describe("cli agent panel", function()
     line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
     assert.is_not_nil(line:find("X", 1, true))
     assert.is_nil(line:find(" D", 1, true))
+    assert.is_nil(line:find(vim.trim(Config.ui.icons.installed), 1, true))
 
     Config.cli.win.tabs.icons = old
   end)

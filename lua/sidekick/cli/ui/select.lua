@@ -123,15 +123,11 @@ function M.format(state, picker)
     ret[#ret + 1] = { idx .. ".", "SnacksPickerIdx" }
     ret[#ret + 1] = { " " }
   end
-  ret[#ret + 1] = { Config.ui.icons[status], status_hl }
-  ret[#ret + 1] = { " " }
   local icon = Icons.tool(state.tool.name)
-  if icon then
-    ret[#ret + 1] = { icon, Icons.highlight(state.tool.name) }
-    ret[#ret + 1] = { " " }
-  end
+  ret[#ret + 1] = { icon or Config.ui.icons[status], status_hl }
+  ret[#ret + 1] = { " " }
   ret[#ret + 1] = { state.tool.name }
-  local len = sw(state.tool.name) + 2 + (icon and sw(icon) + 1 or 0)
+  local len = sw(state.tool.name) + 2
   if state.new or not state.session then
     ret[#ret + 1] = { " · new", "Special" }
     len = len + 6

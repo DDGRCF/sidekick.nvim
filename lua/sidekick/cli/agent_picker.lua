@@ -601,7 +601,7 @@ local function snacks(items, Snacks, opts)
         ret[#ret + 1] = { unread_icon() .. " ", "SidekickCliAttention" }
       end
       local agent_marker = agent_icon()
-      if agent_marker ~= "" then
+      if agent_marker ~= "" and not icon then
         ret[#ret + 1] = { agent_marker .. " ", "SidekickCliInstalled" }
       end
       if icon then

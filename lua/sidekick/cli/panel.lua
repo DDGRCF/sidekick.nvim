@@ -519,13 +519,18 @@ local function tab_highlight(group, selected)
   return has_highlight(derived) and derived or surface
 end
 
-local function agent_marker_text()
+---@param t sidekick.cli.Terminal
+local function agent_marker_text(t)
+  if Icons.tool(t.tool.name) then
+    return ""
+  end
   local icon = Config.ui.icons.installed
   return type(icon) == "string" and vim.trim(icon) or ""
 end
 
-local function agent_marker()
-  return escape(agent_marker_text())
+---@param t sidekick.cli.Terminal
+local function agent_marker(t)
+  return escape(agent_marker_text(t))
 end
 
 local function icon_text(name, fallback)
@@ -594,7 +599,7 @@ end
 ---@param title_value? string
 ---@param compact? boolean
 local function tab_width(p, t, left_separator, right_separator, title_value, compact)
-  local marker = compact and "" or agent_marker_text()
+  local marker = compact and "" or agent_marker_text(t)
   local icon = agent_icon_text(t)
   local status = status_icon_text(t)
   local text = " "
@@ -789,7 +794,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
   local selected = t.id == p.active
   local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
   local state = (t.status or "idle"):gsub("^%l", string.upper)
-  local marker = compact and "" or agent_marker_text()
+  local marker = compact and "" or agent_marker_text(t)
   local tool_hl = selected and tab_highlight(tool_highlight(t), true) or base
   local marker_hl = selected and tab_highlight("SidekickCliInstalled", true) or base
   local status_hl = tab_highlight("SidekickCliStatus" .. state, selected)
@@ -803,7 +808,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
   parts[#parts + 1] = ("%%#SidekickCliTabSeparator#%s"):format(escape(left_separator))
   parts[#parts + 1] = click("select", p, t.id)
   if marker ~= "" then
-    parts[#parts + 1] = ("%%#%s# %s "):format(marker_hl, agent_marker())
+    parts[#parts + 1] = ("%%#%s# %s "):format(marker_hl, agent_marker(t))
   end
   parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_icon(t))
   if status_text ~= "" then
@@ -1273,9 +1278,9 @@ function M.picker_items()
   for _, item in ipairs(tab_items) do
     local t = item.t
     local status = status_icon(t)
-    -- The installed marker is useful beside the activity icon in the panel,
-    -- but becomes a confusing spacer when activity icons are disabled.
-    local prefix = Config.cli.win.tabs.show_status == false and "" or agent_marker()
+    -- A brand icon replaces the installed marker. Keep the latter as a
+    -- fallback for unconfigured tools when an activity icon is visible.
+    local prefix = Config.cli.win.tabs.show_status == false and "" or agent_marker(t)
     prefix = prefix ~= "" and (prefix .. " ") or ""
     prefix = prefix .. agent_icon(t) .. (status ~= "" and (" " .. status) or "")
     items[#items + 1] = {

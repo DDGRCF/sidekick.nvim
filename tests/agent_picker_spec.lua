@@ -221,12 +221,12 @@ describe("cli agent picker", function()
     assert.matches("project", formatted)
     assert.matches("main", formatted)
     assert.matches("%+2", formatted)
-    assert.are.same({ vim.trim(Config.ui.icons.installed) .. " ", "SidekickCliInstalled" }, opts.format(found)[1])
-    assert.are.equal("SidekickCliToolCodex", opts.format(found)[2][2])
+    assert.are.same({ vim.trim(old_icons.codex) .. " ", "SidekickCliToolCodex" }, opts.format(found)[1])
+    assert.are.equal("Identifier", opts.format(found)[2][2])
     Config.cli.win.tabs.icons = { codex = "C" }
     local with_icon = opts.format(found)
-    assert.are.same({ "C ", "SidekickCliToolCodex" }, with_icon[2])
-    assert.are.equal("Identifier", with_icon[3][2])
+    assert.are.same({ "C ", "SidekickCliToolCodex" }, with_icon[1])
+    assert.are.equal("Identifier", with_icon[2][2])
     terminal._sidekick_unread = true
     local lines
     local preview_buf = vim.api.nvim_create_buf(false, true)
