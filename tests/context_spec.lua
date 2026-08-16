@@ -5,6 +5,7 @@ local Context = require("sidekick.cli.context")
 local Git = require("sidekick.cli.context.git")
 local GitDiff = require("sidekick.cli.context.git_diff")
 local GitStatus = require("sidekick.cli.context.git_status")
+local Parser = require("sidekick.cli.context.parser")
 local Text = require("sidekick.text")
 local TreeSitterScope = require("sidekick.cli.context.treesitter_scope")
 
@@ -487,23 +488,187 @@ describe("context module", function()
       end
     end)
 
-    it("bounds git command waits so context rendering cannot hang Neovim", function()
+    it("runs git asynchronously and updates the cache after completion", function()
       local original_system = vim.system
-      local timeout
-      vim.system = function()
+      local callback
+      local killed = false
+      Git.invalidate()
+      vim.system = function(_, _, cb)
+        callback = cb
         return {
-          wait = function(_, value)
-            timeout = value
-            return { code = 0, stdout = "ok" }
+          kill = function()
+            killed = true
           end,
         }
       end
       local ok, result = pcall(Git.run, "/tmp", { "status" })
+      assert.is_true(ok)
+      assert.is_nil(result)
+      assert.is_function(callback)
+      callback({ code = 0, stdout = "ok" })
+      vim.wait(50)
+      local cached = Git.run("/tmp", { "status" })
       vim.system = original_system
 
-      assert.is_true(ok)
-      assert.are.equal("ok", result)
-      assert.are.equal(1000, timeout)
+      assert.are.equal("ok", cached)
+      assert.is_false(killed)
+    end)
+
+    it("coalesces in-flight git requests and invokes all callbacks", function()
+      local original_system = vim.system
+      local callback
+      local calls = 0
+      local updates = {}
+      Git.invalidate()
+      vim.system = function(_, _, cb)
+        calls = calls + 1
+        callback = cb
+        return { kill = function() end }
+      end
+
+      local first, first_pending = Git.run("/tmp", { "status", "--sidekick-test" }, function(cwd, key)
+        updates[#updates + 1] = { cwd, key }
+      end)
+      local second, second_pending = Git.run("/tmp", { "status", "--sidekick-test" }, function(cwd, key)
+        updates[#updates + 1] = { cwd, key }
+      end)
+      assert.is_nil(first)
+      assert.is_nil(second)
+      assert.is_true(first_pending)
+      assert.is_true(second_pending)
+      assert.are.equal(1, calls)
+
+      callback({ code = 0, stdout = "cached" })
+      vim.wait(50)
+      vim.system = original_system
+
+      assert.are.equal(2, #updates)
+      assert.are.equal("cached", Git.run("/tmp", { "status", "--sidekick-test" }))
+      assert.are.equal(1, calls)
+    end)
+
+    it("refreshes again when an in-flight git request is invalidated", function()
+      local original_system = vim.system
+      local callbacks = {}
+      local calls = 0
+      local args = { "status", "--sidekick-invalidated-test" }
+      Git.invalidate("/tmp")
+      vim.system = function(_, _, cb)
+        calls = calls + 1
+        callbacks[calls] = cb
+        return { kill = function() end }
+      end
+
+      local first, first_pending = Git.run("/tmp", args)
+      assert.is_nil(first)
+      assert.is_true(first_pending)
+      Git.invalidate("/tmp")
+      callbacks[1]({ code = 0, stdout = "stale" })
+      vim.wait(50)
+
+      local stale, refreshing = Git.run("/tmp", args)
+      assert.are.equal("stale", stale)
+      assert.is_true(refreshing)
+      assert.are.equal(2, calls)
+      callbacks[2]({ code = 0, stdout = "fresh" })
+      vim.wait(50)
+      local fresh, pending = Git.run("/tmp", args)
+      vim.system = original_system
+
+      assert.are.equal("fresh", fresh)
+      assert.is_false(pending)
+      assert.are.equal(2, calls)
+    end)
+
+    it("omits only a pending context fragment while rendering", function()
+      Config.cli.context.test_pending = function()
+        return Git.PENDING
+      end
+      local ctx = Context.get()
+      local text, _, pending = ctx:render("before {test_pending} after")
+      assert.are.equal("before  after", text)
+      assert.is_true(pending)
+      Config.cli.context.test_pending = nil
+    end)
+
+    it("does not cache partial context as complete", function()
+      local ready = false
+      local calls = 0
+      Config.cli.context.test_partial = function()
+        calls = calls + 1
+        return ready and "complete" or "partial", not ready
+      end
+
+      local ctx = Context.get()
+      local first, _, first_pending = ctx:render("{test_partial}")
+      ready = true
+      local second, _, second_pending = ctx:render("{test_partial}")
+      Config.cli.context.test_partial = nil
+
+      assert.are.equal("partial", first)
+      assert.is_true(first_pending)
+      assert.are.equal("complete", second)
+      assert.is_false(second_pending)
+      assert.are.equal(2, calls)
+    end)
+
+    it("invalidates the shared parser cache when filetype changes", function()
+      local original_get_parser = vim.treesitter.get_parser
+      local original_get_lang = vim.treesitter.language.get_lang
+      local get_calls, parse_calls = 0, 0
+      local parser = {
+        parse = function()
+          parse_calls = parse_calls + 1
+        end,
+      }
+      Parser.clear(buf)
+      vim.treesitter.get_parser = function(requested_buf)
+        assert.are.equal(buf, requested_buf)
+        get_calls = get_calls + 1
+        return parser
+      end
+      vim.treesitter.language.get_lang = function(filetype)
+        return filetype
+      end
+
+      Parser.get(buf)
+      Parser.get(buf)
+      vim.bo[buf].filetype = "python"
+      Parser.get(buf)
+
+      vim.treesitter.get_parser = original_get_parser
+      vim.treesitter.language.get_lang = original_get_lang
+      Parser.clear(buf)
+      assert.are.equal(2, get_calls)
+      assert.are.equal(2, parse_calls)
+    end)
+
+    it("releases the shared parser cache when a buffer detaches", function()
+      local original_get_parser = vim.treesitter.get_parser
+      local parser = { parse = function() end }
+      local parser_cache
+      for index = 1, 20 do
+        local name, value = debug.getupvalue(Parser.get, index)
+        if name == "cache" then
+          parser_cache = value
+          break
+        elseif not name then
+          break
+        end
+      end
+      assert.is_table(parser_cache)
+      Parser.clear(buf)
+      vim.treesitter.get_parser = function()
+        return parser
+      end
+
+      Parser.get(buf)
+      assert.is_not_nil(parser_cache[buf])
+      vim.api.nvim_buf_delete(buf, { force = true })
+      vim.wait(50)
+      vim.treesitter.get_parser = original_get_parser
+
+      assert.is_nil(parser_cache[buf])
     end)
 
     describe("treesitter_scope", function()

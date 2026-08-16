@@ -332,36 +332,69 @@ function M.send(opts)
     opts.msg = "{selection}"
   end
 
-  local msg, text = opts.msg or "", opts.text ---@type string?, sidekick.Text[]?
-  if not text then
-    msg, text = M.render(opts)
+  local finished = false
+
+  ---@param msg string?
+  ---@param text sidekick.Text[]?
+  local function send(msg, text)
+    if finished then
+      return
+    end
     if msg == "" or not text then
+      finished = true
       Util.warn("Nothing to send.")
       return
     elseif msg == "\n" then
       msg = "" -- allow sending a new line
       text = {}
     end
+    finished = true
+
+    local prompt_title = msg
+    State.with(function(state)
+      Util.exit_visual_mode()
+      vim.schedule(function()
+        M.title(state.session, prompt_title or "")
+        local formatted = state.tool:format(text)
+        state.session:send(formatted .. "\n")
+        if opts.submit then
+          state.session:submit()
+        end
+      end)
+    end, {
+      attach = true,
+      cwd = opts.cwd,
+      filter = opts.filter,
+      focus = opts.focus,
+      show = true,
+    })
   end
 
-  local prompt_title = msg
-  State.with(function(state)
-    Util.exit_visual_mode()
-    vim.schedule(function()
-      M.title(state.session, prompt_title or "")
-      local formatted = state.tool:format(text)
-      state.session:send(formatted .. "\n")
-      if opts.submit then
-        state.session:submit()
+  local msg, text = opts.msg or "", opts.text ---@type string?, sidekick.Text[]?
+  if text then
+    return send(msg, text)
+  end
+
+  local context
+  local refresh_pending = false
+  local function render()
+    refresh_pending = false
+    local rendered_msg, rendered_text, pending = context:render(opts)
+    if pending then
+      return
+    end
+    send(rendered_msg, rendered_text)
+  end
+  context = Context.get({
+    on_update = function()
+      if finished or refresh_pending then
+        return
       end
-    end)
-  end, {
-    attach = true,
-    cwd = opts.cwd,
-    filter = opts.filter,
-    focus = opts.focus,
-    show = true,
+      refresh_pending = true
+      vim.schedule(render)
+    end,
   })
+  return render()
 end
 
 ---@deprecated use `require("sidekick.cli").prompt()`

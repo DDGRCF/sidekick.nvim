@@ -7,8 +7,13 @@ local PARTIAL_NS = vim.api.nvim_create_namespace("sidekick.nes.partial")
 M._edits = {} ---@type sidekick.NesEdit[]
 M._requests = {} ---@type table<number, number>
 M._skip_update = {} ---@type table<integer, boolean>
+M._review_cache = {} ---@type table<integer,{key:string,edits:sidekick.NesEdit[],items:sidekick.NesReviewItem[],summary:table}>
 M.enabled = false
 M.did_setup = false
+
+function M._invalidate_review()
+  M._review_cache = {}
+end
 
 local function review_summary_enabled()
   return Config.nes.review and Config.nes.review.summary ~= false
@@ -101,13 +106,11 @@ function M.setup()
     on(
       { "CursorMoved" },
       Util.debounce(function()
-        if M.have() then
-          local UI = require("sidekick.nes.ui")
-          if Config.nes.diff.show == "cursor" then
-            UI.update()
-          else
-            UI.update_summary()
-          end
+        local UI = require("sidekick.nes.ui")
+        if Config.nes.diff.show == "cursor" then
+          UI.update_cursor()
+        elseif M.have() then
+          UI.update_summary()
         end
       end, 50)
     )
@@ -186,6 +189,9 @@ function M.get(buf)
     if not vim.api.nvim_buf_is_valid(edit.buf) then
       return false
     end
+    if buf ~= nil and edit.buf ~= buf then
+      return false
+    end
     if edit.textDocument.version ~= vim.lsp.util.buf_versions[edit.buf] then
       return false
     end
@@ -195,7 +201,7 @@ function M.get(buf)
     if edit:is_empty() then
       return false
     end
-    return buf == nil or edit.buf == buf
+    return true
   end, M._edits)
 end
 
@@ -204,6 +210,7 @@ function M.clear()
   M.cancel()
   M._skip_update = {}
   M._edits = {}
+  M._invalidate_review()
   require("sidekick.nes.ui").update()
   local Preview = package.loaded["sidekick.nes.preview"]
   if Preview then
@@ -247,6 +254,8 @@ function M._handler(err, res, ctx)
     end
   end
 
+  M._invalidate_review()
+
   require("sidekick.nes.ui").update()
 end
 
@@ -272,20 +281,7 @@ end
 ---@return sidekick.NesReviewItem[]
 function M.review_items(buf)
   buf = buf or vim.api.nvim_get_current_buf()
-  local ret = {} ---@type sidekick.NesReviewItem[]
-  for _, edit in ipairs(M.get(buf)) do
-    for _, hunk in ipairs(edit:diff().hunks) do
-      ret[#ret + 1] = {
-        edit = edit,
-        hunk = hunk,
-        pos = vim.deepcopy(hunk.pos),
-      }
-    end
-  end
-  table.sort(ret, function(a, b)
-    return compare_pos(a.pos, b.pos) < 0
-  end)
-  return ret
+  return M._review_snapshot(buf).items
 end
 
 ---@param items sidekick.NesReviewItem[]
@@ -305,6 +301,63 @@ local function current_review_index(items, cursor)
       end
     end
   end
+end
+
+---@param buf integer
+---@return {key:string,edits:sidekick.NesEdit[],items:sidekick.NesReviewItem[],summary:table}
+function M._review_snapshot(buf)
+  local valid = vim.api.nvim_buf_is_valid(buf)
+  local tick = valid and vim.api.nvim_buf_get_changedtick(buf) or 0
+  local version = vim.lsp.util.buf_versions[buf] or -1
+  local filetype = valid and vim.bo[buf].filetype or ""
+  local row, col = 0, 0
+  if buf == vim.api.nvim_get_current_buf() then
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    row, col = cursor[1], cursor[2]
+  end
+  local key = table.concat({
+    tostring(M._edits),
+    tick,
+    version,
+    filetype,
+    tostring(is_enabled(buf)),
+    row,
+    col,
+    tostring(Config.nes.diff.inline),
+    vim.o.columns,
+  }, "\31")
+  local cached = M._review_cache[buf]
+  if cached and cached.key == key then
+    return cached
+  end
+
+  local edits = M.get(buf)
+  local items = {} ---@type sidekick.NesReviewItem[]
+  for _, edit in ipairs(edits) do
+    for _, hunk in ipairs(edit:diff().hunks) do
+      items[#items + 1] = {
+        edit = edit,
+        hunk = hunk,
+        pos = vim.deepcopy(hunk.pos),
+      }
+    end
+  end
+  table.sort(items, function(a, b)
+    return compare_pos(a.pos, b.pos) < 0
+  end)
+
+  local current
+  if #items > 0 and buf == vim.api.nvim_get_current_buf() then
+    current = current_review_index(items, { row - 1, col })
+  end
+  local snapshot = {
+    key = key,
+    edits = edits,
+    items = items,
+    summary = { edits = #edits, hunks = #items, current = current },
+  }
+  M._review_cache[buf] = snapshot
+  return snapshot
 end
 
 ---@param buf integer
@@ -425,7 +478,11 @@ local function remap_siblings(client, buf, marks)
         ["end"] = lsp_position(client, buf, mark.edit.to),
       }
       mark.edit.textDocument.version = version or mark.edit.textDocument.version
-      mark.edit._diff = nil
+      if mark.edit.invalidate_diff then
+        mark.edit:invalidate_diff()
+      else
+        mark.edit._diff = nil
+      end
       kept[mark.edit] = true
     end
   end
@@ -506,6 +563,7 @@ local function act_on_current_hunk(action)
     edits[#edits + 1] = next_edit
   end
   M._edits = edits
+  M._invalidate_review()
 
   local completed = not remaining
   local keep_buffer_edits = vim.tbl_contains(
@@ -536,18 +594,7 @@ end
 ---@return {edits:integer,hunks:integer,current:integer?}
 function M.summary(buf)
   buf = buf or vim.api.nvim_get_current_buf()
-  local edits = M.get(buf)
-  local items = M.review_items(buf)
-  local current
-  if #items > 0 and buf == vim.api.nvim_get_current_buf() then
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    current = current_review_index(items, { cursor[1] - 1, cursor[2] })
-  end
-  return {
-    edits = #edits,
-    hunks = #items,
-    current = current,
-  }
+  return M._review_snapshot(buf).summary
 end
 
 ---@param buf? integer

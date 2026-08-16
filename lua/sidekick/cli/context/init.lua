@@ -1,5 +1,6 @@
 local Config = require("sidekick.config")
 local Diag = require("sidekick.cli.context.diagnostics")
+local Git = require("sidekick.cli.context.git")
 local GitDiff = require("sidekick.cli.context.git_diff")
 local GitStatus = require("sidekick.cli.context.git_status")
 local Loc = require("sidekick.cli.context.location")
@@ -76,9 +77,10 @@ M.context = {
 ---@field row integer (1-based)
 ---@field col integer (1-based)
 ---@field range? sidekick.context.Range
+---@field on_update? fun(cwd:string,key:string)
 
----@alias sidekick.context.Fn.ret string|string[]|sidekick.Text|sidekick.Text[]|false
----@alias sidekick.context.Fn fun(ctx: sidekick.context.ctx): sidekick.context.Fn.ret?
+---@alias sidekick.context.Fn.ret string|string[]|sidekick.Text|sidekick.Text[]|false|table
+---@alias sidekick.context.Fn fun(ctx: sidekick.context.ctx):(sidekick.context.Fn.ret?, boolean?)
 
 ---@class sidekick.context.Range
 ---@field from sidekick.Pos (1,0)-based
@@ -87,41 +89,67 @@ M.context = {
 
 ---@class sidekick.Context
 ---@field ctx sidekick.context.ctx
----@field context table<string, sidekick.Text[]|false>
+---@field context table<string, sidekick.Text[]|false|table>
 local C = {}
 C.__index = C
 
-function C.new()
+---@param opts? {on_update?:fun(cwd:string,key:string)}
+function C.new(opts)
   local self = setmetatable({}, C)
   self.ctx = M.ctx()
+  self.ctx.on_update = opts and opts.on_update or nil
   self.context = {}
   return self
 end
 
 ---@param name string
 function C:get(name)
+  local pending = false
   local names = vim.split(name, "|", { plain = true })
   for _, n in ipairs(names) do
-    if self.context[n] == nil then
+    if self.context[n] == nil or self.context[n] == Git.PENDING then
       local fn = M.fn(n)
       if not fn then
         Util.error(("Invalid context `{%s}`"):format(n))
       end
-      local ret = fn and fn(self.ctx) or false
+      local ret, is_pending
+      if fn then
+        ret, is_pending = fn(self.ctx)
+      else
+        ret = false
+      end
+      if ret == Git.PENDING then
+        ret, is_pending = nil, true
+      end
       ret = ret and Text.to_text(ret) or false
       ret = type(ret) == "table" and not vim.tbl_isempty(ret) and ret or false
-      self.context[n] = ret
+      if is_pending then
+        -- A stale or partial value is useful for previews, but must not be
+        -- cached as complete. Re-evaluate it after the Git callback fires.
+        self.context[n] = Git.PENDING
+        pending = true
+        if ret then
+          return ret, true
+        end
+      else
+        self.context[n] = ret
+      end
     end
-    if self.context[n] then
-      return self.context[n]
+    if self.context[n] == Git.PENDING then
+      pending = true
+    elseif self.context[n] then
+      return self.context[n], false
     end
   end
-  return false
+  return false, pending
 end
 
 ---@param msg string
+---@return sidekick.Text[]?
+---@return boolean pending
 function C:render_line(msg)
   local ret = { {} } ---@type sidekick.Text[]
+  local is_pending = false
   ---@param t sidekick.Text
   ---@param nl? boolean
   local function add(t, nl)
@@ -133,21 +161,32 @@ function C:render_line(msg)
   for _, key in ipairs(Text.split(msg, "%b{}")) do
     ret[#ret] = ret[#ret] or {}
     if key:match("^%b{}$") then
-      local value = self:get(key:sub(2, -2))
+      local value, pending = self:get(key:sub(2, -2))
+      is_pending = is_pending or pending
       if not value then
-        return -- fail if any replacement failed
-      end
-      for i, vt in ipairs(value or {}) do
-        add(vt, i > 1)
+        if pending then
+          -- Git-backed contexts can arrive after the prompt has already been
+          -- rendered. Keep the surrounding text usable and let the caller
+          -- refresh once the cache callback fires.
+        else
+          return nil, false -- fail if any replacement failed
+        end
+      else
+        for i, vt in ipairs(value or {}) do
+          add(vt, i > 1)
+        end
       end
     else
       add({ { key } })
     end
   end
-  return ret
+  return ret, is_pending
 end
 
 ---@param opts string|sidekick.cli.Message|{this?: boolean}
+---@return string?
+---@return sidekick.Text[]?
+---@return boolean? pending
 function C:render(opts)
   opts = type(opts) == "string" and { msg = opts } or opts --[[@as sidekick.cli.Message|{this?:boolean}]]
   opts.msg = opts.msg or ""
@@ -169,6 +208,7 @@ function C:render(opts)
   end
 
   local ret = {} ---@type sidekick.Text[]
+  local pending = false
 
   if opts.this ~= false then
     -- {this} is special:
@@ -186,14 +226,15 @@ function C:render(opts)
   end
 
   for _, line in ipairs(lines) do
-    local vt = self:render_line(line)
+    local vt, line_pending = self:render_line(line)
     if not vt then
       return
     end
+    pending = pending or line_pending
     vim.list_extend(ret, vt)
   end
 
-  return Text.to_string(ret), ret
+  return Text.to_string(ret), ret, pending
 end
 
 ---@param name string

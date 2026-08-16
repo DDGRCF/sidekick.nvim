@@ -1,3 +1,5 @@
+local Parser = require("sidekick.cli.context.parser")
+
 local M = {}
 
 ---@class sidekick.textobject.Opts
@@ -23,13 +25,11 @@ local function get_textobject_range(buf, row, col, textobject, inner)
     return nil
   end
 
-  -- Get the treesitter parser and ensure it's parsed
-  local ok_parser, parser = pcall(vim.treesitter.get_parser, buf)
-  if not ok_parser or not parser then
+  -- Get the treesitter parser and ensure it is parsed once per changedtick.
+  local parser = Parser.get(buf)
+  if not parser then
     return nil
   end
-
-  parser:parse()
   local lang = parser:lang()
 
   -- Check if the query exists for this language
@@ -61,12 +61,10 @@ end
 ---@param start_col integer (0-based)
 ---@return string?
 local function get_textobject_name(buf, start_row, start_col)
-  local ok, parser = pcall(vim.treesitter.get_parser, buf)
-  if not ok or not parser then
+  local parser = Parser.get(buf)
+  if not parser then
     return nil
   end
-
-  parser:parse()
 
   local node = vim.treesitter.get_node({
     bufnr = buf,

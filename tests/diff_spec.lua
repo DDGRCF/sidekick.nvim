@@ -2,6 +2,7 @@
 
 local Config = require("sidekick.config")
 local Diff = require("sidekick.nes.diff")
+local Edit = require("sidekick.nes.edit")
 local TS = require("sidekick.treesitter")
 
 local function stub_ts()
@@ -318,6 +319,30 @@ describe("diff", function()
       case.check(diff, calls)
     end)
   end
+
+  it("reuses an edit diff until the buffer changes", function()
+    local restore = stub_ts()
+    local buf = make_buf({ "local foo = 1" })
+    local edit = setmetatable(make_edit(buf, 0, 6, 0, 9, "food"), Edit)
+    local original_diff = Diff.diff
+    local calls = 0
+    Diff.diff = function(value)
+      calls = calls + 1
+      return original_diff(value)
+    end
+
+    edit:diff()
+    edit:diff()
+    assert.are.equal(1, calls)
+
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "local bar = 1" })
+    edit:diff()
+    assert.are.equal(2, calls)
+
+    Diff.diff = original_diff
+    restore()
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)
 
 describe("diff hunk actions", function()

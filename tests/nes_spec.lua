@@ -68,6 +68,10 @@ describe("nes review navigation", function()
   local buf
   local original_enabled
   local original_nes_enabled
+  local original_show
+  local original_signs
+  local original_summary
+  local extra_bufs
 
   local function edit(pos, hunks)
     local version = vim.lsp.util.buf_versions[buf] or 0
@@ -90,6 +94,10 @@ describe("nes review navigation", function()
   before_each(function()
     original_enabled = Nes.enabled
     original_nes_enabled = Config.nes.enabled
+    original_show = Config.nes.diff.show
+    original_signs = Config.nes.signs
+    original_summary = Config.nes.review.summary
+    extra_bufs = {}
     buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "four" })
     vim.api.nvim_set_current_buf(buf)
@@ -99,9 +107,19 @@ describe("nes review navigation", function()
   end)
 
   after_each(function()
+    require("sidekick.nes.ui").hide()
     Nes._edits = {}
+    Nes._invalidate_review()
     Nes.enabled = original_enabled
     Config.nes.enabled = original_nes_enabled
+    Config.nes.diff.show = original_show
+    Config.nes.signs = original_signs
+    Config.nes.review.summary = original_summary
+    for _, extra in ipairs(extra_bufs) do
+      if vim.api.nvim_buf_is_valid(extra) then
+        vim.api.nvim_buf_delete(extra, { force = true })
+      end
+    end
     if vim.api.nvim_buf_is_valid(buf) then
       vim.api.nvim_buf_delete(buf, { force = true })
     end
@@ -129,6 +147,19 @@ describe("nes review navigation", function()
 
     vim.api.nvim_win_set_cursor(0, { 4, 0 })
     assert.is_nil(Nes.summary().current)
+  end)
+
+  it("invalidates the review cache when NES is disabled for a buffer", function()
+    Config.nes.enabled = function(target)
+      return vim.b[target].sidekick_nes ~= false
+    end
+    Nes._edits = {
+      edit({ 0, 0 }, { { pos = { 0, 0 }, cover = 1 } }),
+    }
+
+    assert.are.equal(1, Nes.summary(buf).edits)
+    vim.b[buf].sidekick_nes = false
+    assert.are.same({ edits = 0, hunks = 0 }, Nes.summary(buf))
   end)
 
   it("navigates to the next and previous edit hunk", function()
@@ -184,7 +215,14 @@ describe("nes review navigation", function()
 
     UI.render(edit)
     local before = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, {})
+    local original_nes_summary = Nes.summary
+    local summary_calls = 0
+    Nes.summary = function(...)
+      summary_calls = summary_calls + 1
+      return original_nes_summary(...)
+    end
     UI.update_summary()
+    Nes.summary = original_nes_summary
     local after = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, {})
 
     UI._hide(buf)
@@ -192,6 +230,51 @@ describe("nes review navigation", function()
     Config.nes.signs = old_signs
     Config.nes.review.summary = old_summary
     assert.are.same(before, after)
+    assert.are.equal(1, summary_calls)
+  end)
+
+  it("keeps the previous buffer sign after a cursor-only redraw", function()
+    local UI = require("sidekick.nes.ui")
+    local second = vim.api.nvim_create_buf(false, true)
+    extra_bufs[#extra_bufs + 1] = second
+    vim.api.nvim_buf_set_lines(second, 0, -1, false, { "other" })
+    vim.lsp.util.buf_versions[second] = vim.lsp.util.buf_versions[second] or 0
+    Config.nes.diff.show = "cursor"
+    Config.nes.signs = false
+    Config.nes.review.summary = false
+
+    local function buffer_edit(target)
+      return {
+        buf = target,
+        from = { 0, 0 },
+        to = { 0, 0 },
+        text = "updated",
+        textDocument = { version = vim.lsp.util.buf_versions[target] },
+        is_empty = function()
+          return false
+        end,
+        diff = function()
+          return {
+            hunks = {
+              { pos = { 0, 0 }, cover = 1, extmarks = {}, kind = "change" },
+            },
+          }
+        end,
+      }
+    end
+    Nes._edits = { buffer_edit(buf), buffer_edit(second) }
+
+    vim.api.nvim_set_current_buf(buf)
+    UI.update()
+    vim.api.nvim_set_current_buf(second)
+    UI.update_cursor()
+    local marks = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, { details = true })
+    local signs = vim.tbl_filter(function(mark)
+      return mark[4].sign_text ~= nil
+    end, marks)
+
+    assert.are.equal(1, #marks)
+    assert.are.equal(1, #signs)
   end)
 end)
 
@@ -393,15 +476,34 @@ describe("nes preview refresh", function()
     )
   end)
 
+  it("skips preview content writes when the edit snapshot is unchanged", function()
+    assert.is_true(Preview.open())
+    local windows = preview_windows()
+    local left_buf = vim.api.nvim_win_get_buf(windows["[NES current]"])
+    local right_buf = vim.api.nvim_win_get_buf(windows["[NES suggested]"])
+    local left_tick = vim.api.nvim_buf_get_changedtick(left_buf)
+    local right_tick = vim.api.nvim_buf_get_changedtick(right_buf)
+
+    assert.is_true(Preview.refresh())
+    assert.are.equal(left_tick, vim.api.nvim_buf_get_changedtick(left_buf))
+    assert.are.equal(right_tick, vim.api.nvim_buf_get_changedtick(right_buf))
+  end)
+
   it("does not rebuild preview windows on resize events", function()
     assert.is_true(Preview.open())
     local before = preview_windows()
+    local left_buf = vim.api.nvim_win_get_buf(before["[NES current]"])
+    local right_buf = vim.api.nvim_win_get_buf(before["[NES suggested]"])
+    local left_tick = vim.api.nvim_buf_get_changedtick(left_buf)
+    local right_tick = vim.api.nvim_buf_get_changedtick(right_buf)
     for _ = 1, 5 do
       vim.api.nvim_exec_autocmds("VimResized", {})
     end
     local after = preview_windows()
     assert.are.equal(before["[NES current]"], after["[NES current]"])
     assert.are.equal(before["[NES suggested]"], after["[NES suggested]"])
+    assert.are.equal(left_tick, vim.api.nvim_buf_get_changedtick(left_buf))
+    assert.are.equal(right_tick, vim.api.nvim_buf_get_changedtick(right_buf))
   end)
 
   it("does not clear edits when a preview pane emits TextChanged", function()
@@ -410,6 +512,7 @@ describe("nes preview refresh", function()
     local before = preview_windows()
     local suggested_buf = vim.api.nvim_win_get_buf(before["[NES suggested]"])
     vim.api.nvim_set_current_win(before["[NES suggested]"])
+    vim.api.nvim_buf_set_lines(buf, 1, 2, false, { "changed" })
     assert.is_true(Preview.refresh())
     vim.api.nvim_exec_autocmds("TextChanged", { buffer = suggested_buf })
     vim.wait(150)

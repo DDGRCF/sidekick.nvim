@@ -26,15 +26,17 @@ end
 
 ---@param ctx sidekick.context.ctx
 ---@return sidekick.Text[]?
+---@return boolean? pending
 function M.get(ctx)
-  local lines = Git.lines(Git.run(ctx.cwd, {
+  local output, pending = Git.run(ctx.cwd, {
     "status",
     "--short",
     "--branch",
     "--untracked-files=all",
-  }))
+  }, ctx.on_update)
+  local lines = Git.lines(output)
   if #lines == 0 then
-    return
+    return nil, pending
   end
 
   local branch = ""
@@ -53,7 +55,7 @@ function M.get(ctx)
   end
 
   if #files == 0 then
-    return
+    return nil, pending
   end
 
   local ret = {
@@ -67,7 +69,7 @@ function M.get(ctx)
       { file.path, "Directory" },
     }
   end
-  return ret
+  return ret, pending
 end
 
 return M

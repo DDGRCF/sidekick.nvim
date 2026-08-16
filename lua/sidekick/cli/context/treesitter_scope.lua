@@ -1,4 +1,5 @@
 local Loc = require("sidekick.cli.context.location")
+local Parser = require("sidekick.cli.context.parser")
 
 local M = {}
 
@@ -75,21 +76,26 @@ function M.get(ctx)
     return
   end
 
-  local ok_parser, parser = pcall(vim.treesitter.get_parser, buf)
-  if not ok_parser or not parser then
-    return
-  end
-  local ok_parse = pcall(function()
-    parser:parse()
-  end)
-  if not ok_parse then
+  local parser, nodes = Parser.get(buf)
+  if not parser then
     return
   end
 
-  local ok_node, node = pcall(vim.treesitter.get_node, {
-    bufnr = buf,
-    pos = { math.max(0, ctx.row - 1), math.max(0, ctx.col - 1) },
-  })
+  local row, col = math.max(0, ctx.row - 1), math.max(0, ctx.col - 1)
+  local node_key = row .. ":" .. col
+  local node = nodes[node_key]
+  local ok_node = true
+  if node == nil then
+    ok_node, node = pcall(vim.treesitter.get_node, {
+      bufnr = buf,
+      pos = { row, col },
+    })
+    if ok_node then
+      nodes[node_key] = node or false
+    end
+  elseif node == false then
+    node = nil
+  end
   if not ok_node or not node then
     return
   end

@@ -5,6 +5,7 @@ local Util = require("sidekick.util")
 local M = {}
 local SUMMARY_NS = vim.api.nvim_create_namespace("sidekick.nes.summary")
 local summary_marks = {} ---@type table<integer,{id:integer,row:integer,text:string}>
+local cursor_buf ---@type integer?
 local SIGN_HL = {
   add = "SidekickNesSignAdd",
   change = "SidekickNesSignChange",
@@ -56,12 +57,13 @@ local function summary_virt_text(buf, summary)
 end
 
 ---@param edit sidekick.NesEdit
-local function update_summary(edit)
+---@param summary? {edits:integer,hunks:integer,current:integer?}
+local function update_summary(edit, summary)
   if not summary_enabled() or not vim.api.nvim_buf_is_valid(edit.buf) then
     return
   end
   local buf = edit.buf
-  local summary = Nes.summary(buf)
+  summary = summary or Nes.summary(buf)
   local previous = summary_marks[buf]
   if summary.hunks == 0 then
     if previous then
@@ -187,7 +189,7 @@ function M.update_summary()
   local seen = {}
   for _, edit in ipairs(Nes.get()) do
     if not seen[edit.buf] then
-      update_summary(edit)
+      update_summary(edit, Nes.summary(edit.buf))
       seen[edit.buf] = true
     end
   end
@@ -212,10 +214,42 @@ function M.update()
   vim.schedule(function()
     Util.emit("SidekickNes" .. (#edits == 0 and "Hide" or "Show"))
   end)
+  cursor_buf = vim.api.nvim_get_current_buf()
+end
+
+-- Cursor-only updates are common when diff visibility is set to `cursor`.
+-- Keep summaries and unrelated buffers intact instead of clearing every NES
+-- namespace and rendering all edits again.
+function M.update_cursor()
+  local buf = vim.api.nvim_get_current_buf()
+  local previous = cursor_buf
+  local summaries = {}
+
+  ---@param target integer
+  local function redraw(target)
+    if not vim.api.nvim_buf_is_valid(target) then
+      return
+    end
+    if vim.b[target].sidekick_nes_ui then
+      vim.api.nvim_buf_clear_namespace(target, Config.ns, 0, -1)
+    end
+    for _, edit in ipairs(Nes.get(target)) do
+      M.render(edit, summaries)
+    end
+  end
+
+  if previous and previous ~= buf then
+    -- The previous buffer is no longer under the cursor, but it still needs
+    -- its persistent NES sign after its cursor-only diff marks are cleared.
+    redraw(previous)
+  end
+  cursor_buf = buf
+  redraw(buf)
 end
 
 function M.hide()
   vim.tbl_map(M._hide, vim.api.nvim_list_bufs())
+  cursor_buf = nil
 end
 
 return M

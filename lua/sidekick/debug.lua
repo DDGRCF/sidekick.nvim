@@ -54,7 +54,11 @@ function M.nes_inspect(show)
   if not edit then
     return
   end
-  edit._diff = nil
+  if edit.invalidate_diff then
+    edit:invalidate_diff()
+  else
+    edit._diff = nil
+  end
   edit.command = nil
   if show ~= false then
     Snacks.debug.inspect(edit)

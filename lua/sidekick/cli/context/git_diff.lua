@@ -41,40 +41,41 @@ end
 ---@param ctx sidekick.context.ctx
 ---@param opts? sidekick.context.GitDiffOpts
 ---@return sidekick.Text[]?
+---@return boolean? pending
 function M.get(ctx, opts)
   opts = opts or {}
   local include_unstaged = opts.unstaged ~= false
   local include_staged = opts.staged ~= false
   local ret = {} ---@type sidekick.Text[]
+  local pending = false
 
   if include_unstaged then
-    add_section(
-      ret,
-      "unstaged",
-      Git.run(ctx.cwd, {
-        "diff",
-        "--no-ext-diff",
-        "--no-color",
-        "--unified=3",
-      })
-    )
+    local output, is_pending = Git.run(ctx.cwd, {
+      "diff",
+      "--no-ext-diff",
+      "--no-color",
+      "--unified=3",
+    }, ctx.on_update)
+    pending = pending or is_pending == true
+    add_section(ret, "unstaged", output)
   end
 
   if include_staged then
-    add_section(
-      ret,
-      "staged",
-      Git.run(ctx.cwd, {
-        "diff",
-        "--cached",
-        "--no-ext-diff",
-        "--no-color",
-        "--unified=3",
-      })
-    )
+    local output, is_pending = Git.run(ctx.cwd, {
+      "diff",
+      "--cached",
+      "--no-ext-diff",
+      "--no-color",
+      "--unified=3",
+    }, ctx.on_update)
+    pending = pending or is_pending == true
+    add_section(ret, "staged", output)
   end
 
-  return #ret > 0 and ret or nil
+  if #ret > 0 then
+    return ret, pending
+  end
+  return nil, pending
 end
 
 return M

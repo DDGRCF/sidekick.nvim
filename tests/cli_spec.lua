@@ -2,6 +2,7 @@
 
 local Cli = require("sidekick.cli")
 local Config = require("sidekick.config")
+local Context = require("sidekick.cli.context")
 local History = require("sidekick.cli.history")
 local Prompt = require("sidekick.cli.ui.prompt")
 local Select = require("sidekick.cli.ui.select")
@@ -10,6 +11,90 @@ local State = require("sidekick.cli.state")
 local Workspace = require("sidekick.cli.workspace")
 
 describe("cli routing", function()
+  it("waits for asynchronous context before sending", function()
+    local original_context_get = Context.get
+    local original_cwd = Session.cwd
+    local original_with = State.with
+    local ready = false
+    local update
+    local sends = 0
+    Context.get = function(opts)
+      update = opts.on_update
+      return {
+        render = function()
+          if ready then
+            return "ready", { { { "ready" } } }, false
+          end
+          return "", { {} }, true
+        end,
+      }
+    end
+    Session.cwd = function(opts)
+      return opts and opts.cwd or "/tmp"
+    end
+    State.with = function()
+      sends = sends + 1
+    end
+
+    Cli.send({ msg = "{git_status}", cwd = "/tmp" })
+    local before = sends
+    ready = true
+    update()
+    vim.wait(100, function()
+      return sends == 1
+    end)
+    update()
+    vim.wait(20)
+
+    Context.get = original_context_get
+    Session.cwd = original_cwd
+    State.with = original_with
+    assert.are.equal(0, before)
+    assert.are.equal(1, sends)
+  end)
+
+  it("waits for asynchronous prompts with the native select provider", function()
+    local original_context_get = Context.get
+    local original_prompts = Config.cli.prompts
+    local original_select = vim.ui.select
+    local ready = false
+    local update
+    local calls = 0
+    local selected
+    Config.cli.prompts = { async = { msg = "{git_status}" } }
+    Context.get = function(opts)
+      update = opts.on_update
+      return {
+        render = function()
+          if ready then
+            return "complete", { { { "complete" } } }, false
+          end
+          return "partial", { { { "partial" } } }, true
+        end,
+      }
+    end
+    vim.ui.select = function(items)
+      calls = calls + 1
+      selected = vim.deepcopy(items)
+      return nil
+    end
+
+    Prompt.select({ cb = function() end })
+    local before = calls
+    ready = true
+    update()
+    vim.wait(100, function()
+      return calls == 1
+    end)
+
+    Context.get = original_context_get
+    Config.cli.prompts = original_prompts
+    vim.ui.select = original_select
+    assert.are.equal(0, before)
+    assert.are.equal(1, calls)
+    assert.are.equal("complete", selected[1].data)
+  end)
+
   it("opens a fork picker when no active agent is selected", function()
     local Panel = require("sidekick.cli.panel")
     local AgentPicker = require("sidekick.cli.agent_picker")

@@ -2,7 +2,7 @@ local Config = require("sidekick.config")
 local Util = require("sidekick.util")
 
 local M = {}
-local state ---@type {source_win:integer,source_buf:integer,left_buf:integer,right_buf:integer,left_win:integer,right_win:integer,closing?:boolean,refreshing?:boolean,source_autocmd?:integer,win_autocmd?:integer,resize_autocmd?:integer}?
+local state ---@type {source_win:integer,source_buf:integer,left_buf:integer,right_buf:integer,left_win:integer,right_win:integer,closing?:boolean,refreshing?:boolean,refresh_pending?:boolean,pending_content?:boolean,content_key?:string,source_tick?:integer,source_autocmd?:integer,win_autocmd?:integer,resize_autocmd?:integer}?
 
 local function valid_buf(buf)
   return buf and vim.api.nvim_buf_is_valid(buf)
@@ -25,6 +25,77 @@ local function dimension(value, total, minimum)
   value = type(value) == "number" and value or 0
   value = value > 0 and value <= 1 and math.floor(total * value) or math.floor(value)
   return math.max(minimum, math.min(value, total))
+end
+
+local function window_configs()
+  local preview = Config.nes.review and Config.nes.review.preview or {}
+  local available_width = math.max(0, vim.o.columns - 4)
+  local minimum_width = 18 * 2 + 1
+  if available_width < minimum_width then
+    return nil, "NES preview needs a wider editor"
+  end
+  local total_width = dimension(preview.width or 0.9, available_width, minimum_width)
+  local pane_width = math.floor((total_width - 1) / 2)
+  local available_height = math.max(0, vim.o.lines - 4)
+  if available_height < 5 then
+    return nil, "NES preview needs a taller editor"
+  end
+  local height = dimension(preview.height or 0.8, available_height, 5)
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - total_width) / 2)
+  local border = preview.border or "rounded"
+  local base = {
+    relative = "editor",
+    style = "minimal",
+    width = pane_width,
+    height = height,
+    row = row,
+    border = border,
+    zindex = 50,
+  }
+  return vim.tbl_extend("force", base, {
+    col = col,
+    title = " Current ",
+    title_pos = "center",
+  }), vim.tbl_extend("force", base, {
+    col = col + pane_width + 1,
+    title = " Suggested ",
+    title_pos = "center",
+  })
+end
+
+local function edit_key(edits)
+  local ret = {}
+  for _, edit in ipairs(edits) do
+    ret[#ret + 1] = table.concat({
+      edit.buf or -1,
+      edit.from and edit.from[1] or -1,
+      edit.from and edit.from[2] or -1,
+      edit.to and edit.to[1] or -1,
+      edit.to and edit.to[2] or -1,
+      edit.text or "",
+      edit.textDocument and edit.textDocument.version or -1,
+    }, "\31")
+  end
+  return table.concat(ret, "\30")
+end
+
+local function content_key(buf, edits, client)
+  return table.concat({
+    vim.api.nvim_buf_get_changedtick(buf),
+    edit_key(edits),
+    client.offset_encoding or "utf-16",
+  }, "\30")
+end
+
+local function apply_layout(current)
+  local left_opts, right_opts = window_configs()
+  if not left_opts then
+    return false, right_opts
+  end
+  local ok = pcall(vim.api.nvim_win_set_config, current.left_win, left_opts)
+  ok = pcall(vim.api.nvim_win_set_config, current.right_win, right_opts) and ok
+  return ok
 end
 
 ---@param buf integer
@@ -87,7 +158,11 @@ function M.close()
       pcall(vim.api.nvim_win_close, win, true)
     end
   end
+  local Nes = package.loaded["sidekick.nes"]
   for _, buf in ipairs({ closing.left_buf, closing.right_buf }) do
+    if Nes and type(Nes._skip_update) == "table" then
+      Nes._skip_update[buf] = nil
+    end
     if valid_buf(buf) then
       pcall(vim.api.nvim_buf_delete, buf, { force = true })
     end
@@ -122,44 +197,12 @@ function M.open()
   end
 
   local preview = Config.nes.review and Config.nes.review.preview or {}
-  local available_width = math.max(0, vim.o.columns - 4)
-  local minimum_width = 18 * 2 + 1
-  if available_width < minimum_width then
-    Util.warn("NES preview needs a wider editor")
+  local left_opts, right_opts = window_configs()
+  if not left_opts then
+    Util.warn(right_opts)
     return false
   end
-  local total_width = dimension(preview.width or 0.9, available_width, minimum_width)
-  local pane_width = math.floor((total_width - 1) / 2)
-  local available_height = math.max(0, vim.o.lines - 4)
-  if available_height < 5 then
-    Util.warn("NES preview needs a taller editor")
-    return false
-  end
-  local height = dimension(preview.height or 0.8, available_height, 5)
-
   local current_lines = vim.api.nvim_buf_get_lines(source_buf, 0, -1, false)
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - total_width) / 2)
-  local border = preview.border or "rounded"
-  local base = {
-    relative = "editor",
-    style = "minimal",
-    width = pane_width,
-    height = height,
-    row = row,
-    border = border,
-    zindex = 50,
-  }
-  local left_opts = vim.tbl_extend("force", base, {
-    col = col,
-    title = " Current ",
-    title_pos = "center",
-  })
-  local right_opts = vim.tbl_extend("force", base, {
-    col = col + pane_width + 1,
-    title = " Suggested ",
-    title_pos = "center",
-  })
   local left_buf, right_buf, left_win, right_win
   local function cleanup()
     for _, win in ipairs({ left_win, right_win }) do
@@ -218,6 +261,8 @@ function M.open()
     right_buf = right_buf,
     left_win = left_win,
     right_win = right_win,
+    content_key = content_key(source_buf, edits, client),
+    source_tick = vim.api.nvim_buf_get_changedtick(source_buf),
   }
   local autocmd_ok, autocmd_err = pcall(function()
     state.source_autocmd = vim.api.nvim_create_autocmd({ "BufUnload", "BufDelete", "BufWipeout" }, {
@@ -239,7 +284,7 @@ function M.open()
     state.resize_autocmd = vim.api.nvim_create_autocmd("VimResized", {
       callback = function()
         if state and not state.closing then
-          M.refresh()
+          M.refresh({ content = false })
         end
       end,
     })
@@ -252,22 +297,59 @@ function M.open()
   return true
 end
 
-function M.refresh()
+---@param opts? {content?:boolean,layout?:boolean}
+function M.refresh(opts)
+  opts = opts or {}
   local current = state
-  if not current or current.refreshing then
+  if not current then
     return false
+  end
+  local want_content = opts.content ~= false
+  local want_layout = opts.layout ~= false
+  if current.refreshing then
+    current.refresh_pending = true
+    current.pending_content = current.pending_content or want_content
+    return true
   end
   current.refreshing = true
   local source_win, source_buf = current.source_win, current.source_buf
+
+  local function finish(ok)
+    if state == current then
+      current.refreshing = false
+      if current.refresh_pending then
+        local pending_content = current.pending_content == true
+        current.refresh_pending = nil
+        current.pending_content = nil
+        vim.schedule(function()
+          if state == current then
+            M.refresh({ content = pending_content, layout = true })
+          end
+        end)
+      end
+    end
+    return ok
+  end
+
   if not valid_buf(source_buf) or not valid_buf(current.left_buf) or not valid_buf(current.right_buf) then
-    current.refreshing = false
     M.close()
     return false
   end
   if not valid_win(current.left_win) or not valid_win(current.right_win) then
-    current.refreshing = false
     M.close()
     return M.open()
+  end
+
+  if want_layout then
+    local ok_layout, layout_err = apply_layout(current)
+    if not ok_layout then
+      M.close()
+      Util.warn(layout_err or "Failed to resize NES preview")
+      return false
+    end
+  end
+  if not want_content then
+    return finish(true)
   end
 
   local Nes = require("sidekick.nes")
@@ -275,15 +357,18 @@ function M.refresh()
     return Nes.get(source_buf), Config.get_client(source_buf)
   end)
   if not ok_data then
-    current.refreshing = false
     M.close()
     Util.warn(("Failed to refresh NES preview: %s"):format(edits))
     return false
   end
   if #edits == 0 or not client then
-    current.refreshing = false
     M.close()
     return false
+  end
+
+  local next_content_key = content_key(source_buf, edits, client)
+  if current.content_key == next_content_key then
+    return finish(true)
   end
 
   local source_cursor = valid_win(source_win) and vim.api.nvim_win_get_cursor(source_win)
@@ -314,9 +399,6 @@ function M.refresh()
     vim.bo[right_buf].modifiable = false
   end
 
-  if state == current then
-    current.refreshing = false
-  end
   if not ok then
     M.close()
     Util.warn(("Failed to refresh NES preview: %s"):format(err))
@@ -326,6 +408,9 @@ function M.refresh()
     return false
   end
 
+  current.content_key = next_content_key
+  current.source_tick = vim.api.nvim_buf_get_changedtick(source_buf)
+  finish(true)
   for _, win in ipairs({ current.left_win, current.right_win }) do
     if valid_win(win) then
       vim.api.nvim_win_set_cursor(win, clamp_cursor(vim.api.nvim_win_get_buf(win), source_cursor))

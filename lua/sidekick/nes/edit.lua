@@ -1,4 +1,5 @@
 local Util = require("sidekick.util")
+local Config = require("sidekick.config")
 
 ---@alias sidekick.Pos {[1]:integer, [2]:integer}
 
@@ -13,6 +14,7 @@ local Util = require("sidekick.util")
 ---@field from sidekick.Pos
 ---@field to sidekick.Pos
 ---@field _diff sidekick.Diff
+---@field _diff_key string
 local M = {}
 M.__index = M
 
@@ -47,10 +49,33 @@ function M:valid()
 end
 
 function M:diff()
-  if not self._diff then
+  local tick = 0
+  local filetype = ""
+  if self.buf and vim.api.nvim_buf_is_valid(self.buf) then
+    tick = vim.api.nvim_buf_get_changedtick(self.buf)
+    filetype = vim.bo[self.buf].filetype
+  end
+  local key = table.concat({
+    tick,
+    self.from and self.from[1] or -1,
+    self.from and self.from[2] or -1,
+    self.to and self.to[1] or -1,
+    self.to and self.to[2] or -1,
+    self.text or "",
+    filetype,
+    tostring(Config.nes.diff.inline),
+    vim.o.columns,
+  }, "\31")
+  if not self._diff or self._diff_key ~= key then
     self._diff = require("sidekick.nes.diff").diff(self)
+    self._diff_key = key
   end
   return self._diff
+end
+
+function M:invalidate_diff()
+  self._diff = nil
+  self._diff_key = nil
 end
 
 function M:is_empty()
