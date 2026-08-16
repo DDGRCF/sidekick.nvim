@@ -117,14 +117,44 @@ function M.select(opts)
 end
 
 --- Start a new independent agent, even when the same tool is already running.
----@param opts? {name?:string,focus?:boolean,cwd?:string}
+---@param opts? {name?:string,focus?:boolean,cwd?:string,proposal?:boolean}
 function M.new(opts)
   opts = opts or {}
   local cwd = Session.cwd({ cwd = opts.cwd })
-  local function start(state)
+  local function attach(state)
     if state then
       State.attach(state, { show = true, focus = opts.focus ~= false, cwd = cwd })
     end
+  end
+  local function start(state)
+    if not state or opts.proposal == false or Config.cli.proposal.enabled == false then
+      return attach(state)
+    end
+    if require("sidekick.cli.proposal").has_modified_buffers(cwd) then
+      return vim.ui.select({ "Save all and start", "Cancel" }, {
+        prompt = "Save modified buffers before starting a proposal agent?",
+      }, function(choice)
+        if choice == "Save all and start" then
+          vim.cmd("wall")
+          start(state)
+        end
+      end)
+    end
+    local instance_id = Session.instance()
+    local proposal, err = require("sidekick.cli.proposal").create(cwd, instance_id)
+    if not proposal then
+      return Util.error(err or "Failed to create proposal worktree")
+    end
+    local session = Session.new({ tool = state.tool.name, cwd = proposal.cwd, instance_id = instance_id })
+    session.proposal = proposal
+    Session.persist(session)
+    state.session = session
+    State.attach(state, {
+      show = true,
+      focus = opts.focus ~= false,
+      cwd = proposal.cwd,
+      instance_id = instance_id,
+    })
   end
   if opts.name then
     local tool = Config.tools()[opts.name]
@@ -174,6 +204,12 @@ end
 function M.workspace(action)
   local Workspace = require("sidekick.cli.workspace")
   return assert(Workspace[action], "Unknown workspace action: " .. tostring(action))()
+end
+
+--- Open the active proposal agent's changes in a side-by-side review view.
+---@return boolean? opened
+function M.changes()
+  return require("sidekick.cli.changes").open()
 end
 
 --- Select the next agent tab.

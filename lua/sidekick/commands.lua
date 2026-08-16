@@ -50,6 +50,32 @@ M.commands = {
     end,
   },
   cli = {
+    changes = {
+      open = function()
+        require("sidekick.cli").changes()
+      end,
+      next = function()
+        require("sidekick.cli.changes").next()
+      end,
+      prev = function()
+        require("sidekick.cli.changes").prev()
+      end,
+      accept = function()
+        require("sidekick.cli.changes").accept()
+      end,
+      reject = function()
+        require("sidekick.cli.changes").reject()
+      end,
+      accept_all = function()
+        require("sidekick.cli.changes").accept_all()
+      end,
+      reject_all = function()
+        require("sidekick.cli.changes").reject_all()
+      end,
+      discard = function()
+        require("sidekick.cli.changes").discard()
+      end,
+    },
     new = function(opts)
       require("sidekick.cli").new(opts)
     end,
@@ -175,6 +201,9 @@ function M.parse(str, opts)
       break
     end
   end
+  if type(cmd) == "table" and #parts == 0 and type(cmd.open) == "function" then
+    return cmd.open, {}
+  end
   if type(cmd) == "function" then
     if M.commands.cli and cmd == M.commands.cli.new and parts[1] and not parts[1]:find("=", 1, true) then
       local name = table.remove(parts, 1)
@@ -196,6 +225,9 @@ end
 ---@param line string
 function M.complete(line)
   line = line:gsub("^%s*Sidekick%s+", "")
+  if line:match("^cli%s+changes%s+$") then
+    return { "accept", "accept_all", "discard", "next", "prev", "reject", "reject_all" }
+  end
   local tool = line:match("^cli%s+new%s+([^%s=]*)$")
   if tool then
     return vim.tbl_filter(function(name)

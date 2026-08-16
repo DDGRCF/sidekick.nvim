@@ -291,6 +291,10 @@ local defaults = {
       restore_tabpages = true,
       resume_timeout_ms = 15000,
     },
+    proposal = {
+      --- Start new Git-backed agents in an isolated worktree so their changes can be reviewed.
+      enabled = true,
+    },
     agent_picker = {
       provider = "auto", ---@type "auto"|"snacks"|"native"
       preview_lines = 80,
@@ -441,7 +445,7 @@ local defaults = {
     context = {},
     ---@type table<string, sidekick.Prompt|string|fun(ctx:sidekick.context.ctx):(string?)>
     prompts = {
-      changes         = "Can you review my changes?",
+      review_changes  = "Review the following Git changes for correctness, regressions, and missing tests.\n\n{git_diff}",
       diagnostics     = "Can you help me fix the diagnostics in {file}?\n{diagnostics}",
       diagnostics_all = "Can you help me fix these diagnostics?\n{diagnostics_all}",
       document        = "Add documentation to {function|line}",
@@ -696,6 +700,15 @@ agent/action menu.
 <!-- api_cli:start -->
 
 <table><tr><th>Cmd</th><th>Lua</th></tr>
+<tr><td><code>:Sidekick cli changes</code> Open the active proposal agent's changes in a side-by-side review view.</td><td>
+
+
+```lua
+---@return boolean? opened
+require("sidekick.cli").changes()
+```
+
+</td></tr>
 <tr><td><code>:Sidekick cli close</code> </td><td>
 
 
@@ -748,7 +761,7 @@ require("sidekick.cli").move(opts)
 
 
 ```lua
----@param opts? {name?:string,focus?:boolean,cwd?:string}
+---@param opts? {name?:string,focus?:boolean,cwd?:string,proposal?:boolean}
 require("sidekick.cli").new(opts)
 ```
 
@@ -892,7 +905,7 @@ current file, selection, diagnostics, and more.
 
 <details><summary><strong>Available Prompts</strong></summary>
 
-- **changes**: `Can you review my changes?`
+- **review_changes**: Review the current Git diff for correctness, regressions, and missing tests.
 - **diagnostics**: `Can you help me fix the diagnostics in {file}?\n{diagnostics}`
 - **diagnostics_all**: `Can you help me fix these diagnostics?\n{diagnostics_all}`
 - **document**: `Add documentation to {position}`
@@ -904,6 +917,18 @@ current file, selection, diagnostics, and more.
 - **quickfix**: `{quickfix}` (current quickfix entries).
 
 </details>
+
+### Agent Changes
+
+New CLI agents started in a Git worktree run in proposal mode by default. Their edits stay
+in an isolated worktree until you open `:Sidekick cli changes`. The view shows the current
+files beside the Agent proposal. The file list labels additions, modifications, deletions,
+line counts, and pending hunks; the preview also keeps the current hunk and available
+actions visible. Use `]c`/`[c` to move between hunks, `a`/`r` to accept or reject one hunk,
+and `A`/`R` to process all pending changes. Narrow editors automatically stack the two
+versions instead of closing the review. Use `:Sidekick cli changes discard` to remove an
+unneeded proposal. Pass `proposal=false` to `:Sidekick cli new` to use the legacy
+direct-editing mode.
 
 <details><summary><strong>Available Context Variables</strong></summary>
 

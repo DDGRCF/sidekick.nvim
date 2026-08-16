@@ -22,6 +22,7 @@ M._attached = {} ---@type table<string,sidekick.cli.Session>
 ---@field title? string user-facing agent title
 ---@field conversation? sidekick.cli.Conversation native CLI conversation metadata
 ---@field forked_from? sidekick.cli.ForkInfo
+---@field proposal? sidekick.cli.Proposal
 ---@field skip_resume_prepare? boolean internal flag for provider-native fork commands
 ---@field hidden? boolean start without adding the terminal to a panel
 
@@ -112,6 +113,7 @@ function M.new(state)
     self.title = self.title or saved.title
     self.conversation = self.conversation or saved.conversation
     self.forked_from = self.forked_from or saved.forked_from
+    self.proposal = self.proposal or saved.proposal
   end
   self.instance_id = self.instance_id or M.instance(self.id)
   local adapter = tool.config.resume
@@ -183,6 +185,7 @@ function M.persist(session)
     title = session.title,
     conversation = session.conversation,
     forked_from = session.forked_from,
+    proposal = session.proposal,
   }
   Util.set_state(session.sid, data)
   if session.id and session.id ~= session.sid then

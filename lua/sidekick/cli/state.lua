@@ -193,7 +193,7 @@ function M.with(cb, opts)
 end
 
 ---@param state sidekick.cli.State
----@param opts? {show?:boolean, focus?:boolean, cwd?:string}
+---@param opts? {show?:boolean, focus?:boolean, cwd?:string, instance_id?:string}
 ---@return sidekick.cli.State state, boolean attached whether we just attached
 function M.attach(state, opts)
   opts = opts or {}
@@ -201,7 +201,7 @@ function M.attach(state, opts)
   local tool = state.tool
 
   -- if the session is already attached, the below is a no-op
-  local session = state.session or Session.new({ tool = tool.name, cwd = opts.cwd })
+  local session = state.session or Session.new({ tool = tool.name, cwd = opts.cwd, instance_id = opts.instance_id })
   session = Session.attach(session)
 
   state = M.get_state(session) -- update state

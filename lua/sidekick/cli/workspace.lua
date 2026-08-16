@@ -20,6 +20,7 @@ local version = 1
 ---@field forked_from? sidekick.cli.ForkInfo
 ---@field status? sidekick.cli.ActivityStatus
 ---@field restore_blocked? boolean defer automatic retries while a provider writer conflict remains
+---@field proposal? sidekick.cli.Proposal
 
 ---@class sidekick.cli.WorkspaceState
 ---@field version integer
@@ -79,6 +80,7 @@ function M.snapshot()
         title = t.title or session.title,
         conversation = Resume.capture(t),
         forked_from = vim.deepcopy(t.forked_from or session.forked_from),
+        proposal = vim.deepcopy(t.proposal or session.proposal),
         status = t.status,
       }
     end
@@ -214,6 +216,7 @@ local function restore_agent(saved, discovered)
     title = saved.title,
     conversation = saved.conversation,
     forked_from = saved.forked_from,
+    proposal = saved.proposal,
     hidden = true,
   })
   local terminal = as_terminal(session)
