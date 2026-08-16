@@ -53,6 +53,7 @@ end
 local wo = {
   winhighlight = table.concat({
     "Normal:SidekickChat",
+    "NormalFloat:SidekickChat",
     "NormalNC:SidekickChat",
     "EndOfBuffer:SidekickChat",
     "SignColumn:SidekickChat",

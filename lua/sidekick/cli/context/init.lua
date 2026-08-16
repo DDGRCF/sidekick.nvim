@@ -1,9 +1,12 @@
 local Config = require("sidekick.config")
 local Diag = require("sidekick.cli.context.diagnostics")
+local GitDiff = require("sidekick.cli.context.git_diff")
+local GitStatus = require("sidekick.cli.context.git_status")
 local Loc = require("sidekick.cli.context.location")
 local Quickfix = require("sidekick.cli.context.quickfix")
 local Text = require("sidekick.text")
 local TextObject = require("sidekick.cli.context.textobject")
+local TreeSitterScope = require("sidekick.cli.context.treesitter_scope")
 local Util = require("sidekick.util")
 
 local M = {}
@@ -42,6 +45,12 @@ M.context = {
   diagnostics_all = function(ctx)
     return Diag.get(ctx, { all = true })
   end,
+  git_diff = function(ctx)
+    return GitDiff.get(ctx)
+  end,
+  git_status = function(ctx)
+    return GitStatus.get(ctx)
+  end,
   quickfix = function(ctx)
     return Quickfix.get(ctx)
   end,
@@ -54,6 +63,9 @@ M.context = {
   end,
   class = function(ctx)
     return TextObject.get(ctx, { type = "class", kind = "position" })
+  end,
+  treesitter_scope = function(ctx)
+    return TreeSitterScope.get(ctx)
   end,
 }
 

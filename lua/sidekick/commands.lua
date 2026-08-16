@@ -12,6 +12,12 @@ M.commands = {
     apply = function()
       require("sidekick.nes").apply()
     end,
+    accept = function()
+      require("sidekick.nes").accept()
+    end,
+    reject = function()
+      require("sidekick.nes").reject()
+    end,
     enable = function()
       require("sidekick.nes").enable(true)
     end,
@@ -32,6 +38,9 @@ M.commands = {
     end,
     review = function()
       require("sidekick.nes").review()
+    end,
+    preview = function()
+      require("sidekick.nes").preview()
     end,
     clear = function()
       require("sidekick.nes").clear()

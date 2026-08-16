@@ -134,6 +134,29 @@ describe("cli agent panel", function()
     end
   end)
 
+  it("cleans duplicate panel splits during refresh", function()
+    local first = fake("refresh-split", "codex", "Refresh split")
+    Panel.show(first)
+    local tab = vim.api.nvim_get_current_tabpage()
+    local panel_win = Panel.win(first)
+
+    vim.api.nvim_set_current_win(panel_win)
+    vim.cmd("noautocmd split")
+
+    local panel_buffers = vim.tbl_filter(function(win)
+      return vim.api.nvim_win_get_buf(win) == first.buf
+    end, vim.api.nvim_tabpage_list_wins(tab))
+    assert.are.equal(2, #panel_buffers)
+
+    Panel.refresh()
+
+    panel_buffers = vim.tbl_filter(function(win)
+      return vim.api.nvim_win_get_buf(win) == first.buf
+    end, vim.api.nvim_tabpage_list_wins(tab))
+    assert.are.equal(1, #panel_buffers)
+    assert.are.equal(panel_win, Panel.win(first))
+  end)
+
   it("keeps a floating window that reuses the panel buffer", function()
     local first = fake("popup-one", "codex", "One")
     Panel.show(first)
@@ -173,9 +196,9 @@ describe("cli agent panel", function()
 
     assert.matches("Implement panel", line)
     assert.matches("codex", line)
-    assert.matches("SidekickCliToolCodex", line)
+    assert.matches("SidekickCliTabSelectedToolCodex", line)
     assert.matches("SidekickCliTabSelected", line)
-    assert.matches("SidekickCliStatusDone", line)
+    assert.matches("SidekickCliTabSelectedStatusDone", line)
   end)
 
   it("uses the green diagnostic highlight for working and done tabs", function()
@@ -186,6 +209,57 @@ describe("cli agent panel", function()
 
     assert.are.equal("DiagnosticOk", working.link)
     assert.are.equal("DiagnosticOk", done.link)
+  end)
+
+  it("keeps tab decorations on their tab surface", function()
+    Config.set_hl()
+    local tab = vim.api.nvim_get_hl(0, { name = "SidekickCliTab", link = false })
+    local selected = vim.api.nvim_get_hl(0, { name = "SidekickCliTabSelected", link = false })
+    local inactive_pin = vim.api.nvim_get_hl(0, { name = "SidekickCliTabPin", link = false })
+    local active_pin = vim.api.nvim_get_hl(0, { name = "SidekickCliTabSelectedPin", link = false })
+    local inactive_tool = vim.api.nvim_get_hl(0, { name = "SidekickCliTabToolCodex", link = false })
+    local active_tool = vim.api.nvim_get_hl(0, { name = "SidekickCliTabSelectedToolCodex", link = false })
+
+    assert.is_true(next(inactive_pin) ~= nil)
+    assert.is_true(next(active_pin) ~= nil)
+    assert.is_true(next(inactive_tool) ~= nil)
+    assert.is_true(next(active_tool) ~= nil)
+    assert.are.equal(tab.bg, inactive_pin.bg)
+    assert.are.equal(tab.ctermbg, inactive_pin.ctermbg)
+    assert.are.equal(tab.bg, inactive_tool.bg)
+    assert.are.equal(tab.ctermbg, inactive_tool.ctermbg)
+    assert.are.equal(selected.bg, active_pin.bg)
+    assert.are.equal(selected.ctermbg, active_pin.ctermbg)
+    assert.are.equal(selected.bg, active_tool.bg)
+    assert.are.equal(selected.ctermbg, active_tool.ctermbg)
+  end)
+
+  it("rebuilds tab decorations after a colorscheme change", function()
+    local previous = vim.g.colors_name
+    local ok, err = pcall(function()
+      for _, scheme in ipairs({ "default", "habamax" }) do
+        vim.cmd.colorscheme(scheme)
+        Config.set_hl()
+        for _, surface_name in ipairs({ "SidekickCliTab", "SidekickCliTabSelected" }) do
+          local surface = vim.api.nvim_get_hl(0, { name = surface_name, link = false })
+          for _, suffix in ipairs({ "Pin", "ToolCodex", "StatusDone", "Close" }) do
+            local decoration = vim.api.nvim_get_hl(0, { name = surface_name .. suffix, link = false })
+            assert.is_true(next(decoration) ~= nil)
+            assert.are.equal(surface.bg, decoration.bg)
+            assert.are.equal(surface.ctermbg, decoration.ctermbg)
+          end
+        end
+      end
+    end)
+    if previous then
+      pcall(function()
+        vim.cmd.colorscheme(previous)
+      end)
+    else
+      vim.cmd.colorscheme("default")
+    end
+    Config.set_hl()
+    assert.is_true(ok, err)
   end)
 
   it("slowly blinks working markers and stops when work is done", function()
@@ -255,7 +329,7 @@ describe("cli agent panel", function()
     local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
 
     Config.cli.win.tabs.show_attention = old_attention
-    assert.matches("SidekickCliAttention", line)
+    assert.matches("SidekickCliTabSelectedAttention", line)
   end)
 
   it("keeps priority agents visible when tabs overflow", function()
@@ -273,7 +347,7 @@ describe("cli agent panel", function()
 
     assert.matches("Work", line)
     assert.matches("Activ", line)
-    assert.matches("SidekickCliStatusWorking", line)
+    assert.matches("SidekickCliTabStatusWorking", line)
     assert.matches("SidekickCliTabSelected", line)
   end)
 
@@ -286,7 +360,7 @@ describe("cli agent panel", function()
     local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
 
     assert.is_nil(line:find("SidekickCliToolCodex", 1, true))
-    assert.matches("SidekickCliToolClaude", line)
+    assert.matches("SidekickCliTabSelectedToolClaude", line)
   end)
 
   it("uses configured agent icons before falling back to the tool name", function()
@@ -315,11 +389,28 @@ describe("cli agent panel", function()
 
     Config.ui.icons.pin = "PIN"
     Config.ui.icons.close = "CLOSE"
-    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    local ok, line = pcall(Panel.render, Panel.panels[vim.api.nvim_get_current_tabpage()])
 
     Config.ui.icons.pin, Config.ui.icons.close = old_pin, old_close
+    assert.is_true(ok)
     assert.is_not_nil(line:find("PIN", 1, true))
     assert.is_not_nil(line:find("CLOSE", 1, true))
+  end)
+
+  it("escapes configurable tab icons for winbar rendering", function()
+    local old_pin, old_close = Config.ui.icons.pin, Config.ui.icons.close
+    local codex = fake("codex-1", "codex", "Escaped panel")
+    Panel.show(codex)
+
+    Config.ui.icons.pin = "%"
+    Config.ui.icons.close = "%"
+    Panel.panels[vim.api.nvim_get_current_tabpage()].pinned[codex.id] = true
+    local ok, line = pcall(Panel.render, Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    Config.ui.icons.pin, Config.ui.icons.close = old_pin, old_close
+    assert.is_true(ok)
+    assert.is_not_nil(line:find("SidekickCliTabSelectedPin# %% ", 1, true))
+    assert.is_not_nil(line:find("SidekickCliTabSelectedClose#%% %T", 1, true))
   end)
 
   it("supports configurable tab separators", function()

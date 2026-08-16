@@ -319,3 +319,48 @@ describe("diff", function()
     end)
   end
 end)
+
+describe("diff hunk actions", function()
+  it("accepts a block hunk while keeping the other proposal hunks", function()
+    local diff = {
+      from = { lines = { "one", "two", "three" } },
+      to = { lines = { "one", "TWO", "three", "four" } },
+    }
+    local current, pending = Diff.apply_hunk(diff, {
+      kind = "change",
+      pos = { 1, 0 },
+      cover = 1,
+      from_index = 2,
+      from_count = 1,
+      to_index = 2,
+      to_count = 1,
+      extmarks = {},
+    }, "accept")
+
+    assert.are.same({ "one", "TWO", "three" }, current)
+    assert.are.same({ "one", "TWO", "three", "four" }, pending)
+  end)
+
+  it("rejects an inline hunk without discarding another inline change", function()
+    local diff = {
+      from = { lines = { "one two three" } },
+      to = { lines = { "one TWO THREE" } },
+    }
+    local current, pending = Diff.apply_hunk(diff, {
+      kind = "change",
+      pos = { 0, 4 },
+      cover = 1,
+      inline = true,
+      from_index = 1,
+      to_index = 1,
+      from_col = 4,
+      from_end_col = 7,
+      to_col = 4,
+      to_end_col = 7,
+      extmarks = {},
+    }, "reject")
+
+    assert.are.same({ "one two three" }, current)
+    assert.are.same({ "one two THREE" }, pending)
+  end)
+end)

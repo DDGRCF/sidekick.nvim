@@ -41,6 +41,14 @@ local DIFF_INLINE_OPTS = {
 ---@field cover integer the number of lines covered in the "from" text
 ---@field kind "add" | "delete" | "change"
 ---@field inline? boolean
+---@field from_index? integer diff line index in the source text
+---@field from_count? integer number of source lines covered by a block hunk
+---@field to_index? integer diff line index in the proposed text
+---@field to_count? integer number of proposed lines covered by a block hunk
+---@field from_col? integer 0-based byte column of an inline hunk
+---@field from_end_col? integer 0-based exclusive byte column of an inline hunk
+---@field to_col? integer 0-based byte column of the proposed inline hunk
+---@field to_end_col? integer 0-based exclusive byte column of the proposed inline hunk
 ---@field extmarks sidekick.Extmark[]
 
 --- Calculate the result covering full lines
@@ -132,6 +140,10 @@ function M.diff_lines(diff)
         kind = ac > 0 and bc > 0 and "change" or ac > 0 and "delete" or "add",
         pos = { row, 0 },
         cover = ac,
+        from_index = ai,
+        from_count = ac,
+        to_index = bi,
+        to_count = bc,
         extmarks = {},
       }
       table.insert(diff.hunks, h)
@@ -226,6 +238,14 @@ function M.diff_inline(diff, from_idx, to_idx)
       pos = { row, a_from.col },
       cover = 1,
       inline = true,
+      from_index = from_idx,
+      from_count = 1,
+      to_index = to_idx,
+      to_count = 1,
+      from_col = a_from.col,
+      from_end_col = ac > 0 and a_index[ai + ac - 1].end_col or a_from.col,
+      to_col = b_index[bi].col,
+      to_end_col = bc > 0 and b_index[bi + bc - 1].end_col or b_index[bi].col,
       extmarks = {},
     }
 
@@ -256,6 +276,78 @@ function M.diff_inline(diff, from_idx, to_idx)
   local new_len = #(diff.to.lines[to_idx] or "")
   local insert_ratio = insert_len / new_len
   return insert_ratio < INLINE_MAX_INSERT_RATIO and ret or nil
+end
+
+---@param lines string[]
+---@param index integer diff line index; zero means before the first line for insertions
+---@param count integer number of lines to replace
+---@param replacement string[]
+---@return string[]
+local function replace_lines(lines, index, count, replacement)
+  local start = count > 0 and index - 1 or index
+  local ret = {} ---@type string[]
+  for i = 1, start do
+    ret[#ret + 1] = lines[i]
+  end
+  vim.list_extend(ret, replacement)
+  for i = start + count + 1, #lines do
+    ret[#ret + 1] = lines[i]
+  end
+  return ret
+end
+
+---@param line string
+---@param from_col integer
+---@param to_col integer
+---@param replacement string
+---@return string
+local function replace_bytes(line, from_col, to_col, replacement)
+  return line:sub(1, from_col) .. replacement .. line:sub(to_col + 1)
+end
+
+---Apply one hunk to the source text and remove it from the pending proposal.
+---@param diff sidekick.Diff
+---@param hunk sidekick.diff.Hunk
+---@param action "accept"|"reject"
+---@return string[] current
+---@return string[] pending
+function M.apply_hunk(diff, hunk, action)
+  local current = vim.deepcopy(diff.from.lines)
+  local pending = vim.deepcopy(diff.to.lines)
+
+  if hunk.inline then
+    local from_idx = hunk.from_index or 1
+    local to_idx = hunk.to_index or from_idx
+    local from_line = diff.from.lines[from_idx] or ""
+    local to_line = diff.to.lines[to_idx] or ""
+    local from_col = hunk.from_col or hunk.pos[2]
+    local from_end_col = hunk.from_end_col or from_col
+    local to_col = hunk.to_col or from_col
+    local to_end_col = hunk.to_end_col or to_col
+    local source = from_line:sub(from_col + 1, from_end_col)
+    local replacement = to_line:sub(to_col + 1, to_end_col)
+
+    if action == "accept" then
+      current[from_idx] = replace_bytes(from_line, from_col, from_end_col, replacement)
+    else
+      pending[to_idx] = replace_bytes(to_line, to_col, to_end_col, source)
+    end
+    return current, pending
+  end
+
+  local from_index = hunk.from_index or 0
+  local from_count = hunk.from_count or hunk.cover or 0
+  local to_index = hunk.to_index or 0
+  local to_count = hunk.to_count or 0
+  local proposed = to_count > 0 and vim.list_slice(diff.to.lines, to_index, to_index + to_count - 1) or {}
+  local source = from_count > 0 and vim.list_slice(diff.from.lines, from_index, from_index + from_count - 1) or {}
+
+  if action == "accept" then
+    current = replace_lines(current, from_index, from_count, proposed)
+  else
+    pending = replace_lines(pending, to_index, to_count, source)
+  end
+  return current, pending
 end
 
 return M

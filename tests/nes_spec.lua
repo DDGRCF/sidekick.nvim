@@ -194,3 +194,118 @@ describe("nes review navigation", function()
     assert.are.same(before, after)
   end)
 end)
+
+describe("nes hunk actions", function()
+  local buf
+  local original_get_client
+  local original_ui_update
+  local original_inline
+
+  before_each(function()
+    local Edit = require("sidekick.nes.edit")
+    original_get_client = Config.get_client
+    original_ui_update = require("sidekick.nes.ui").update
+    original_inline = Config.nes.diff.inline
+    Config.nes.diff.inline = false
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three" })
+    vim.api.nvim_set_current_buf(buf)
+    vim.lsp.util.buf_versions[buf] = 0
+    Nes.enabled = true
+    Config.nes.enabled = true
+    Config.get_client = function()
+      return { id = 1, offset_encoding = "utf-16", name = "copilot" }
+    end
+    require("sidekick.nes.ui").update = function() end
+    local edit = setmetatable({
+      buf = buf,
+      from = { 0, 0 },
+      to = { 2, 5 },
+      range = {
+        start = { line = 0, character = 0 },
+        ["end"] = { line = 2, character = 5 },
+      },
+      text = "one\nTWO\nthree\nfour",
+      textDocument = { uri = "file:///tmp/nes-hunk.lua", version = 0 },
+    }, Edit)
+    Nes._edits = { edit }
+  end)
+
+  after_each(function()
+    Config.get_client = original_get_client
+    require("sidekick.nes.ui").update = original_ui_update
+    Config.nes.diff.inline = original_inline
+    Nes._edits = {}
+    Nes._skip_update = {}
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end)
+
+  it("accepts only the hunk under the cursor and keeps the remaining hunk", function()
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    assert.is_true(Nes.accept())
+    assert.are.same({ "one", "TWO", "three" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    assert.are.equal(1, Nes.summary().hunks)
+  end)
+
+  it("rejects the current hunk without changing the buffer", function()
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    assert.is_true(Nes.reject())
+    assert.are.same({ "one", "two", "three" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    assert.are.equal(1, Nes.summary().hunks)
+  end)
+
+  it("keeps adjacent same-line edits after accepting one", function()
+    local Edit = require("sidekick.nes.edit")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "abcdefghij" })
+
+    local function make_edit(from_col, to_col, text, uri)
+      return setmetatable({
+        buf = buf,
+        from = { 0, from_col },
+        to = { 0, to_col },
+        range = {
+          start = { line = 0, character = from_col },
+          ["end"] = { line = 0, character = to_col },
+        },
+        text = text,
+        textDocument = { uri = uri, version = 0 },
+      }, Edit)
+    end
+
+    Nes._edits = {
+      make_edit(0, 3, "ABC", "file:///tmp/nes-adjacent-a.lua"),
+      make_edit(3, 6, "DEF", "file:///tmp/nes-adjacent-b.lua"),
+    }
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    assert.is_true(Nes.accept())
+    assert.are.same({ "ABCdefghij" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    assert.are.equal(1, #Nes.get(buf))
+  end)
+
+  it("uses the cursor column to select inline hunks", function()
+    local Edit = require("sidekick.nes.edit")
+    Config.nes.diff.inline = "words"
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "a b c d e f g h i j" })
+    local text = "A b c d e f g h i J"
+    Nes._edits = {
+      setmetatable({
+        buf = buf,
+        from = { 0, 0 },
+        to = { 0, #"a b c d e f g h i j" },
+        range = {
+          start = { line = 0, character = 0 },
+          ["end"] = { line = 0, character = #"a b c d e f g h i j" },
+        },
+        text = text,
+        textDocument = { uri = "file:///tmp/nes-inline.lua", version = 0 },
+      }, Edit),
+    }
+
+    vim.api.nvim_win_set_cursor(0, { 1, 18 })
+    assert.is_true(Nes.accept())
+    assert.are.same({ "a b c d e f g h i J" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+  end)
+end)

@@ -2,13 +2,20 @@
 
 local Config = require("sidekick.config")
 local Context = require("sidekick.cli.context")
+local Git = require("sidekick.cli.context.git")
+local GitDiff = require("sidekick.cli.context.git_diff")
+local GitStatus = require("sidekick.cli.context.git_status")
+local Text = require("sidekick.text")
+local TreeSitterScope = require("sidekick.cli.context.treesitter_scope")
 
 describe("context module", function()
   local buf, win
   local original_cwd
+  local original_git_run
 
   before_each(function()
     original_cwd = vim.fn.getcwd()
+    original_git_run = Git.run
     buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
       "local foo = 1",
@@ -22,6 +29,7 @@ describe("context module", function()
   end)
 
   after_each(function()
+    Git.run = original_git_run
     if vim.api.nvim_buf_is_valid(buf) then
       vim.api.nvim_buf_delete(buf, { force = true })
     end
@@ -371,6 +379,173 @@ describe("context module", function()
   end)
 
   describe("context functions", function()
+    describe("git_diff", function()
+      local cases = {
+        {
+          name = "combines unstaged and staged changes",
+          unstaged = "diff --git a/main.lua b/main.lua\n--- a/main.lua\n+++ b/main.lua\n@@ -1 +1 @@\n-old\n+new\n",
+          staged = "diff --git a/staged.lua b/staged.lua\n@@ -1 +1 @@\n-old\n+staged\n",
+          expected = {
+            "Git diff (unstaged)",
+            "diff --git a/main.lua b/main.lua",
+            "--- a/main.lua",
+            "+++ b/main.lua",
+            "@@ -1 +1 @@",
+            "-old",
+            "+new",
+            "",
+            "Git diff (staged)",
+            "diff --git a/staged.lua b/staged.lua",
+            "@@ -1 +1 @@",
+            "-old",
+            "+staged",
+          },
+        },
+        {
+          name = "can request only staged changes",
+          opts = { unstaged = false },
+          staged = "diff --git a/staged.lua b/staged.lua\n@@ -1 +1 @@\n-old\n+staged\n",
+          expected = {
+            "Git diff (staged)",
+            "diff --git a/staged.lua b/staged.lua",
+            "@@ -1 +1 @@",
+            "-old",
+            "+staged",
+          },
+        },
+        {
+          name = "returns nil without changes",
+          expected = nil,
+        },
+      }
+
+      for _, case in ipairs(cases) do
+        it(case.name, function()
+          local calls = {}
+          Git.run = function(cwd, args)
+            calls[#calls + 1] = { cwd = cwd, args = args }
+            return vim.tbl_contains(args, "--cached") and case.staged or case.unstaged
+          end
+
+          local result = GitDiff.get({ cwd = "/tmp" }, case.opts)
+          if case.expected then
+            assert.are.same(case.expected, Text.lines(result))
+          else
+            assert.is_nil(result)
+          end
+
+          if case.opts and case.opts.unstaged == false then
+            assert.are.equal(1, #calls)
+            assert.is_true(vim.tbl_contains(calls[1].args, "--cached"))
+          else
+            assert.are.equal(2, #calls)
+          end
+        end)
+      end
+    end)
+
+    describe("git_status", function()
+      local cases = {
+        {
+          name = "formats branch and changed files",
+          output = "## main...origin/main [ahead 1]\n M lua/modified.lua\nA  lua/staged.lua\n?? notes.txt\n",
+          expected = {
+            "Git status: main",
+            "- ·M lua/modified.lua",
+            "- A· lua/staged.lua",
+            "- ?? notes.txt",
+          },
+        },
+        {
+          name = "returns nil for a clean tree",
+          output = "## main...origin/main\n",
+          expected = nil,
+        },
+        {
+          name = "labels detached HEAD clearly",
+          output = "## HEAD (no branch)\n M detached.lua\n",
+          expected = {
+            "Git status: detached HEAD",
+            "- ·M detached.lua",
+          },
+        },
+      }
+
+      for _, case in ipairs(cases) do
+        it(case.name, function()
+          Git.run = function()
+            return case.output
+          end
+
+          local result = GitStatus.get({ cwd = "/tmp" })
+          if case.expected then
+            assert.are.same(case.expected, Text.lines(result))
+          else
+            assert.is_nil(result)
+          end
+        end)
+      end
+    end)
+
+    describe("treesitter_scope", function()
+      local cases = {
+        {
+          name = "returns the outermost containing function",
+          lines = {
+            "local function outer()",
+            "  local function inner()",
+            "    return 1",
+            "  end",
+            "end",
+          },
+          cursor = { 3, 4 },
+          expected = true,
+          first = "1 local function outer()",
+          last = "5 end",
+          title = "Tree-sitter scope function outer",
+          range = ":L1-L5",
+        },
+        {
+          name = "returns nil outside a scope",
+          lines = { "local value = 1" },
+          cursor = { 1, 4 },
+          expected = nil,
+        },
+      }
+
+      for _, case in ipairs(cases) do
+        it(case.name, function()
+          vim.bo[buf].filetype = "lua"
+          vim.api.nvim_buf_set_lines(buf, 0, -1, false, case.lines)
+          vim.api.nvim_win_set_cursor(win, case.cursor)
+
+          local has_parser = pcall(vim.treesitter.get_parser, buf, "lua")
+          if not has_parser then
+            assert.is_true(true)
+            return
+          end
+
+          local result = TreeSitterScope.get(Context.ctx())
+          if case.expected == nil then
+            assert.is_nil(result)
+            return
+          end
+
+          local rendered = Text.lines(result)
+          assert.is_true(rendered[1]:find(case.title, 1, true) ~= nil, rendered[1])
+          assert.is_true(rendered[1]:find(case.range, 1, true) ~= nil, rendered[1])
+          assert.are.equal(case.first, rendered[2])
+          assert.are.equal(case.last, rendered[#rendered])
+        end)
+      end
+    end)
+
+    it("registers the new built-in context names", function()
+      for _, name in ipairs({ "git_diff", "git_status", "treesitter_scope" }) do
+        assert.are.equal("function", type(Context.fn(name)))
+      end
+    end)
+
     describe("position", function()
       it("returns position info for file buffer", function()
         local tmp = vim.fn.tempname() .. ".lua"

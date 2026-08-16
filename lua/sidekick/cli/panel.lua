@@ -511,6 +511,27 @@ local function tool_highlight(t)
   return tool_highlights[t.tool.name] or "SidekickCliTool"
 end
 
+local CLI_HL_PREFIX = "SidekickCli"
+
+local function has_highlight(group)
+  if vim.fn.hlexists(group) ~= 1 then
+    return false
+  end
+  local attrs = vim.api.nvim_get_hl(0, { name = group, link = false })
+  attrs.default = nil
+  return next(attrs) ~= nil
+end
+
+local function tab_highlight(group, selected)
+  if group:sub(1, #CLI_HL_PREFIX) ~= CLI_HL_PREFIX then
+    return group
+  end
+  local suffix = group:sub(#CLI_HL_PREFIX + 1)
+  local surface = selected and "SidekickCliTabSelected" or "SidekickCliTab"
+  local derived = surface .. suffix
+  return has_highlight(derived) and derived or surface
+end
+
 local function agent_marker_text()
   local icon = Config.ui.icons.installed
   return type(icon) == "string" and vim.trim(icon) or ""
@@ -584,8 +605,9 @@ end
 ---@param left_separator string
 ---@param right_separator string
 ---@param title_value? string
-local function tab_width(p, t, left_separator, right_separator, title_value)
-  local marker = agent_marker_text()
+---@param compact? boolean
+local function tab_width(p, t, left_separator, right_separator, title_value, compact)
+  local marker = compact and "" or agent_marker_text()
   local text = " "
     .. (marker ~= "" and (marker .. " ") or "")
     .. agent_icon_text(t)
@@ -603,7 +625,7 @@ local function tab_width(p, t, left_separator, right_separator, title_value)
   return vim.api.nvim_strwidth(left_separator .. text .. right_separator)
 end
 
----@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,priority:boolean}[]
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,compact_width:integer,compact_min_width:integer,priority:boolean}[]
 ---@param visible table<integer,boolean>
 ---@param width_field? string
 ---@return integer
@@ -626,11 +648,15 @@ local function visible_width(items, visible, width_field)
   return width
 end
 
----@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,priority:boolean}[]
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,compact_width:integer,compact_min_width:integer,priority:boolean}[]
 ---@param active integer
 ---@param available integer
+---@param width_field? string
+---@param min_width_field? string
 ---@return table<integer,boolean>
-local function visible_range(items, active, available)
+local function visible_range(items, active, available, width_field, min_width_field)
+  width_field = width_field or "width"
+  min_width_field = min_width_field or "min_width"
   local has_priority = false
   for index, item in ipairs(items) do
     if index ~= active and item.priority then
@@ -649,7 +675,7 @@ local function visible_range(items, active, available)
       local width = vim.api.nvim_strwidth(truncation_marker(hidden_left))
         + vim.api.nvim_strwidth(truncation_marker(hidden_right))
       for index = left, right do
-        width = width + items[index].width
+        width = width + items[index][width_field]
       end
       return width
     end
@@ -664,7 +690,7 @@ local function visible_range(items, active, available)
         left_width = vim.api.nvim_strwidth(truncation_marker(hidden_left + 1))
           + vim.api.nvim_strwidth(truncation_marker(hidden_right))
         for index = left + 1, right do
-          left_width = left_width + items[index].width
+          left_width = left_width + items[index][width_field]
         end
       end
       local right_width
@@ -672,7 +698,7 @@ local function visible_range(items, active, available)
         right_width = vim.api.nvim_strwidth(truncation_marker(hidden_left))
           + vim.api.nvim_strwidth(truncation_marker(hidden_right + 1))
         for index = left, right - 1 do
-          right_width = right_width + items[index].width
+          right_width = right_width + items[index][width_field]
         end
       end
       if left_width and right_width then
@@ -720,22 +746,26 @@ local function visible_range(items, active, available)
 
   for _, candidate in ipairs(candidates) do
     visible[candidate.index] = true
-    if visible_width(items, visible, "min_width") > available then
+    if visible_width(items, visible, min_width_field) > available then
       visible[candidate.index] = nil
     end
   end
   return visible
 end
 
----@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,priority:boolean}[]
+---@param items {id:string,t:sidekick.cli.Terminal,width:integer,min_width:integer,compact_width:integer,compact_min_width:integer,priority:boolean}[]
 ---@param visible table<integer,boolean>
 ---@param available integer
 ---@param titles table<string,string>
 ---@param suffixes table<string,string>
+---@param width_field? string
+---@param min_width_field? string
 ---@return table<integer,string>
-local function compact_titles(items, visible, available, titles, suffixes)
+local function compact_titles(items, visible, available, titles, suffixes, width_field, min_width_field)
+  width_field = width_field or "width"
+  min_width_field = min_width_field or "min_width"
   local values = {}
-  if visible_width(items, visible) <= available then
+  if visible_width(items, visible, width_field) <= available then
     for index, item in ipairs(items) do
       if visible[index] then
         values[index] = titles[item.id]
@@ -744,13 +774,13 @@ local function compact_titles(items, visible, available, titles, suffixes)
     return values
   end
 
-  local remaining = math.max(0, available - visible_width(items, visible, "min_width"))
+  local remaining = math.max(0, available - visible_width(items, visible, min_width_field))
   local visible_count = vim.tbl_count(visible)
   for index, item in ipairs(items) do
     if visible[index] then
       local desired = vim.api.nvim_strwidth(titles[item.id])
       local share = visible_count > 0 and math.floor(remaining / visible_count) or 0
-      local width = math.min(desired, share)
+      local width = math.max(1, math.min(desired, share))
       values[index] = title_text(item.t, width, suffixes[item.id])
       remaining = math.max(0, remaining - vim.api.nvim_strwidth(values[index]))
       visible_count = visible_count - 1
@@ -764,14 +794,19 @@ end
 ---@param left_separator string
 ---@param right_separator string
 ---@param title_value? string
-local function render_tab(p, t, left_separator, right_separator, title_value)
+---@param compact? boolean
+local function render_tab(p, t, left_separator, right_separator, title_value, compact)
   local parts = {} ---@type string[]
   local selected = t.id == p.active
   local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
   local state = (t.status or "idle"):gsub("^%l", string.upper)
-  local marker = agent_marker_text()
-  local tool_hl = selected and tool_highlight(t) or base
-  local marker_hl = selected and "SidekickCliInstalled" or base
+  local marker = compact and "" or agent_marker_text()
+  local tool_hl = selected and tab_highlight(tool_highlight(t), true) or base
+  local marker_hl = selected and tab_highlight("SidekickCliInstalled", true) or base
+  local status_hl = tab_highlight("SidekickCliStatus" .. state, selected)
+  local attention_hl = tab_highlight("SidekickCliAttention", selected)
+  local pin_hl = tab_highlight("SidekickCliPin", selected)
+  local close_hl = tab_highlight("SidekickCliClose", selected)
   if selected then
     parts[#parts + 1] = "%<"
   end
@@ -781,20 +816,19 @@ local function render_tab(p, t, left_separator, right_separator, title_value)
     parts[#parts + 1] = ("%%#%s# %s "):format(marker_hl, agent_marker())
   end
   parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_icon(t))
-  parts[#parts + 1] = ("%%#SidekickCliStatus%s#%s"):format(state, status_icon(t))
+  parts[#parts + 1] = ("%%#%s#%s"):format(status_hl, status_icon(t))
   if attention_text(t) ~= "" then
-    parts[#parts + 1] = ("%%#SidekickCliAttention#%s "):format(attention(t))
+    parts[#parts + 1] = ("%%#%s#%s "):format(attention_hl, attention(t))
   end
   parts[#parts + 1] = ("%%#%s#: %s"):format(base, title(t, title_value))
   if p.pinned[t.id] then
-    parts[#parts + 1] = ("%%#SidekickCliPin# %s"):format(pin_icon_text())
+    parts[#parts + 1] = ("%%#%s# %s"):format(pin_hl, escape(pin_icon_text()))
   end
   parts[#parts + 1] = " "
   parts[#parts + 1] = "%T"
   if Config.cli.win.tabs.show_close then
     parts[#parts + 1] = click("close", p, t.id)
-    local close_hl = selected and base or "SidekickCliClose"
-    parts[#parts + 1] = ("%%#%s#%s %%T"):format(close_hl, close_icon_text())
+    parts[#parts + 1] = ("%%#%s#%s %%T"):format(close_hl, escape(close_icon_text()))
   end
   parts[#parts + 1] = ("%%#SidekickCliTabSeparator#%s"):format(escape(right_separator))
   return table.concat(parts)
@@ -826,6 +860,8 @@ function M.render(p)
         t = t,
         width = 0,
         min_width = 0,
+        compact_width = 0,
+        compact_min_width = 0,
         priority = priority(t, p.pinned[id] == true),
       }
     end
@@ -836,6 +872,8 @@ function M.render(p)
     titles[item.id] = title_text(item.t, nil, suffixes[item.id])
     item.width = tab_width(p, item.t, left_separator, right_separator, titles[item.id])
     item.min_width = tab_width(p, item.t, left_separator, right_separator, "")
+    item.compact_width = tab_width(p, item.t, left_separator, right_separator, titles[item.id], true)
+    item.compact_min_width = tab_width(p, item.t, left_separator, right_separator, "…", true)
   end
 
   local active = 1
@@ -848,10 +886,28 @@ function M.render(p)
   local visible = {}
   local available
   local title_values = {}
+  local compact_layout = false
   if #items > 0 then
     available = math.max(1, vim.api.nvim_win_get_width(p.win) - vim.api.nvim_strwidth("+ "))
-    visible = visible_range(items, active, available)
-    title_values = compact_titles(items, visible, available, titles, suffixes)
+    local all_visible = {}
+    for index = 1, #items do
+      all_visible[index] = true
+    end
+    compact_layout = visible_width(items, all_visible) > available
+    local width_field = compact_layout and "compact_width" or "width"
+    -- Keep a conservative minimum for priority tabs so a working/unread tab
+    -- does not become a row of empty labels just because its marker was
+    -- compacted away.
+    local has_priority = false
+    for index, item in ipairs(items) do
+      if index ~= active and item.priority then
+        has_priority = true
+        break
+      end
+    end
+    local min_width_field = compact_layout and not has_priority and "compact_min_width" or "min_width"
+    visible = visible_range(items, active, available, width_field, min_width_field)
+    title_values = compact_titles(items, visible, available, titles, suffixes, width_field, min_width_field)
   end
   local hidden = 0
   for index, item in ipairs(items) do
@@ -859,7 +915,14 @@ function M.render(p)
       parts[#parts + 1] = render_truncation(hidden, p)
       hidden = 0
       local title_value = title_values[index] ~= nil and title_values[index] or titles[item.id]
-      parts[#parts + 1] = render_tab(p, item.t, left_separator, right_separator, title_value)
+      parts[#parts + 1] = render_tab(
+        p,
+        item.t,
+        left_separator,
+        right_separator,
+        title_value,
+        compact_layout or available < item.min_width
+      )
     else
       hidden = hidden + 1
     end
@@ -871,28 +934,34 @@ function M.render(p)
   return table.concat(parts)
 end
 
----@param p sidekick.cli.Panel
-local function refresh_panel(p)
-  clean(p)
-  if valid(p.win) and Config.cli.win.tabs.enabled then
-    vim.wo[p.win].winbar = M.render(p)
+---@param p sidekick.cli.Panel?
+local function close_duplicate_windows(p)
+  if not p or not valid(p.win) then
+    return
+  end
+  local panel_buf = vim.api.nvim_win_get_buf(p.win)
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(p.tab)) do
+    if
+      win ~= p.win
+      and valid(win)
+      and vim.api.nvim_win_get_config(win).relative == ""
+      and vim.api.nvim_win_get_buf(win) == panel_buf
+    then
+      pcall(vim.api.nvim_win_close, win, true)
+    end
   end
 end
 
 local function close_duplicate_window()
-  local p = panel()
-  if not p or not valid(p.win) then
-    return
-  end
-  local win = vim.api.nvim_get_current_win()
-  if win == p.win or not valid(win) then
-    return
-  end
-  if vim.api.nvim_win_get_config(win).relative ~= "" then
-    return
-  end
-  if vim.api.nvim_win_get_buf(win) == vim.api.nvim_win_get_buf(p.win) then
-    pcall(vim.api.nvim_win_close, win, true)
+  close_duplicate_windows(panel())
+end
+
+---@param p sidekick.cli.Panel
+local function refresh_panel(p)
+  clean(p)
+  close_duplicate_windows(p)
+  if valid(p.win) and Config.cli.win.tabs.enabled then
+    vim.wo[p.win].winbar = M.render(p)
   end
 end
 
@@ -936,7 +1005,9 @@ local function open(p, buf)
     opts.col = opts.col == nil and math.floor((vim.o.columns - opts.width) / 2)
       or not saved and opts.col <= 1 and math.floor((vim.o.columns - opts.width) * opts.col)
       or opts.col
-    opts.title = opts.title or " Sidekick Agents "
+    local icon = Config.ui.icons.terminal_started
+    icon = type(icon) == "string" and vim.trim(icon) or ""
+    opts.title = opts.title or (" %s Sidekick Agents "):format(icon)
     opts.title_pos = opts.title_pos or "center"
     opts.border = opts.border or "rounded"
   else

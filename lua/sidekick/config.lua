@@ -2,6 +2,7 @@
 local M = {}
 
 M.ns = vim.api.nvim_create_namespace("sidekick.ui")
+local derived_highlights = {} ---@type table<string,{attrs:table,custom:boolean}>
 
 ---@class sidekick.Config
 local defaults = {
@@ -30,6 +31,13 @@ local defaults = {
     review = {
       -- show a compact progress summary for active suggestions
       summary = true,
+      -- floating side-by-side preview used by `:Sidekick nes review`
+      preview = {
+        width = 0.9,
+        height = 0.8,
+        border = "rounded",
+        winblend = 0,
+      },
     },
     signs = true, -- show signs for next edit suggestions
     jumplist = true, -- add an entry to the jumplist
@@ -201,12 +209,15 @@ local defaults = {
       -- simple context prompts
       buffers         = "{buffers}",
       file            = "{file}",
+      git_diff        = "{git_diff}",
+      git_status      = "{git_status}",
       line            = "{line}",
       position        = "{position}",
       quickfix        = "{quickfix}",
       selection       = "{selection}",
       ["function"]    = "{function}",
       class           = "{class}",
+      treesitter_scope = "{treesitter_scope}",
     },
     -- preferred picker for selecting files
     ---@alias sidekick.picker "snacks"|"telescope"|"fzf-lua"
@@ -362,8 +373,47 @@ function M.set_hl()
   local function available(name, fallback)
     return vim.fn.hlexists(name) == 1 and name or fallback
   end
+  local function available_surface(name, fallback)
+    local attrs = vim.api.nvim_get_hl(0, { name = name, link = false })
+    if attrs.bg or attrs.ctermbg then
+      return name
+    end
+    return fallback
+  end
+  local function with_background(name, source, background)
+    local attrs = vim.api.nvim_get_hl(0, { name = source, link = false })
+    local surface = vim.api.nvim_get_hl(0, { name = background, link = false })
+    for key, value in pairs(surface) do
+      if key ~= "fg" and key ~= "ctermfg" and key ~= "default" then
+        attrs[key] = value
+      end
+    end
+    attrs.bg = surface.bg or "NONE"
+    attrs.ctermbg = surface.ctermbg or "NONE"
+
+    local current = vim.api.nvim_get_hl(0, { name = name, link = false })
+    local state = derived_highlights[name]
+    local custom = state and state.custom or false
+    if next(current) == nil then
+      if custom then
+        vim.api.nvim_set_hl(0, name, state.attrs)
+        current = vim.api.nvim_get_hl(0, { name = name, link = false })
+      else
+        custom = false
+      end
+    elseif not custom and state and not vim.deep_equal(current, state.attrs) then
+      custom = true
+    elseif not state and vim.fn.hlexists(name) == 1 and next(current) ~= nil then
+      custom = true
+    end
+    if not custom then
+      vim.api.nvim_set_hl(0, name, attrs)
+      current = vim.api.nvim_get_hl(0, { name = name, link = false })
+    end
+    derived_highlights[name] = { attrs = vim.deepcopy(current), custom = custom }
+  end
   local links = {
-    DiffContext = "CursorLine",
+    DiffContext = available_surface("CursorLine", "DiffChange"),
     DiffAdd = "DiffText",
     DiffDelete = "DiffDelete",
     Sign = "Special",
@@ -420,6 +470,17 @@ function M.set_hl()
   for from, to in pairs(tabs) do
     local bufferline = to:find("^BufferLine") ~= nil
     vim.api.nvim_set_hl(0, "Sidekick" .. from, { link = to, default = not bufferline })
+  end
+
+  -- Keep semantic tab decorations on the same surface as their tab. The
+  -- original groups remain foreground-only for pickers and other contexts.
+  for from in pairs(links) do
+    local decoration = from:match("^Cli(.+)$")
+    if decoration then
+      local source = "SidekickCli" .. decoration
+      with_background("SidekickCliTab" .. decoration, source, "SidekickCliTab")
+      with_background("SidekickCliTabSelected" .. decoration, source, "SidekickCliTabSelected")
+    end
   end
 end
 

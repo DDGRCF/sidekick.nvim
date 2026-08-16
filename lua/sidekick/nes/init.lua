@@ -2,9 +2,11 @@ local Config = require("sidekick.config")
 local Util = require("sidekick.util")
 
 local M = {}
+local PARTIAL_NS = vim.api.nvim_create_namespace("sidekick.nes.partial")
 
 M._edits = {} ---@type sidekick.NesEdit[]
 M._requests = {} ---@type table<number, number>
+M._skip_update = {} ---@type table<integer, boolean>
 M.enabled = false
 M.did_setup = false
 
@@ -82,7 +84,17 @@ function M.setup()
   end
 
   on(Config.nes.clear.events, M.clear)
-  on(Config.nes.trigger.events, Util.debounce(M.update, Config.nes.debounce))
+  on(
+    Config.nes.trigger.events,
+    Util.debounce(function()
+      local buf = vim.api.nvim_get_current_buf()
+      if type(M._skip_update) == "table" and M._skip_update[buf] then
+        M._skip_update[buf] = nil
+        return
+      end
+      M.update()
+    end, Config.nes.debounce)
+  )
   on({ "BufEnter", "WinEnter" }, Util.debounce(did_focus, 10))
 
   if Config.nes.diff.show == "cursor" or review_summary_enabled() then
@@ -190,8 +202,13 @@ end
 -- Clear all active edits
 function M.clear()
   M.cancel()
+  M._skip_update = {}
   M._edits = {}
   require("sidekick.nes.ui").update()
+  local Preview = package.loaded["sidekick.nes.preview"]
+  if Preview then
+    Preview.close()
+  end
 end
 
 --- Cancel pending requests
@@ -278,9 +295,241 @@ local function current_review_index(items, cursor)
   for index, item in ipairs(items) do
     local end_row = item.pos[1] + math.max(1, item.hunk.cover or 1) - 1
     if cursor[1] >= item.pos[1] and cursor[1] <= end_row then
-      return index
+      if not item.hunk.inline then
+        return index
+      end
+      local from_col = item.hunk.from_col or item.pos[2]
+      local to_col = item.hunk.from_end_col or from_col
+      if cursor[2] == from_col or (to_col > from_col and cursor[2] < to_col) then
+        return index
+      end
     end
   end
+end
+
+---@param buf integer
+---@return sidekick.NesReviewItem?
+local function current_review_item(buf)
+  if buf ~= vim.api.nvim_get_current_buf() then
+    return
+  end
+  local items = M.review_items(buf)
+  if #items == 0 then
+    return
+  end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local index = current_review_index(items, { cursor[1] - 1, cursor[2] })
+  return index and items[index] or nil
+end
+
+---@param client vim.lsp.Client
+---@param buf integer
+---@param pos sidekick.Pos
+---@return lsp.Position
+local function lsp_position(client, buf, pos)
+  local line = vim.api.nvim_buf_get_lines(buf, pos[1], pos[1] + 1, false)[1] or ""
+  return {
+    line = pos[1],
+    character = vim.str_utfindex(line, client.offset_encoding or "utf-16", pos[2], false),
+  }
+end
+
+---@param a_from sidekick.Pos
+---@param a_to sidekick.Pos
+---@param b_from sidekick.Pos
+---@param b_to sidekick.Pos
+---@return boolean
+local function ranges_overlap(a_from, a_to, b_from, b_to)
+  local a_empty = compare_pos(a_from, a_to) == 0
+  local b_empty = compare_pos(b_from, b_to) == 0
+  if a_empty and b_empty then
+    return compare_pos(a_from, b_from) == 0
+  elseif a_empty then
+    return compare_pos(b_from, a_from) < 0 and compare_pos(a_from, b_to) < 0
+  elseif b_empty then
+    return compare_pos(a_from, b_from) < 0 and compare_pos(b_from, a_to) < 0
+  end
+  return compare_pos(a_from, b_to) < 0 and compare_pos(b_from, a_to) < 0
+end
+
+---@param edit sidekick.NesEdit
+---@param diff sidekick.Diff
+---@param hunk sidekick.diff.Hunk
+---@return sidekick.Pos from
+---@return sidekick.Pos to
+local function hunk_range(edit, diff, hunk)
+  if hunk.inline then
+    return vim.deepcopy(hunk.pos), { hunk.pos[1], hunk.from_end_col or hunk.pos[2] }
+  end
+  local from = { hunk.pos[1], 0 }
+  local count = hunk.from_count or hunk.cover or 0
+  if count == 0 then
+    if edit.from[1] == from[1] then
+      from[2] = edit.from[2]
+    end
+    return from, from
+  end
+  local from_index = hunk.from_index or 1
+  local last = diff.from.lines[from_index + count - 1] or ""
+  local to = { hunk.pos[1] + count - 1, #last }
+  if edit.from[1] == from[1] then
+    from[2] = edit.from[2]
+  end
+  if edit.to[1] == to[1] then
+    to[2] = edit.to[2]
+  end
+  return from, to
+end
+
+---@param buf integer
+---@param item sidekick.NesReviewItem
+---@param diff sidekick.Diff
+---@return {edit:sidekick.NesEdit,start:integer,finish:integer}[]
+local function mark_siblings(buf, item, diff)
+  local changed_from, changed_to = hunk_range(item.edit, diff, item.hunk)
+  local ret = {}
+  vim.api.nvim_buf_clear_namespace(buf, PARTIAL_NS, 0, -1)
+  for _, edit in ipairs(M._edits) do
+    if edit.buf == buf and edit ~= item.edit and not ranges_overlap(edit.from, edit.to, changed_from, changed_to) then
+      local ok_start, start = pcall(vim.api.nvim_buf_set_extmark, buf, PARTIAL_NS, edit.from[1], edit.from[2], {
+        right_gravity = true,
+      })
+      local ok_finish, finish = pcall(vim.api.nvim_buf_set_extmark, buf, PARTIAL_NS, edit.to[1], edit.to[2], {
+        right_gravity = true,
+      })
+      if ok_start and ok_finish then
+        ret[#ret + 1] = { edit = edit, start = start, finish = finish }
+      elseif ok_start then
+        pcall(vim.api.nvim_buf_del_extmark, buf, PARTIAL_NS, start)
+      end
+    end
+  end
+  return ret
+end
+
+---@param client vim.lsp.Client
+---@param buf integer
+---@param marks {edit:sidekick.NesEdit,start:integer,finish:integer}[]
+---@return table<sidekick.NesEdit, boolean>
+local function remap_siblings(client, buf, marks)
+  local kept = {}
+  local version = vim.lsp.util.buf_versions[buf]
+  for _, mark in ipairs(marks) do
+    local from = vim.api.nvim_buf_get_extmark_by_id(buf, PARTIAL_NS, mark.start, {})
+    local to = vim.api.nvim_buf_get_extmark_by_id(buf, PARTIAL_NS, mark.finish, {})
+    if #from == 2 and #to == 2 then
+      mark.edit.from = { from[1], from[2] }
+      mark.edit.to = { to[1], to[2] }
+      mark.edit.range = {
+        start = lsp_position(client, buf, mark.edit.from),
+        ["end"] = lsp_position(client, buf, mark.edit.to),
+      }
+      mark.edit.textDocument.version = version or mark.edit.textDocument.version
+      mark.edit._diff = nil
+      kept[mark.edit] = true
+    end
+  end
+  vim.api.nvim_buf_clear_namespace(buf, PARTIAL_NS, 0, -1)
+  return kept
+end
+
+---@param client vim.lsp.Client
+---@param edit sidekick.NesEdit
+---@param current string[]
+---@param pending string[]
+---@return sidekick.NesEdit
+local function partial_edit(client, edit, current, pending)
+  local buf = edit.buf
+  local start_row = edit.from[1]
+  local end_row = start_row + #current - 1
+  local end_line = current[#current] or ""
+  local from = { start_row, 0 }
+  local to = { end_row, #end_line }
+  local range = {
+    start = lsp_position(client, buf, from),
+    ["end"] = lsp_position(client, buf, to),
+  }
+  local version = vim.lsp.util.buf_versions[buf] or edit.textDocument.version or 0
+  vim.lsp.util.buf_versions[buf] = version
+
+  local Edit = require("sidekick.nes.edit")
+  local ret = setmetatable({
+    buf = buf,
+    from = from,
+    to = to,
+    range = range,
+    text = table.concat(pending, "\n"),
+    command = edit.command,
+    textDocument = {
+      uri = edit.textDocument.uri,
+      version = version,
+    },
+  }, Edit) ---@type sidekick.NesEdit
+  return ret
+end
+
+---@param action "accept"|"reject"
+---@return boolean acted
+local function act_on_current_hunk(action)
+  local buf = vim.api.nvim_get_current_buf()
+  if not is_enabled(buf) then
+    return false
+  end
+  local client = Config.get_client(buf)
+  local item = current_review_item(buf)
+  if not client or not item then
+    return false
+  end
+
+  local Diff = require("sidekick.nes.diff")
+  local diff = item.edit:diff()
+  local current, pending = Diff.apply_hunk(diff, item.hunk, action)
+  if #current == 0 then
+    current = { "" }
+  end
+  local sibling_marks = action == "accept" and mark_siblings(buf, item, diff) or {}
+  if action == "accept" then
+    local start_row = diff.range.from[1]
+    vim.api.nvim_buf_set_lines(buf, start_row, start_row + #diff.from.lines, false, current)
+  end
+  local siblings = action == "accept" and remap_siblings(client, buf, sibling_marks) or {}
+
+  local next_edit = partial_edit(client, item.edit, current, pending)
+  local remaining = #next_edit:diff().hunks > 0 and next_edit or nil
+  local edits = {}
+  for _, edit in ipairs(M._edits) do
+    if edit.buf ~= buf or (action == "reject" and edit ~= item.edit) or (action == "accept" and siblings[edit]) then
+      edits[#edits + 1] = edit
+    end
+  end
+  if remaining then
+    edits[#edits + 1] = next_edit
+  end
+  M._edits = edits
+
+  local completed = not remaining
+  local keep_buffer_edits = vim.tbl_contains(
+    vim.tbl_map(function(edit)
+      return edit.buf
+    end, edits),
+    buf
+  )
+  if completed and action == "accept" and item.edit.command then
+    vim.schedule(function()
+      if client then
+        client:exec_cmd(item.edit.command, { bufnr = buf })
+      end
+      Util.emit("SidekickNesDone", { client_id = client.id, buffer = buf })
+    end)
+  end
+
+  M._skip_update[buf] = action == "accept" and keep_buffer_edits or nil
+  require("sidekick.nes.ui").update()
+  local Preview = package.loaded["sidekick.nes.preview"]
+  if Preview then
+    Preview.refresh()
+  end
+  return true
 end
 
 ---@param buf? integer
@@ -346,9 +595,13 @@ function M.prev()
   return navigate(nil, -1)
 end
 
---- Show a compact summary of active edit hunks.
+--- Toggle the side-by-side review preview, falling back to a compact summary.
 ---@return boolean shown
 function M.review()
+  local Preview = require("sidekick.nes.preview")
+  if Preview.toggle() then
+    return true
+  end
   local summary = M.summary()
   if summary.hunks == 0 then
     return false
@@ -364,6 +617,32 @@ function M.review()
     )
   )
   return true
+end
+
+--- Accept the edit hunk under the cursor.
+---@return boolean accepted
+function M.accept()
+  local Preview = package.loaded["sidekick.nes.preview"]
+  if Preview then
+    Preview.focus_source()
+  end
+  return act_on_current_hunk("accept")
+end
+
+--- Reject the edit hunk under the cursor.
+---@return boolean rejected
+function M.reject()
+  local Preview = package.loaded["sidekick.nes.preview"]
+  if Preview then
+    Preview.focus_source()
+  end
+  return act_on_current_hunk("reject")
+end
+
+--- Open the active edits in a side-by-side floating diff.
+---@return boolean opened
+function M.preview()
+  return require("sidekick.nes.preview").open()
 end
 
 --- Jump to the start of the active edit

@@ -265,6 +265,13 @@ local defaults = {
     review = {
       -- show a compact progress summary for active suggestions
       summary = true,
+      -- floating side-by-side preview used by `:Sidekick nes review`
+      preview = {
+        width = 0.9,
+        height = 0.8,
+        border = "rounded",
+        winblend = 0,
+      },
     },
     signs = true, -- show signs for next edit suggestions
     jumplist = true, -- add an entry to the jumplist
@@ -433,12 +440,15 @@ local defaults = {
       -- simple context prompts
       buffers         = "{buffers}",
       file            = "{file}",
+      git_diff        = "{git_diff}",
+      git_status      = "{git_status}",
       line            = "{line}",
       position        = "{position}",
       quickfix        = "{quickfix}",
       selection       = "{selection}",
       ["function"]    = "{function}",
       class           = "{class}",
+      treesitter_scope = "{treesitter_scope}",
     },
     -- preferred picker for selecting files
     ---@alias sidekick.picker "snacks"|"telescope"|"fzf-lua"
@@ -486,6 +496,15 @@ modify text in normal mode, or after applying an edit.
 <!-- api_nes:start -->
 
 <table><tr><th>Cmd</th><th>Lua</th></tr>
+<tr><td><code>:Sidekick nes accept</code> Accept the edit hunk under the cursor.</td><td>
+
+
+```lua
+---@return boolean accepted
+require("sidekick.nes").accept()
+```
+
+</td></tr>
 <tr><td><code>:Sidekick nes apply</code> Apply active text edits</td><td>
 
 
@@ -556,7 +575,25 @@ require("sidekick.nes").prev()
 ```
 
 </td></tr>
-<tr><td><code>:Sidekick nes review</code> Show a compact summary of active edit hunks.</td><td>
+<tr><td><code>:Sidekick nes preview</code> Open the active edits in a side-by-side floating diff.</td><td>
+
+
+```lua
+---@return boolean opened
+require("sidekick.nes").preview()
+```
+
+</td></tr>
+<tr><td><code>:Sidekick nes reject</code> Reject the edit hunk under the cursor.</td><td>
+
+
+```lua
+---@return boolean rejected
+require("sidekick.nes").reject()
+```
+
+</td></tr>
+<tr><td><code>:Sidekick nes review</code> Toggle the side-by-side review preview, falling back to a compact summary.</td><td>
 
 
 ```lua
@@ -865,8 +902,11 @@ current file, selection, diagnostics, and more.
 - `{diagnostics}`: The diagnostics for the current buffer.
 - `{diagnostics_all}`: All diagnostics in the workspace.
 - `{quickfix}`: The current quickfix list, including title and formatted items.
+- `{git_diff}`: Unstaged and staged Git changes for the current working tree.
+- `{git_status}`: The current branch and modified file list from Git.
 - `{function}`: The function at cursor (Tree-sitter) - returns location like `function foo @file:10:5`.
 - `{class}`: The class/struct at cursor (Tree-sitter) - returns location.
+- `{treesitter_scope}`: The outermost containing function, class, interface, or struct with full source and line numbers.
 - `{this}`: A special context variable. If the current buffer is a file, it resolves to `{position}`. Otherwise, it resolves to the literal string "this" and appends the current `{selection}` to the prompt.
 
 </details>
