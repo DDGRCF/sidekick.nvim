@@ -1,5 +1,6 @@
 local Config = require("sidekick.config")
 local History = require("sidekick.cli.history")
+local Icons = require("sidekick.cli.icons")
 local Util = require("sidekick.util")
 
 ---@class sidekick.cli.Select: sidekick.cli.With
@@ -124,8 +125,13 @@ function M.format(state, picker)
   end
   ret[#ret + 1] = { Config.ui.icons[status], status_hl }
   ret[#ret + 1] = { " " }
+  local icon = Icons.tool(state.tool.name)
+  if icon then
+    ret[#ret + 1] = { icon, Icons.highlight(state.tool.name) }
+    ret[#ret + 1] = { " " }
+  end
   ret[#ret + 1] = { state.tool.name }
-  local len = sw(state.tool.name) + 2
+  local len = sw(state.tool.name) + 2 + (icon and sw(icon) + 1 or 0)
   if state.new or not state.session then
     ret[#ret + 1] = { " · new", "Special" }
     len = len + 6

@@ -96,8 +96,21 @@ local defaults = {
         show_cwd = false, -- include the agent working directory in the title
         ---@type "thin"|"thick"|"slant"|"slope"|"padded_slant"|"padded_slope"|{left:string,right:string}
         separator_style = "thin",
-        --- Set per-tool icons here. Unconfigured tools use their name.
-        icons = {}, ---@type table<string, string>
+        --- Set per-tool brand icons here. They are used throughout the CLI UI.
+        --- Unconfigured tools use their name in tabs and omit the icon in pickers.
+        --- Do not include surrounding whitespace; renderers add their own spacing.
+        icons = {
+          antigravity = "󱚣",
+          claude = "󰚩",
+          codex = "󱠡",
+          copilot = "",
+          crush = "󰛡",
+          cursor = "󰅴",
+          grok = "󱚥",
+          opencode = "󰄛",
+          pi = "󰠭",
+          qwen = "󱚠",
+        }, ---@type table<string, string>
         status = { ---@type table<sidekick.cli.ActivityStatus, string>
           idle = "○",
           starting = "◌",

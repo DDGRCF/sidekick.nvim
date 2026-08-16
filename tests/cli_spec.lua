@@ -394,6 +394,21 @@ describe("cli routing", function()
     assert.matches("new", new)
   end)
 
+  it("uses the shared brand icon mapping in the CLI tool selector", function()
+    local old_icons = Config.cli.win.tabs.icons
+    Config.cli.win.tabs.icons = { codex = " C " }
+    local parts = Select.format({ tool = { name = "codex" }, installed = true, new = true })
+    Config.cli.win.tabs.icons = old_icons
+
+    assert.are.same({ "C", "SidekickCliToolCodex" }, parts[3])
+    assert.matches(
+      "C codex",
+      table.concat(vim.tbl_map(function(part)
+        return part[1]
+      end, parts))
+    )
+  end)
+
   it("prioritizes recent tools for select and new", function()
     local original_get = State.get
     local original_tools = Config.tools

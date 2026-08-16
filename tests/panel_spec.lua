@@ -13,6 +13,7 @@ describe("cli agent panel", function()
   local bufs = {} ---@type integer[]
   local previous_layout
   local previous_tabs
+  local previous_icons
 
   local function fake(id, tool, title, status)
     local buf = vim.api.nvim_create_buf(false, true)
@@ -51,6 +52,8 @@ describe("cli agent panel", function()
   before_each(function()
     previous_layout = Util.get_state("cli-panel-layout")
     previous_tabs = Util.get_state("cli-panel-tabs")
+    previous_icons = Config.cli.win.tabs.icons
+    Config.cli.win.tabs.icons = {}
   end)
 
   after_each(function()
@@ -78,6 +81,8 @@ describe("cli agent panel", function()
     end
     previous_layout = nil
     previous_tabs = nil
+    Config.cli.win.tabs.icons = previous_icons
+    previous_icons = nil
   end)
 
   it("reuses one window for multiple agent buffers", function()
@@ -188,7 +193,7 @@ describe("cli agent panel", function()
     vim.cmd.stopinsert()
   end)
 
-  it("renders tool names and activity state by default", function()
+  it("renders tool names and activity state without brand icons", function()
     local codex = fake("codex-1", "codex", "Implement panel")
     Panel.show(codex)
     codex.status = "done"
@@ -199,6 +204,17 @@ describe("cli agent panel", function()
     assert.matches("SidekickCliTabSelectedToolCodex", line)
     assert.matches("SidekickCliTabSelected", line)
     assert.matches("SidekickCliTabSelectedStatusDone", line)
+  end)
+
+  it("renders the configured brand icon in agent tabs", function()
+    local codex = fake("codex-icon", "codex", "Implement panel")
+    Config.cli.win.tabs.icons = { codex = "C" }
+    Panel.show(codex)
+
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+
+    assert.matches("C", line)
+    assert.is_nil(line:find("codex", 1, true))
   end)
 
   it("uses the green diagnostic highlight for working and done tabs", function()
@@ -346,7 +362,7 @@ describe("cli agent panel", function()
     local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
 
     assert.matches("Work", line)
-    assert.matches("Activ", line)
+    assert.matches("Acti", line)
     assert.matches("SidekickCliTabStatusWorking", line)
     assert.matches("SidekickCliTabSelected", line)
   end)

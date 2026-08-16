@@ -1,5 +1,6 @@
 local Config = require("sidekick.config")
 local History = require("sidekick.cli.history")
+local Icons = require("sidekick.cli.icons")
 local Util = require("sidekick.util")
 
 local M = {}
@@ -486,29 +487,15 @@ local function title(t, value)
 end
 
 local function agent_icon_text(t)
-  local icons = Config.cli.win.tabs.icons
-  return icons[t.tool.name] or icons.default or t.tool.name
+  return Icons.text(t.tool.name)
 end
 
 local function agent_icon(t)
   return escape(agent_icon_text(t))
 end
 
-local tool_highlights = {
-  antigravity = "SidekickCliToolAntigravity",
-  claude = "SidekickCliToolClaude",
-  codex = "SidekickCliToolCodex",
-  copilot = "SidekickCliToolCopilot",
-  crush = "SidekickCliToolCrush",
-  cursor = "SidekickCliToolCursor",
-  grok = "SidekickCliToolGrok",
-  opencode = "SidekickCliToolOpencode",
-  pi = "SidekickCliToolPi",
-  qwen = "SidekickCliToolQwen",
-}
-
 local function tool_highlight(t)
-  return tool_highlights[t.tool.name] or "SidekickCliTool"
+  return Icons.highlight(t.tool.name)
 end
 
 local CLI_HL_PREFIX = "SidekickCli"
@@ -608,10 +595,12 @@ end
 ---@param compact? boolean
 local function tab_width(p, t, left_separator, right_separator, title_value, compact)
   local marker = compact and "" or agent_marker_text()
+  local icon = agent_icon_text(t)
+  local status = status_icon_text(t)
   local text = " "
     .. (marker ~= "" and (marker .. " ") or "")
-    .. agent_icon_text(t)
-    .. status_icon_text(t)
+    .. icon
+    .. (status ~= "" and (" " .. status) or "")
     .. ": "
     .. (attention_text(t) ~= "" and (attention_text(t) .. " ") or "")
     .. (title_value or title_text(t))
@@ -807,6 +796,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
   local attention_hl = tab_highlight("SidekickCliAttention", selected)
   local pin_hl = tab_highlight("SidekickCliPin", selected)
   local close_hl = tab_highlight("SidekickCliClose", selected)
+  local status_text = status_icon_text(t)
   if selected then
     parts[#parts + 1] = "%<"
   end
@@ -816,7 +806,9 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
     parts[#parts + 1] = ("%%#%s# %s "):format(marker_hl, agent_marker())
   end
   parts[#parts + 1] = ("%%#%s#%s%s"):format(tool_hl, marker == "" and " " or "", agent_icon(t))
-  parts[#parts + 1] = ("%%#%s#%s"):format(status_hl, status_icon(t))
+  if status_text ~= "" then
+    parts[#parts + 1] = ("%%#%s# %s"):format(status_hl, escape(status_text))
+  end
   if attention_text(t) ~= "" then
     parts[#parts + 1] = ("%%#%s#%s "):format(attention_hl, attention(t))
   end

@@ -1,6 +1,7 @@
 local Activity = require("sidekick.cli.activity")
 local Config = require("sidekick.config")
 local Fork = require("sidekick.cli.fork")
+local Icons = require("sidekick.cli.icons")
 local Panel = require("sidekick.cli.panel")
 local Usage = require("sidekick.cli.agent_usage")
 local Util = require("sidekick.util")
@@ -484,11 +485,6 @@ local function snacks(items, Snacks, opts)
       end
     end)
   end
-  local function tool_icon(tool)
-    local icons = Config.cli.win.tabs.icons
-    local icon = icons[tool] or icons.default
-    return type(icon) == "string" and vim.trim(icon) or ""
-  end
   local function status_icon(status)
     local icon = Config.cli.win.tabs.status[status]
     return type(icon) == "string" and vim.trim(icon) or "*"
@@ -504,21 +500,6 @@ local function snacks(items, Snacks, opts)
   local function fork_icon()
     local icon = Config.ui.icons.fork
     return type(icon) == "string" and vim.trim(icon) or "↗"
-  end
-  local tool_highlights = {
-    antigravity = "SidekickCliToolAntigravity",
-    claude = "SidekickCliToolClaude",
-    codex = "SidekickCliToolCodex",
-    copilot = "SidekickCliToolCopilot",
-    crush = "SidekickCliToolCrush",
-    cursor = "SidekickCliToolCursor",
-    grok = "SidekickCliToolGrok",
-    opencode = "SidekickCliToolOpencode",
-    pi = "SidekickCliToolPi",
-    qwen = "SidekickCliToolQwen",
-  }
-  local function tool_highlight(tool)
-    return tool_highlights[tool] or "SidekickCliTool"
   end
   local function finish_rename(commit)
     if not renaming or not picker or picker.closed then
@@ -604,8 +585,8 @@ local function snacks(items, Snacks, opts)
       local status = t and t.status or "error"
       local state = status:gsub("^%l", string.upper)
       local agent = item.agent
-      local icon = tool_icon(agent.tool)
-      local tool_hl = tool_highlight(agent.tool)
+      local icon = Icons.tool(agent.tool)
+      local tool_hl = Icons.highlight(agent.tool)
       local ret = {}
       if agent.active then
         ret[#ret + 1] = { "◆ ", "SidekickCliTabSelected" }
@@ -623,7 +604,7 @@ local function snacks(items, Snacks, opts)
       if agent_marker ~= "" then
         ret[#ret + 1] = { agent_marker .. " ", "SidekickCliInstalled" }
       end
-      if icon ~= "" then
+      if icon then
         ret[#ret + 1] = { icon .. " ", tool_hl }
         ret[#ret + 1] = { agent.tool, "Identifier" }
       else
