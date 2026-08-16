@@ -203,6 +203,16 @@ function M.read(terminal)
 end
 
 ---@param terminal sidekick.cli.Terminal
+---@return boolean focused
+function M.focus(terminal)
+  if not is_focused(terminal) then
+    return false
+  end
+  M.read(terminal)
+  return true
+end
+
+---@param terminal sidekick.cli.Terminal
 ---@param code integer
 function M.exit(terminal, code)
   stop_timer(terminal)

@@ -1,6 +1,7 @@
 ---@module 'luassert'
 
 local Activity = require("sidekick.cli.activity")
+local Session = require("sidekick.cli.session")
 local Terminal = require("sidekick.cli.terminal")
 
 describe("cli terminal scheduling", function()
@@ -72,5 +73,51 @@ describe("cli terminal scheduling", function()
 
     assert.are.equal(1, #starts)
     assert.is_false(t._sidekick_send_scheduled)
+  end)
+
+  it("clears unread output when entering an agent from another window", function()
+    local source = vim.api.nvim_get_current_win()
+    local id = "focus-unread-" .. vim.uv.hrtime()
+    local t = Session.new({
+      id = id,
+      cwd = vim.fn.getcwd(),
+      backend = "terminal",
+      tool = {
+        name = "sidekick-focus-test",
+        cmd = { vim.o.shell, vim.o.shellcmdflag, "sleep 10" },
+        config = {},
+      },
+    })
+    local ok, err = xpcall(function()
+      t:start()
+      t.normal_mode = true
+
+      local events = {}
+      for _, autocmd in ipairs(vim.api.nvim_get_autocmds({ group = t.group })) do
+        events[autocmd.event] = true
+      end
+      assert.is_true(events.BufEnter)
+      assert.is_true(events.WinEnter)
+
+      local agent_win = assert(t:window())
+      vim.api.nvim_set_current_win(agent_win)
+
+      t._sidekick_unread = true
+      vim.api.nvim_exec_autocmds("BufEnter", {})
+      assert.is_false(Activity.unread(t))
+
+      t._sidekick_unread = true
+      vim.api.nvim_set_current_win(source)
+      vim.api.nvim_set_current_win(agent_win)
+      assert.is_false(Activity.unread(t))
+    end, debug.traceback)
+
+    if vim.api.nvim_win_is_valid(source) then
+      vim.api.nvim_set_current_win(source)
+    end
+    if not t.closed then
+      t:close()
+    end
+    assert.is_true(ok, err)
   end)
 end)

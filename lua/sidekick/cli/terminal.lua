@@ -306,7 +306,7 @@ function M:start()
   vim.api.nvim_create_autocmd({ "TermLeave", "TermEnter" }, {
     group = self.group,
     callback = function()
-      if not self:is_focused() then
+      if not Activity.focus(self) then
         return
       end
       -- schedule to make sure we're still in mormal mode and in the terminal window
@@ -316,11 +316,12 @@ function M:start()
     end,
   })
 
-  -- restore mode when entering the sidekick window
-  vim.api.nvim_create_autocmd("WinEnter", {
+  -- Restore the terminal mode and acknowledge output when entering the
+  -- agent from any other UI.
+  vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
     group = self.group,
     callback = function()
-      if not self:is_focused() then
+      if not Activity.focus(self) then
         return
       end
       self.atime = vim.uv.hrtime()

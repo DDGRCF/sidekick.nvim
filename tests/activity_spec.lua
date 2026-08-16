@@ -121,6 +121,24 @@ describe("cli activity", function()
     Activity.close(t)
   end)
 
+  it("clears unread output when an agent regains focus", function()
+    local t = terminal("done")
+    t._sidekick_unread = true
+    t.is_focused = function()
+      return true
+    end
+
+    assert.is_true(Activity.focus(t))
+    assert.is_false(Activity.unread(t))
+
+    t._sidekick_unread = true
+    t.is_focused = function()
+      return false
+    end
+    assert.is_false(Activity.focus(t))
+    assert.is_true(Activity.unread(t))
+  end)
+
   it("acknowledges a completed agent when it is selected", function()
     local t = terminal("done")
     t._sidekick_working = true
