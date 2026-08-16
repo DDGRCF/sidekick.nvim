@@ -25,8 +25,16 @@ local Util = require("sidekick.util")
 ---@field status? sidekick.cli.ActivityStatus
 ---@field last_activity? integer
 ---@field activity_timer? uv.uv_timer_t
+---@field output_timer? uv.uv_timer_t
 ---@field _sidekick_working? boolean
 ---@field _sidekick_unread? boolean
+---@field _sidekick_ready? boolean
+---@field _sidekick_send_scheduled? boolean
+---@field _sidekick_output_scheduled? boolean
+---@field _sidekick_output_chunks? table<integer, string>
+---@field _sidekick_output_first? integer
+---@field _sidekick_output_last? integer
+---@field _sidekick_output_bytes? integer
 local M = {}
 M.__index = M
 M.priority = 100
@@ -37,6 +45,9 @@ local READY_CHECK_INTERVAL = 100 -- ms
 local READY_INIT_DELAY = 500 -- ms
 local READY_INIT_LINES = 5
 local SEND_DELAY = 100 --ms
+local OUTPUT_FLUSH_DELAY = 50 -- ms
+local OUTPUT_MAX_BYTES = 64 * 1024
+local OUTPUT_MAX_CHUNKS = 256
 local TERM_CLOSE_ERROR_DELAY = 3000 -- ms if the terminal errored, don't close the window
 local TERM_CLOSE_DELAY = 500 -- ms if the terminal closed too quickly, don't close the window
 
@@ -139,6 +150,10 @@ function M:init()
   self.ctime = vim.uv.hrtime()
   self.atime = self.ctime
   self.send_queue = {}
+  self._sidekick_output_chunks = {}
+  self._sidekick_output_first = 1
+  self._sidekick_output_last = 0
+  self._sidekick_output_bytes = 0
   self.status = self.status or "idle"
   self.group = vim.api.nvim_create_augroup("sidekick_cli_" .. self.id, { clear = true })
   M.terminals[self.id] = self
@@ -147,6 +162,75 @@ function M:init()
   end
   self.scrollback = require("sidekick.cli.scrollback").new(self)
   return self
+end
+
+---@param output string
+function M:_queue_output(output)
+  if output == "" or self.closed then
+    return
+  end
+
+  local chunks = self._sidekick_output_chunks or {}
+  local first = self._sidekick_output_first or 1
+  local last = self._sidekick_output_last or 0
+  local bytes = self._sidekick_output_bytes or 0
+  if #output >= OUTPUT_MAX_BYTES then
+    chunks = { output:sub(-OUTPUT_MAX_BYTES) }
+    first, last, bytes = 1, 1, OUTPUT_MAX_BYTES
+  else
+    last = last + 1
+    chunks[last] = output
+    bytes = bytes + #output
+    while first <= last and (bytes > OUTPUT_MAX_BYTES or last - first + 1 > OUTPUT_MAX_CHUNKS) do
+      bytes = bytes - #chunks[first]
+      chunks[first] = nil
+      first = first + 1
+    end
+  end
+  self._sidekick_output_chunks = chunks
+  self._sidekick_output_first = first
+  self._sidekick_output_last = last
+  self._sidekick_output_bytes = bytes
+
+  if self._sidekick_output_scheduled then
+    return
+  end
+  self._sidekick_output_scheduled = true
+  self.output_timer = self.output_timer or vim.uv.new_timer()
+  if not self.output_timer then
+    return vim.schedule(function()
+      self._sidekick_output_scheduled = false
+      self:_flush_output()
+    end)
+  end
+  self.output_timer:start(OUTPUT_FLUSH_DELAY, 0, function()
+    vim.schedule(function()
+      self:_flush_output()
+    end)
+  end)
+end
+
+function M:_flush_output()
+  if self.output_timer and not self.output_timer:is_closing() then
+    self.output_timer:stop()
+  end
+  self._sidekick_output_scheduled = false
+  local chunks = self._sidekick_output_chunks
+  local first = self._sidekick_output_first or 1
+  local last = self._sidekick_output_last or 0
+  self._sidekick_output_chunks = {}
+  self._sidekick_output_first = 1
+  self._sidekick_output_last = 0
+  self._sidekick_output_bytes = 0
+  if self.closed or not chunks or first > last then
+    return
+  end
+
+  local output = {}
+  for i = first, last do
+    output[#output + 1] = chunks[i]
+  end
+  Activity.output(self, table.concat(output, "\n"))
 end
 
 function M:attach() end
@@ -214,11 +298,7 @@ function M:start()
   vim.api.nvim_buf_attach(self.buf, false, {
     on_lines = function(_, buf, _, first, _, last)
       local output = table.concat(vim.api.nvim_buf_get_lines(buf, first, last, false), "\n")
-      vim.schedule(function()
-        if self:buf_valid() then
-          Activity.output(self, output)
-        end
-      end)
+      self:_queue_output(output)
     end,
   })
 
@@ -256,6 +336,7 @@ function M:start()
     group = self.group,
     buffer = self.buf,
     callback = function()
+      self:_flush_output()
       Activity.exit(self, vim.v.event.status)
       local ms = (vim.uv.hrtime() - self.atime) / 1e6
       if ms < TERM_CLOSE_DELAY then
@@ -413,24 +494,33 @@ function M:on_ready()
   -- Capture native session metadata before the ready event triggers a workspace save.
   require("sidekick.cli.resume").capture(self)
   Activity.ready(self)
-  self.timer:start(0, SEND_DELAY, function()
-    local next = table.remove(self.send_queue, 1) ---@type string?
-    if next then
-      next = next:gsub("\r\n", "\n") -- normalize line endings
-      vim.schedule(function()
-        if self:is_running() then
-          -- Use nvim_put to send input to the terminal
-          -- instead of nvim_chan_send to better simulate user input
-          -- vim.api.nvim_chan_send(self.job, next)
-          vim.api.nvim_buf_call(self.buf, function()
-            vim.api.nvim_put(vim.split(next, "\n", { plain = true }), "c", false, true)
-          end)
-          if self:is_focused() then
-            vim.cmd.startinsert()
-          end
+  self._sidekick_ready = true
+  self:_schedule_send(0)
+end
+
+---@param delay? integer
+function M:_schedule_send(delay)
+  if self.closed or not self._sidekick_ready or self._sidekick_send_scheduled or #self.send_queue == 0 then
+    return
+  end
+  self._sidekick_send_scheduled = true
+  self.timer:start(delay or SEND_DELAY, 0, function()
+    vim.schedule(function()
+      self._sidekick_send_scheduled = false
+      local next = table.remove(self.send_queue, 1) ---@type string?
+      if next and self:is_running() then
+        next = next:gsub("\r\n", "\n") -- normalize line endings
+        -- Use nvim_put to send input to the terminal instead of
+        -- nvim_chan_send to better simulate user input.
+        vim.api.nvim_buf_call(self.buf, function()
+          vim.api.nvim_put(vim.split(next, "\n", { plain = true }), "c", false, true)
+        end)
+        if self:is_focused() then
+          vim.cmd.startinsert()
         end
-      end)
-    end
+      end
+      self:_schedule_send()
+    end)
   end)
 end
 
@@ -492,9 +582,17 @@ function M:close()
   end
   Session.detach(self)
   if self.timer and not self.timer:is_closing() then
+    self.timer:stop()
     self.timer:close()
     self.timer = nil
   end
+  if self.output_timer and not self.output_timer:is_closing() then
+    self.output_timer:stop()
+    self.output_timer:close()
+    self.output_timer = nil
+  end
+  self._sidekick_output_scheduled = false
+  self._sidekick_send_scheduled = false
   Activity.close(self)
   Panel.remove(self.id)
   if not self.parent and not self.mux_backend then
@@ -539,6 +637,7 @@ function M:send(input)
     Activity.input(self, input)
   end
   table.insert(self.send_queue, input)
+  self:_schedule_send(0)
 end
 
 function M:submit()

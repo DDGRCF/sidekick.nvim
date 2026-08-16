@@ -73,6 +73,7 @@ describe("status handler", function()
     local Session = require("sidekick.cli.session")
     local Panel = require("sidekick.cli.panel")
     local original_attached = Session.attached
+    local original_get = Session.get
     local original_active = Panel.active
     local working = {
       id = "summary-working",
@@ -90,13 +91,33 @@ describe("status handler", function()
     Session.attached = function()
       return { working, waiting }
     end
+    Session.get = function(id)
+      return id == working.id and working or id == waiting.id and waiting or nil
+    end
     Panel.active = function()
       return working
     end
 
+    for _, session in ipairs({ working, waiting }) do
+      vim.api.nvim_exec_autocmds("User", {
+        pattern = "SidekickCliAttach",
+        modeline = false,
+        data = { id = session.id },
+      })
+    end
+
     local summary = Status.summary()
 
+    for _, session in ipairs({ working, waiting }) do
+      vim.api.nvim_exec_autocmds("User", {
+        pattern = "SidekickCliDetach",
+        modeline = false,
+        data = { id = session.id },
+      })
+    end
+
     Session.attached = original_attached
+    Session.get = original_get
     Panel.active = original_active
     assert.are.same({
       total = 2,
@@ -109,5 +130,51 @@ describe("status handler", function()
       unread = 1,
       attention = 2,
     }, summary)
+  end)
+
+  it("updates one CLI session without rescanning all attached jobs", function()
+    local Session = require("sidekick.cli.session")
+    local Panel = require("sidekick.cli.panel")
+    local original_attached = Session.attached
+    local original_get = Session.get
+    local original_active = Panel.active
+    local id = "status-incremental-" .. tostring(vim.uv.hrtime())
+    local session = {
+      id = id,
+      tool = { name = "codex" },
+      cwd = "/tmp",
+      status = "working",
+      last_activity = 10,
+    }
+    Session.attached = function()
+      error("unexpected full session scan")
+    end
+    Session.get = function(session_id)
+      return session_id == id and session or nil
+    end
+    Panel.active = function()
+      return session
+    end
+
+    local ok, err = pcall(vim.api.nvim_exec_autocmds, "User", {
+      pattern = "SidekickCliAttach",
+      modeline = false,
+      data = { id = id },
+    })
+    local item = vim.tbl_filter(function(value)
+      return value.id == id
+    end, Status.cli())[1]
+    vim.api.nvim_exec_autocmds("User", {
+      pattern = "SidekickCliDetach",
+      modeline = false,
+      data = { id = id },
+    })
+
+    Session.attached = original_attached
+    Session.get = original_get
+    Panel.active = original_active
+    assert.is_true(ok, err)
+    assert.are.equal("working", item.status)
+    assert.is_true(item.active)
   end)
 end)

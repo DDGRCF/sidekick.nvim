@@ -311,4 +311,10 @@ function M.attached()
   return ret
 end
 
+---@param id string
+---@return sidekick.cli.Session?
+function M.get(id)
+  return M._attached[id]
+end
+
 return M

@@ -2,6 +2,7 @@
 
 local Activity = require("sidekick.cli.activity")
 local Config = require("sidekick.config")
+local Util = require("sidekick.util")
 
 describe("cli activity", function()
   local function terminal(status)
@@ -65,6 +66,47 @@ describe("cli activity", function()
     vim.uv.now = old_now
     assert.are.equal(101, first)
     assert.are.equal(102, second)
+  end)
+
+  it("throttles repeated activity events without losing timestamps", function()
+    local old_emit = Util.emit
+    local old_now = vim.uv.now
+    local now = 100
+    local events = {}
+    Util.emit = function(event, data)
+      events[#events + 1] = { event = event, data = data }
+    end
+    vim.uv.now = function()
+      return now
+    end
+    local t = terminal("working")
+
+    Activity.set(t, "working")
+    now = 150
+    Activity.set(t, "working")
+    now = 200
+    Activity.set(t, "working")
+
+    Util.emit = old_emit
+    vim.uv.now = old_now
+    assert.are.equal(2, #events)
+    assert.are.equal(200, t.last_activity)
+    assert.are.equal(200, events[2].data.last_activity)
+  end)
+
+  it("reuses the quiet timer across output bursts", function()
+    local old_ms = Config.cli.status.quiet_ms
+    Config.cli.status.quiet_ms = 10000
+    local t = terminal("working")
+    t._sidekick_working = true
+
+    Activity.output(t, "first")
+    local timer = t.activity_timer
+    Activity.output(t, "second")
+
+    Config.cli.status.quiet_ms = old_ms
+    assert.are.equal(timer, t.activity_timer)
+    Activity.close(t)
   end)
 
   it("tracks unread output until the agent is acknowledged", function()

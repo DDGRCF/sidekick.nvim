@@ -40,21 +40,55 @@ local levels = {
   Inactive = vim.log.levels.WARN,
 }
 
+---@param session sidekick.cli.Session
+---@param active? sidekick.cli.Session
+---@return sidekick.cli.Status
+local function session_status(session, active)
+  return {
+    id = session.id,
+    tool = session.tool.name,
+    cwd = session.cwd,
+    instance_id = session.instance_id,
+    title = session.title,
+    status = session.status,
+    active = active == session,
+    unread = session._sidekick_unread == true,
+    last_activity = session.last_activity,
+  }
+end
+
 local function update_cli_status()
   local Session = require("sidekick.cli.session")
+  local active = require("sidekick.cli.panel").active()
   cli_sessions = {}
   for id, session in pairs(Session.attached()) do
-    cli_sessions[id] = {
-      id = session.id,
-      tool = session.tool.name,
-      cwd = session.cwd,
-      instance_id = session.instance_id,
-      title = session.title,
-      status = session.status,
-      active = require("sidekick.cli.panel").active() == session,
-      unread = session._sidekick_unread == true,
-      last_activity = session.last_activity,
-    }
+    cli_sessions[id] = session_status(session, active)
+  end
+  cli_last_update = vim.uv.now()
+end
+
+---@param ev vim.api.keyset.create_autocmd.callback_args
+local function update_cli_event(ev)
+  local data = ev.data or {}
+  local id = data.id
+  if not id then
+    return update_cli_status()
+  end
+  if ev.match == "SidekickCliDetach" then
+    cli_sessions[id] = nil
+  elseif ev.match == "SidekickCliActivate" then
+    for session_id, item in pairs(cli_sessions) do
+      item.active = session_id == id
+    end
+  elseif ev.match == "SidekickCliActivity" and cli_sessions[id] then
+    cli_sessions[id].last_activity = data.last_activity
+  else
+    local session = require("sidekick.cli.session").get(id)
+    if session then
+      cli_sessions[id] = session_status(session, require("sidekick.cli.panel").active())
+    else
+      cli_sessions[id] = nil
+    end
   end
 end
 
@@ -122,7 +156,7 @@ function M.setup()
       "SidekickCliAttention",
       "SidekickCliTitle",
     },
-    callback = update_cli_status,
+    callback = update_cli_event,
   })
 
   update_cli_status()

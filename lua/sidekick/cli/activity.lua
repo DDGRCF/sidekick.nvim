@@ -3,6 +3,8 @@ local Util = require("sidekick.util")
 
 local M = {}
 
+local ACTIVITY_EVENT_INTERVAL = 100 -- ms
+
 ---@alias sidekick.cli.ActivityStatus "idle"|"starting"|"working"|"waiting"|"done"|"error"
 ---@alias sidekick.cli.ActivityEventType "input"|"output"|"ready"|"exit"
 
@@ -42,6 +44,11 @@ end
 function M.set(terminal, status, data)
   terminal.last_activity = vim.uv.now()
   if terminal.status == status then
+    local last = terminal._sidekick_activity_emitted_at
+    if last and terminal.last_activity - last < ACTIVITY_EVENT_INTERVAL then
+      return
+    end
+    terminal._sidekick_activity_emitted_at = terminal.last_activity
     Util.emit("SidekickCliActivity", {
       id = terminal.id,
       last_activity = terminal.last_activity,
@@ -49,6 +56,7 @@ function M.set(terminal, status, data)
     return
   end
   terminal.status = status
+  terminal._sidekick_activity_emitted_at = terminal.last_activity
   if status == "waiting" or status == "done" or status == "error" then
     mark_unread(terminal)
   end
@@ -81,31 +89,32 @@ local function adapter(terminal, event)
 end
 
 ---@param terminal sidekick.cli.Terminal
-local function stop_timer(terminal)
+---@param close? boolean
+local function stop_timer(terminal, close)
   terminal._sidekick_activity_generation = (terminal._sidekick_activity_generation or 0) + 1
   local timer = terminal.activity_timer
   if timer and not timer:is_closing() then
     timer:stop()
-    timer:close()
+    if close then
+      timer:close()
+    end
   end
-  terminal.activity_timer = nil
+  if close then
+    terminal.activity_timer = nil
+  end
 end
 
 ---@param terminal sidekick.cli.Terminal
 local function complete_later(terminal)
   stop_timer(terminal)
   local generation = terminal._sidekick_activity_generation
-  local timer = vim.uv.new_timer()
+  local timer = terminal.activity_timer or vim.uv.new_timer()
   if not timer then
     return
   end
   terminal.activity_timer = timer
   timer:start(math.max(0, Config.cli.status.quiet_ms), 0, function()
     timer:stop()
-    timer:close()
-    if terminal.activity_timer == timer then
-      terminal.activity_timer = nil
-    end
     vim.schedule(function()
       if
         terminal._sidekick_activity_generation == generation
@@ -204,7 +213,7 @@ end
 
 ---@param terminal sidekick.cli.Terminal
 function M.close(terminal)
-  stop_timer(terminal)
+  stop_timer(terminal, true)
 end
 
 ---@param terminal sidekick.cli.Terminal
