@@ -453,6 +453,7 @@ function M.set_hl()
     CliStatusDone = "DiagnosticOk",
     CliStatusError = "DiagnosticError",
     CliAttention = "DiagnosticInfo",
+    CliTitle = "Comment",
     CliClose = "Comment",
     CliPin = "Special",
     CliTool = "Special",

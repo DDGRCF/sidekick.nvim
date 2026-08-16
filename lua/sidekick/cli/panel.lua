@@ -800,6 +800,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
   local marker_hl = selected and tab_highlight("SidekickCliInstalled", true) or base
   local status_hl = tab_highlight("SidekickCliStatus" .. state, selected)
   local attention_hl = tab_highlight("SidekickCliAttention", selected)
+  local title_hl = tab_highlight("SidekickCliTitle", selected)
   local pin_hl = tab_highlight("SidekickCliPin", selected)
   local close_hl = tab_highlight("SidekickCliClose", selected)
   local status_text = status_icon_text(t)
@@ -818,7 +819,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
   if attention_text(t) ~= "" then
     parts[#parts + 1] = ("%%#%s#%s "):format(attention_hl, attention(t))
   end
-  parts[#parts + 1] = ("%%#%s#: %s"):format(base, title(t, title_value))
+  parts[#parts + 1] = ("%%#%s#: %s"):format(title_hl, title(t, title_value))
   if p.pinned[t.id] then
     parts[#parts + 1] = ("%%#%s# %s"):format(pin_hl, escape(pin_icon_text()))
   end
