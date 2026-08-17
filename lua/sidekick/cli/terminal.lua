@@ -629,8 +629,11 @@ function M:is_open()
 end
 
 ---@param input string
-function M:send(input)
-  self:show()
+---@param opts? {show?: boolean}
+function M:send(input, opts)
+  if not opts or opts.show ~= false then
+    self:show()
+  end
   if not self:is_running() then
     return
   end
@@ -641,11 +644,12 @@ function M:send(input)
   self:_schedule_send(0)
 end
 
-function M:submit()
+---@param opts? {show?: boolean}
+function M:submit(opts)
   if not self:is_running() then
     return
   end
-  self:send("\r") -- Updated to use the send method
+  self:send("\r", opts)
 end
 
 ---@param buf? integer

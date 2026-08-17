@@ -162,6 +162,11 @@ describe("commands", function()
         expected = { "codex", "copilot" },
       },
       {
+        name = "suggests proposal review feedback command",
+        input = "Sidekick cli changes ",
+        expected = { "accept", "accept_all", "discard", "next", "prev", "reject", "reject_all", "request" },
+      },
+      {
         name = "returns empty when no matches",
         input = "Sidekick unknown",
         expected = {},

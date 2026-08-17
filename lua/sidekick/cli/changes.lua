@@ -22,24 +22,36 @@ local M = {}
 
 ---@class sidekick.cli.ChangesView
 ---@field proposal sidekick.cli.Proposal
+---@field terminal sidekick.cli.Terminal
 ---@field agent string
+---@field tab integer
+---@field group integer
 ---@field items sidekick.cli.ChangesItem[]
 ---@field index integer
 ---@field hunk integer
 ---@field notice? string
----@field compact boolean
 ---@field list_buf integer
 ---@field current_buf integer
----@field proposal_buf integer
+---@field empty_buf integer
 ---@field list_win integer
 ---@field current_win integer
 ---@field proposal_win integer
+---@field proposal_buffers table<string, integer>
+---@field mapped_buffers table<integer, boolean>
 ---@field timer? uv.uv_timer_t
 local view ---@type sidekick.cli.ChangesView?
 local ns = vim.api.nvim_create_namespace("sidekick_cli_changes")
 
 local function valid(buf)
   return buf and vim.api.nvim_buf_is_valid(buf)
+end
+
+local function valid_win(win)
+  return win and vim.api.nvim_win_is_valid(win)
+end
+
+local function valid_tab(tab)
+  return tab and vim.api.nvim_tabpage_is_valid(tab)
 end
 
 ---@param cmd string[]
@@ -207,22 +219,6 @@ local function collect(proposal)
   return ret
 end
 
-local function close()
-  if not view then
-    return
-  end
-  if view.timer and not view.timer:is_closing() then
-    view.timer:stop()
-    view.timer:close()
-  end
-  for _, win in ipairs({ view.list_win, view.current_win, view.proposal_win }) do
-    if win and vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, true)
-    end
-  end
-  view = nil
-end
-
 ---@param buf integer
 ---@param content string
 ---@param filename string
@@ -236,6 +232,18 @@ end
 
 local function item()
   return view and view.items[view.index] or nil
+end
+
+---@param changed sidekick.cli.ChangesItem
+---@return string
+local function proposal_path(changed)
+  return vim.fs.joinpath(view.proposal.cwd, changed.path)
+end
+
+---@param changed sidekick.cli.ChangesItem
+---@return string
+local function current_path(changed)
+  return vim.fs.joinpath(view.proposal.root, changed.path)
 end
 
 ---@param changed sidekick.cli.ChangesItem
@@ -280,17 +288,9 @@ local function item_suffix(changed)
 end
 
 ---@param win integer
----@param title string
-local function set_title(win, title)
-  if win and vim.api.nvim_win_is_valid(win) then
-    vim.api.nvim_win_set_config(win, { title = title, title_pos = "center" })
-  end
-end
-
----@param win integer
 ---@param value string
 local function set_winbar(win, value)
-  if win and vim.api.nvim_win_is_valid(win) then
+  if valid_win(win) then
     vim.api.nvim_set_option_value("winbar", value:gsub("%%", "%%%%"), { win = win })
   end
 end
@@ -309,25 +309,178 @@ local function render_chrome()
     totals.hunks,
     totals.hunks == 1 and "hunk" or "hunks"
   )
-  set_title(view.list_win, title)
+  set_winbar(view.list_win, title)
 
   local changed = item()
   if not changed then
-    set_title(view.current_win, " Current ")
-    set_title(view.proposal_win, " Proposal ")
-    set_winbar(view.current_win, "All proposal changes are reviewed")
-    set_winbar(view.proposal_win, "[q] Close")
+    set_winbar(view.current_win, "Current | All proposal changes are reviewed")
+    set_winbar(view.proposal_win, "Proposal | [q] Close review tab")
     return
   end
 
   local location = ("%s %s"):format(changed.status, changed.path)
   local progress = changed.kind == "file" and "File change" or ("Hunk %d/%d"):format(view.hunk, hunk_count(changed))
   local notice = view.notice and (" | %s"):format(view.notice) or ""
-  local actions = view.compact and "[a] Accept [r] Reject [q] Close" or "[a] Accept [r] Reject [A/R] All [q] Close"
-  set_title(view.current_win, " Current ")
-  set_title(view.proposal_win, " Proposal ")
-  set_winbar(view.current_win, ("%s | %s%s"):format(location, progress, notice))
-  set_winbar(view.proposal_win, actions)
+  set_winbar(view.current_win, ("Current | %s | %s%s"):format(location, progress, notice))
+  set_winbar(view.proposal_win, "Proposal | [:w] Save  [dp] Accept hunk  [do] Restore current  [gd] Definition")
+end
+
+---@param buf integer
+---@param name string
+local function setup_scratch(buf, name)
+  pcall(vim.api.nvim_buf_set_name, buf, name)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = false
+end
+
+---@param win integer
+---@param list? boolean
+local function setup_window(win, list)
+  vim.wo[win].cursorline = true
+  vim.wo[win].wrap = false
+  vim.wo[win].number = not list
+  vim.wo[win].relativenumber = false
+end
+
+---@return boolean
+local function proposal_buffers_modified()
+  if not view then
+    return false
+  end
+  local cwd = vim.fs.normalize(view.proposal.cwd) .. "/"
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    local name = vim.api.nvim_buf_get_name(buf)
+    if vim.bo[buf].modified and vim.startswith(vim.fs.normalize(name), cwd) then
+      return true
+    end
+  end
+  return false
+end
+
+local function cleanup()
+  local current = view
+  if not current then
+    return
+  end
+  if current.timer and not current.timer:is_closing() then
+    current.timer:stop()
+    current.timer:close()
+  end
+  for buf in pairs(current.mapped_buffers) do
+    if valid(buf) then
+      pcall(vim.keymap.del, "n", "dp", { buffer = buf })
+    end
+  end
+  pcall(vim.api.nvim_clear_autocmds, { group = current.group })
+  pcall(vim.api.nvim_del_augroup_by_id, current.group)
+  view = nil
+end
+
+---@param force? boolean
+---@return boolean closed
+local function close(force)
+  if not view then
+    return false
+  end
+  if not force and proposal_buffers_modified() then
+    return Util.warn("Save or discard Proposal edits before closing the review")
+  end
+  local tab = view.tab
+  if valid_tab(tab) then
+    vim.api.nvim_set_current_tabpage(tab)
+    vim.cmd(force and "tabclose!" or "tabclose")
+  end
+  if view and not valid_tab(tab) then
+    cleanup()
+  end
+  return true
+end
+
+local hunk_at_row
+
+---@param changed sidekick.cli.ChangesItem
+---@return integer?
+local function proposal_buffer(changed)
+  if not view or changed.binary then
+    return
+  end
+  local path = proposal_path(changed)
+  local buf = view.proposal_buffers[path]
+  if not valid(buf) then
+    buf = vim.fn.bufadd(path)
+    vim.fn.bufload(buf)
+    view.proposal_buffers[path] = buf
+    vim.bo[buf].swapfile = false
+    vim.bo[buf].filetype = vim.bo[buf].filetype ~= "" and vim.bo[buf].filetype
+      or vim.filetype.match({ filename = changed.path })
+      or ""
+    vim.api.nvim_create_autocmd("BufWritePost", {
+      group = view.group,
+      buffer = buf,
+      callback = function()
+        if view and view.proposal_buffers[path] == buf then
+          M.refresh(true, "Proposal saved; review refreshed")
+        end
+      end,
+    })
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      group = view.group,
+      buffer = buf,
+      callback = function()
+        if view and valid_win(view.proposal_win) and vim.api.nvim_win_get_buf(view.proposal_win) == buf then
+          local changed_item = item()
+          if changed_item and changed_item.diff then
+            local row = vim.api.nvim_win_get_cursor(view.proposal_win)[1]
+            local hunk = hunk_at_row(changed_item, row, "proposal")
+            for index, candidate in ipairs(changed_item.diff.hunks) do
+              if hunk == candidate and view.hunk ~= index then
+                view.hunk = index
+                render_chrome()
+                break
+              end
+            end
+          end
+        end
+      end,
+    })
+    vim.keymap.set("n", "dp", function()
+      M.accept_at_cursor()
+    end, { buffer = buf, silent = true, desc = "Sidekick changes: accept hunk" })
+    view.mapped_buffers[buf] = true
+  elseif not vim.bo[buf].modified then
+    vim.api.nvim_buf_call(buf, function()
+      vim.cmd("silent! checktime")
+    end)
+  end
+  return buf
+end
+
+local function diff_windows()
+  if not view or not valid_win(view.current_win) or not valid_win(view.proposal_win) then
+    return
+  end
+  for _, win in ipairs({ view.current_win, view.proposal_win }) do
+    vim.api.nvim_win_call(win, function()
+      vim.cmd("diffthis")
+    end)
+  end
+  vim.api.nvim_win_call(view.proposal_win, function()
+    vim.cmd("silent! diffupdate")
+  end)
+end
+
+---@param path string
+local function reload_clean_buffers(path)
+  local target = vim.fs.normalize(path)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if valid(buf) and not vim.bo[buf].modified and vim.fs.normalize(vim.api.nvim_buf_get_name(buf)) == target then
+      vim.api.nvim_buf_call(buf, function()
+        vim.cmd("silent! checktime")
+      end)
+    end
+  end
 end
 
 local function render()
@@ -363,15 +516,32 @@ local function render()
   local changed = item()
   if not changed then
     set_buffer(view.current_buf, "", "Current")
-    set_buffer(view.proposal_buf, "", "Proposal")
+    if valid_win(view.proposal_win) then
+      vim.api.nvim_win_set_buf(view.proposal_win, view.empty_buf)
+    end
     render_chrome()
     return
   end
   set_buffer(view.current_buf, changed.current or "", changed.path)
-  set_buffer(view.proposal_buf, changed.proposal or "", changed.path)
-  if vim.api.nvim_win_is_valid(view.list_win) then
+  pcall(
+    vim.api.nvim_buf_set_name,
+    view.current_buf,
+    ("sidekick://changes/current/%s/%s"):format(view.proposal.id, changed.path)
+  )
+  vim.bo[view.current_buf].filetype = vim.filetype.match({ filename = changed.path }) or ""
+  if valid_win(view.current_win) then
+    vim.api.nvim_win_set_buf(view.current_win, view.current_buf)
+  end
+  local buf = proposal_buffer(changed)
+  if buf and valid_win(view.proposal_win) then
+    vim.api.nvim_win_set_buf(view.proposal_win, buf)
+  else
+    vim.api.nvim_win_set_buf(view.proposal_win, view.empty_buf)
+  end
+  if valid_win(view.list_win) then
     vim.api.nvim_win_set_cursor(view.list_win, { view.index, 0 })
   end
+  diff_windows()
   render_chrome()
   M.jump()
 end
@@ -381,6 +551,11 @@ end
 function M.refresh(force, notice)
   if not view then
     return
+  end
+  if proposal_buffers_modified() then
+    view.notice = "Proposal has unsaved edits; save before refreshing"
+    render_chrome()
+    return false
   end
   local previous = item() and item().path
   local previous_hunk = view.hunk
@@ -395,7 +570,7 @@ function M.refresh(force, notice)
     end
   end
   if not changed then
-    return
+    return false
   end
   view.items = items
   view.index = 1
@@ -410,13 +585,14 @@ function M.refresh(force, notice)
     or 1
   view.notice = notice or (not force and "Changes updated; review refreshed" or nil)
   render()
+  return true
 end
 
-local function buffers_modified(changed)
+local function root_buffer_modified(changed)
   if not view then
     return false
   end
-  local target = vim.fs.normalize(vim.fs.joinpath(view.proposal.root, changed.path))
+  local target = vim.fs.normalize(current_path(changed))
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.bo[buf].modified and vim.fs.normalize(vim.api.nvim_buf_get_name(buf)) == target then
       return true
@@ -428,8 +604,8 @@ end
 ---@param changed sidekick.cli.ChangesItem
 ---@return boolean
 local function fresh(changed)
-  local current = read(vim.fs.joinpath(view.proposal.root, changed.path))
-  local suggested = read(vim.fs.joinpath(view.proposal.cwd, changed.path))
+  local current = read(current_path(changed))
+  local suggested = read(proposal_path(changed))
   local key = fingerprint(current, suggested)
   if key == changed.key then
     return true
@@ -466,9 +642,30 @@ function M.apply(proposal, changed, action, hunk)
   return true
 end
 
+---@param changed sidekick.cli.ChangesItem
+---@param row integer
+---@param side "current"|"proposal"
+---@return sidekick.diff.Hunk?
+hunk_at_row = function(changed, row, side)
+  if not changed.diff then
+    return
+  end
+  local source = side == "current" and changed.diff.from.lines or changed.diff.to.lines
+  for _, hunk in ipairs(changed.diff.hunks) do
+    local from = side == "current" and hunk.from_index or hunk.to_index
+    local count = side == "current" and hunk.from_count or hunk.to_count
+    from = math.min(math.max(1, from or 1), math.max(1, #source))
+    local to = from + math.max(1, count or 0) - 1
+    if row >= from and row <= to then
+      return hunk
+    end
+  end
+end
+
 ---@param action "accept"|"reject"
 ---@param all? boolean
-local function act(action, all)
+---@param hunk? sidekick.diff.Hunk
+local function act(action, all, hunk)
   if not view then
     return false
   end
@@ -476,16 +673,20 @@ local function act(action, all)
   if not changed then
     return false
   end
-  if buffers_modified(changed) then
+  if proposal_buffers_modified() then
+    return Util.warn("Save Proposal edits before accepting changes")
+  end
+  if action == "accept" and root_buffer_modified(changed) then
     return Util.warn("Save the current buffer before accepting proposal changes")
   end
   if not fresh(changed) then
     return false
   end
-  local hunk = changed.diff and changed.diff.hunks[view.hunk] or nil
+  hunk = hunk or changed.diff and changed.diff.hunks[view.hunk] or nil
   if not M.apply(view.proposal, changed, action, hunk) then
     return false
   end
+  reload_clean_buffers(action == "accept" and current_path(changed) or proposal_path(changed))
   M.refresh(true)
   if all then
     return true
@@ -497,8 +698,32 @@ function M.accept()
   return act("accept")
 end
 
+function M.accept_at_cursor()
+  if not view then
+    return false
+  end
+  local changed = item()
+  if not changed or not changed.diff or not valid_win(view.proposal_win) then
+    return Util.warn("Place the cursor on a text hunk in the Proposal window")
+  end
+  local buf = proposal_buffer(changed)
+  if not buf or vim.api.nvim_win_get_buf(view.proposal_win) ~= buf then
+    return Util.warn("Place the cursor on a text hunk in the Proposal window")
+  end
+  local row = vim.api.nvim_win_get_cursor(view.proposal_win)[1]
+  local hunk = hunk_at_row(changed, row, "proposal")
+  if not hunk then
+    return Util.warn("Cursor is not on a pending hunk")
+  end
+  return act("accept", false, hunk)
+end
+
 function M.reject()
   return act("reject")
+end
+
+function M.close()
+  return close()
 end
 
 ---@param action "accept"|"reject"
@@ -541,11 +766,19 @@ end
 ---@param index integer
 function M.select(index)
   if not view or not view.items[index] or index == view.index then
-    return
+    return false
+  end
+  local current = item()
+  if current then
+    local buf = proposal_buffer(current)
+    if buf and vim.bo[buf].modified then
+      return Util.warn("Save or discard Proposal edits before switching files")
+    end
   end
   view.index = index
   view.hunk = 1
   render()
+  return true
 end
 
 function M.jump()
@@ -554,11 +787,11 @@ function M.jump()
   if not hunk then
     return
   end
-  local row = math.max(1, hunk.pos[1] + 1)
-  for _, win in ipairs({ view.current_win, view.proposal_win }) do
-    if vim.api.nvim_win_is_valid(win) then
-      pcall(vim.api.nvim_win_set_cursor, win, { row, 0 })
-    end
+  if valid_win(view.current_win) then
+    pcall(vim.api.nvim_win_set_cursor, view.current_win, { math.max(1, hunk.from_index or 1), 0 })
+  end
+  if valid_win(view.proposal_win) then
+    pcall(vim.api.nvim_win_set_cursor, view.proposal_win, { math.max(1, hunk.to_index or 1), 0 })
   end
 end
 
@@ -570,9 +803,7 @@ function M.next()
   if changed and changed.diff and view.hunk < #changed.diff.hunks then
     view.hunk = view.hunk + 1
   elseif view.index < #view.items then
-    view.index = view.index + 1
-    view.hunk = 1
-    render()
+    M.select(view.index + 1)
     return
   end
   render_chrome()
@@ -586,14 +817,81 @@ function M.prev()
   if view.hunk > 1 then
     view.hunk = view.hunk - 1
   elseif view.index > 1 then
-    view.index = view.index - 1
-    local changed = item()
-    view.hunk = changed and changed.diff and #changed.diff.hunks or 1
-    render()
+    if M.select(view.index - 1) then
+      local changed = item()
+      view.hunk = changed and changed.diff and #changed.diff.hunks or 1
+      render()
+    end
     return
   end
   render_chrome()
   M.jump()
+end
+
+---@param changed sidekick.cli.ChangesItem
+---@param hunk? sidekick.diff.Hunk
+---@return string
+local function request_context(changed, hunk)
+  if not hunk then
+    return ("File: %s\nChange: file-level %s"):format(changed.path, changed.status)
+  end
+  local current = vim.list_slice(changed.diff.from.lines, hunk.from_index, hunk.from_index + (hunk.from_count or 0) - 1)
+  local proposal = vim.list_slice(changed.diff.to.lines, hunk.to_index, hunk.to_index + (hunk.to_count or 0) - 1)
+  local body = {
+    ("File: %s"):format(changed.path),
+    ("Current lines: %d-%d"):format(hunk.from_index, hunk.from_index + math.max(1, hunk.from_count or 0) - 1),
+    ("Proposal lines: %d-%d"):format(hunk.to_index, hunk.to_index + math.max(1, hunk.to_count or 0) - 1),
+    "Current:",
+  }
+  for _, line in ipairs(current) do
+    body[#body + 1] = "- " .. line
+  end
+  body[#body + 1] = "Proposal:"
+  for _, line in ipairs(proposal) do
+    body[#body + 1] = "+ " .. line
+  end
+  return table.concat(body, "\n")
+end
+
+function M.request()
+  if not view then
+    return Util.warn("Open a proposal review before requesting changes")
+  end
+  local changed = item()
+  if not changed then
+    return Util.warn("There is no pending change to send to the agent")
+  end
+  local hunk
+  if changed.diff and valid_win(view.proposal_win) then
+    hunk = hunk_at_row(changed, vim.api.nvim_win_get_cursor(view.proposal_win)[1], "proposal")
+      or changed.diff.hunks[view.hunk]
+  end
+  vim.ui.input({ prompt = "Request agent revision: " }, function(request)
+    request = request and vim.trim(request) or ""
+    if request == "" or not view then
+      return
+    end
+    local terminal = view.terminal
+    if not terminal or not terminal.is_running or not terminal:is_running() then
+      return Util.warn("The proposal agent is no longer running")
+    end
+    local message = table.concat({
+      "Please revise the proposal based on this review feedback.",
+      "",
+      request_context(changed, hunk),
+      "",
+      "Reviewer request:",
+      request,
+      "",
+      "Edit the proposal worktree only, then leave the revised changes ready for review.",
+    }, "\n")
+    terminal:send(message .. "\n", { show = false })
+    terminal:submit({ show = false })
+    if view then
+      view.notice = "Revision request sent to agent"
+      render_chrome()
+    end
+  end)
 end
 
 function M.discard()
@@ -605,7 +903,7 @@ function M.discard()
     if choice == "Discard proposal" then
       local ok, err = Proposal.discard(proposal)
       if ok then
-        close()
+        close(true)
       else
         Util.error(err or "Failed to discard proposal")
       end
@@ -613,125 +911,128 @@ function M.discard()
   end)
 end
 
----@param buf integer
-local function maps(buf)
-  local opts = { buffer = buf, silent = true, nowait = true }
-  vim.keymap.set("n", "q", close, opts)
-  vim.keymap.set("n", "<Esc>", close, opts)
-  vim.keymap.set("n", "]c", M.next, opts)
-  vim.keymap.set("n", "[c", M.prev, opts)
-  vim.keymap.set("n", "a", M.accept, opts)
-  vim.keymap.set("n", "r", M.reject, opts)
-  vim.keymap.set("n", "A", M.accept_all, opts)
-  vim.keymap.set("n", "R", M.reject_all, opts)
-end
-
----@param title string
----@param config vim.api.keyset.win_config
----@param opts? {number?:boolean}
----@return integer, integer
-local function window(title, config, opts)
-  local buf = vim.api.nvim_create_buf(false, true)
-  local win = vim.api.nvim_open_win(buf, true, vim.tbl_extend("force", config, { title = title, title_pos = "center" }))
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].bufhidden = "wipe"
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].modifiable = false
-  vim.wo[win].number = not opts or opts.number ~= false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].cursorline = true
-  vim.wo[win].wrap = false
-  maps(buf)
-  return buf, win
-end
-
 function M.open()
-  local terminal = Panel.active()
-  local proposal = terminal and (terminal.proposal or terminal.parent and terminal.parent.proposal)
+  local active = Panel.active()
+  local terminal = active and (active.parent or active)
+  local proposal = terminal and terminal.proposal
   if not proposal then
     return Util.warn("The active agent is not running in proposal mode")
   end
-  if view and view.proposal.id == proposal.id then
-    close()
+  if view and view.proposal.id == proposal.id and valid_tab(view.tab) then
+    vim.api.nvim_set_current_tabpage(view.tab)
+    return true
+  end
+  local cwd = vim.fs.normalize(proposal.cwd) .. "/"
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[buf].modified and vim.startswith(vim.fs.normalize(vim.api.nvim_buf_get_name(buf)), cwd) then
+      return Util.warn("Save or discard Proposal edits before opening the review")
+    end
+  end
+  if view and not close() then
     return false
   end
-  close()
-  local width = vim.o.columns - 4
-  local height = vim.o.lines - 4
-  if width < 66 or height < 9 then
-    return Util.warn("Changes preview needs a wider editor")
-  end
-  local compact = width < 96
-  local list_width = math.min(30, math.max(20, math.floor(width * (compact and 0.3 or 0.22))))
-  local row, col = 1, 2
-  local common = { relative = "editor", border = "rounded", style = "minimal", zindex = 50 }
-  local list_buf, list_win = window(
-    " Changes ",
-    vim.tbl_extend("force", common, { row = row, col = col, width = list_width, height = height }),
-    { number = false }
-  )
-  local current_buf, current_win, proposal_buf, proposal_win
-  local pane_col = col + list_width + 2
-  if compact then
-    local pane_width = width - list_width - 4
-    local current_height = math.floor((height - 2) / 2)
-    local proposal_height = height - current_height - 2
-    current_buf, current_win = window(
-      " Current ",
-      vim.tbl_extend("force", common, { row = row, col = pane_col, width = pane_width, height = current_height })
-    )
-    proposal_buf, proposal_win = window(
-      " Proposal ",
-      vim.tbl_extend(
-        "force",
-        common,
-        { row = row + current_height + 2, col = pane_col, width = pane_width, height = proposal_height }
-      )
-    )
+  vim.cmd("tabnew")
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.cmd("tcd " .. vim.fn.fnameescape(proposal.cwd))
+  local list_win = vim.api.nvim_get_current_win()
+  local list_buf = vim.api.nvim_get_current_buf()
+  setup_scratch(list_buf, "sidekick://changes/list/" .. proposal.id)
+  vim.bo[list_buf].filetype = "sidekick_changes"
+  setup_window(list_win, true)
+  local current_buf = vim.api.nvim_create_buf(false, true)
+  local empty_buf = vim.api.nvim_create_buf(false, true)
+  setup_scratch(current_buf, "sidekick://changes/current/" .. proposal.id)
+  setup_scratch(empty_buf, "sidekick://changes/empty/" .. proposal.id)
+  vim.bo[empty_buf].bufhidden = "hide"
+  local wide = vim.o.columns >= 100
+  local current_win, proposal_win
+  if wide then
+    vim.cmd("rightbelow vsplit")
+    current_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(current_win, current_buf)
+    vim.cmd("rightbelow vsplit")
+    proposal_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(proposal_win, empty_buf)
+    vim.api.nvim_win_set_width(list_win, math.min(30, math.max(24, math.floor(vim.o.columns * 0.22))))
   else
-    local pane_width = math.floor((width - list_width - 6) / 2)
-    current_buf, current_win = window(
-      " Current ",
-      vim.tbl_extend("force", common, { row = row, col = pane_col, width = pane_width, height = height })
-    )
-    proposal_buf, proposal_win = window(
-      " Proposal ",
-      vim.tbl_extend(
-        "force",
-        common,
-        { row = row, col = pane_col + pane_width + 2, width = pane_width, height = height }
-      )
-    )
+    vim.api.nvim_set_current_win(list_win)
+    vim.cmd("belowright split")
+    current_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(current_win, current_buf)
+    vim.cmd("rightbelow vsplit")
+    proposal_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(proposal_win, empty_buf)
+    vim.api.nvim_win_set_height(list_win, math.min(10, math.max(5, math.floor(vim.o.lines * 0.25))))
   end
-  vim.wo[current_win].diff = true
-  vim.wo[proposal_win].diff = true
-  vim.wo[current_win].scrollbind = true
-  vim.wo[proposal_win].scrollbind = true
+  setup_window(current_win)
+  setup_window(proposal_win)
   view = {
     proposal = proposal,
+    terminal = terminal,
     agent = type(terminal.title) == "string" and terminal.title ~= "" and terminal.title or terminal.tool.name,
+    tab = tab,
+    group = vim.api.nvim_create_augroup("sidekick_cli_changes_" .. proposal.id, { clear = true }),
     items = {},
     index = 1,
     hunk = 1,
-    compact = compact,
     list_buf = list_buf,
     current_buf = current_buf,
-    proposal_buf = proposal_buf,
+    empty_buf = empty_buf,
     list_win = list_win,
     current_win = current_win,
     proposal_win = proposal_win,
+    proposal_buffers = {},
+    mapped_buffers = {},
   }
   vim.api.nvim_create_autocmd("CursorMoved", {
-    buffer = list_buf,
+    group = view.group,
+    buffer = view.list_buf,
     callback = function()
       if not view or view.list_buf ~= list_buf or not vim.api.nvim_win_is_valid(list_win) then
         return
       end
       local index = vim.api.nvim_win_get_cursor(list_win)[1]
-      M.select(index)
+      if not M.select(index) then
+        vim.api.nvim_win_set_cursor(list_win, { view.index, 0 })
+      end
     end,
   })
-  vim.api.nvim_set_current_win(list_win)
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    group = view.group,
+    buffer = view.current_buf,
+    callback = function()
+      if not view or not valid_win(view.current_win) or vim.api.nvim_win_get_buf(view.current_win) ~= current_buf then
+        return
+      end
+      local changed = item()
+      if not changed or not changed.diff then
+        return
+      end
+      local hunk = hunk_at_row(changed, vim.api.nvim_win_get_cursor(view.current_win)[1], "current")
+      for index, candidate in ipairs(changed.diff.hunks) do
+        if hunk == candidate and view.hunk ~= index then
+          view.hunk = index
+          render_chrome()
+          break
+        end
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("TabClosed", {
+    group = view.group,
+    callback = function()
+      if view and view.tab == tab and not valid_tab(tab) then
+        cleanup()
+      end
+    end,
+  })
+  vim.keymap.set("n", "q", close, { buffer = view.list_buf, silent = true, desc = "Close proposal review" })
+  vim.keymap.set("n", "<Esc>", close, { buffer = view.list_buf, silent = true, desc = "Close proposal review" })
+  vim.keymap.set("n", "<CR>", function()
+    if view and valid_win(view.proposal_win) then
+      vim.api.nvim_set_current_win(view.proposal_win)
+    end
+  end, { buffer = view.list_buf, silent = true, desc = "Edit proposal file" })
   local timer = assert(vim.uv.new_timer())
   view.timer = timer
   timer:start(
@@ -742,6 +1043,9 @@ function M.open()
     end)
   )
   M.refresh(true)
+  if valid_win(view.proposal_win) then
+    vim.api.nvim_set_current_win(view.proposal_win)
+  end
   return true
 end
 

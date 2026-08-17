@@ -60,6 +60,9 @@ M.commands = {
       prev = function()
         require("sidekick.cli.changes").prev()
       end,
+      request = function()
+        require("sidekick.cli.changes").request()
+      end,
       accept = function()
         require("sidekick.cli.changes").accept()
       end,
@@ -226,7 +229,7 @@ end
 function M.complete(line)
   line = line:gsub("^%s*Sidekick%s+", "")
   if line:match("^cli%s+changes%s+$") then
-    return { "accept", "accept_all", "discard", "next", "prev", "reject", "reject_all" }
+    return { "accept", "accept_all", "discard", "next", "prev", "reject", "reject_all", "request" }
   end
   local tool = line:match("^cli%s+new%s+([^%s=]*)$")
   if tool then
