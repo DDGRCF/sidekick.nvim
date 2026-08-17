@@ -700,7 +700,8 @@ agent/action menu.
 <!-- api_cli:start -->
 
 <table><tr><th>Cmd</th><th>Lua</th></tr>
-<tr><td><code>:Sidekick cli changes</code> Open the active proposal agent's changes in a side-by-side review view.</td><td>
+<tr><td><code>:Sidekick cli changes</code> Open the active proposal agent's changes in a dedicated review tab.
+The Current pane is read-only; Proposal is the editable proposal-worktree buffer.</td><td>
 
 
 ```lua
@@ -921,14 +922,20 @@ current file, selection, diagnostics, and more.
 ### Agent Changes
 
 New CLI agents started in a Git worktree run in proposal mode by default. Their edits stay
-in an isolated worktree until you open `:Sidekick cli changes`. The view shows the current
-files beside the Agent proposal. The file list labels additions, modifications, deletions,
-line counts, and pending hunks; the preview also keeps the current hunk and available
-actions visible. Use `]c`/`[c` to move between hunks, `a`/`r` to accept or reject one hunk,
-and `A`/`R` to process all pending changes. Narrow editors automatically stack the two
-versions instead of closing the review. Use `:Sidekick cli changes discard` to remove an
-unneeded proposal. Pass `proposal=false` to `:Sidekick cli new` to use the legacy
-direct-editing mode.
+in an isolated worktree until you open `:Sidekick cli changes`, which opens a dedicated
+review tab. The file list labels additions, modifications, deletions, line counts, and
+pending hunks. **Current** is a read-only snapshot of the main worktree; **Proposal** is the
+real, editable buffer in the proposal worktree, so normal Vim editing, folds, search, and
+LSP navigation such as `gd` work as usual.
+
+Use native diff motions (`]c`/`[c`) in either code pane. In Proposal, `do` restores the
+current hunk for manual editing; save it with `:w`. `dp` accepts the hunk under the cursor
+into the main worktree, but only after Proposal has been saved, so a local reviewer edit is
+never silently discarded. The list uses `j`/`k`, `<CR>` focuses Proposal, and `q` or `<Esc>`
+closes the review tab. Use `:Sidekick cli changes request` to send feedback and the selected
+hunk context back to the same agent without opening its panel; the request is submitted
+immediately. Use `:Sidekick cli changes discard` to remove an unneeded proposal. Pass
+`proposal=false` to `:Sidekick cli new` to use the legacy direct-editing mode.
 
 <details><summary><strong>Available Context Variables</strong></summary>
 

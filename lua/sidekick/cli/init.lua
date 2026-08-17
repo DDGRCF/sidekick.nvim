@@ -206,7 +206,8 @@ function M.workspace(action)
   return assert(Workspace[action], "Unknown workspace action: " .. tostring(action))()
 end
 
---- Open the active proposal agent's changes in a side-by-side review view.
+--- Open the active proposal agent's changes in a dedicated review tab.
+--- The Current pane is read-only; Proposal is the editable proposal-worktree buffer.
 ---@return boolean? opened
 function M.changes()
   return require("sidekick.cli.changes").open()
