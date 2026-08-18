@@ -61,6 +61,14 @@ function M.fork(t)
   end)
 end
 
+---@param t sidekick.cli.Terminal
+function M.reference(t)
+  vim.cmd.stopinsert()
+  vim.schedule(function()
+    require("sidekick.cli").reference({ target = t, focus = true })
+  end)
+end
+
 function M.prev()
   panel().cycle(-1)
 end

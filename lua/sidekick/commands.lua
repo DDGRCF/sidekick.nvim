@@ -56,6 +56,9 @@ M.commands = {
     fork = function(opts)
       require("sidekick.cli").fork(opts)
     end,
+    reference = function(opts)
+      require("sidekick.cli").reference(opts)
+    end,
     switch = function(opts)
       require("sidekick.cli").switch(opts)
     end,

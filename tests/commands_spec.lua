@@ -112,6 +112,11 @@ describe("commands", function()
         expected_completions = { "focus", "fork" },
       },
       {
+        name = "includes running agent references in cli completions",
+        input = "cli r",
+        expected_completions = { "reference", "rename", "resize" },
+      },
+      {
         name = "returns empty for unknown command",
         input = "bogus",
         expected_completions = {},

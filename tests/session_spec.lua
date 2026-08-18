@@ -189,6 +189,37 @@ describe("cli sessions", function()
     Util.del_state(parent.mux_session)
   end)
 
+  it("exposes OpenCode conversation messages to live agent references", function()
+    local Util = require("sidekick.util")
+    local old_curl = Util.curl
+    local requested
+    Util.curl = function(url)
+      requested = url
+      return vim.json.encode({
+        { info = { role = "user" }, parts = { { type = "text", text = "Find the bug" } } },
+        {
+          info = { role = "assistant" },
+          parts = {
+            { type = "reasoning", text = "hidden" },
+            { type = "text", text = "The parser is fixed" },
+          },
+        },
+      })
+    end
+    local backend = assert(Session.backends.opencode)
+    local opencode = setmetatable({
+      base_url = "http://127.0.0.1:12345",
+      conversation = { id = "ses_abcdef1234567890", provider = "opencode" },
+    }, backend)
+
+    local ok, output = pcall(opencode.dump, opencode)
+
+    Util.curl = old_curl
+    assert.is_true(ok)
+    assert.are.equal("http://127.0.0.1:12345/session/ses_abcdef1234567890/message", requested)
+    assert.are.equal("[user]\nFind the bug\n\n[assistant]\nThe parser is fixed", output)
+  end)
+
   it("skips managed session preparation for provider-native forks", function()
     local prepared = false
     local session = Session.new({

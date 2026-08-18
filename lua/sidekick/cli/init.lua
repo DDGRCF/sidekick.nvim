@@ -67,6 +67,12 @@ local M = {}
 ---@field focus? boolean
 ---@field title? string
 
+---@class sidekick.cli.AgentReferenceOpts
+---@field source? sidekick.cli.Session|string Source agent, Sidekick session/instance id, or native conversation id
+---@field target? sidekick.cli.Session|string Target agent; defaults to the current panel agent
+---@field focus? boolean Focus the target after sending the reference
+---@field submit? boolean Submit the reference immediately; defaults to true
+
 --- Keymap options similar to `vim.keymap.set` and `lazy.nvim` mappings
 ---@class sidekick.cli.Keymap: vim.keymap.set.Opts
 ---@field [1] string keymap
@@ -155,6 +161,16 @@ function M.fork(opts)
     return require("sidekick.cli.agent_picker").open(items, { fork = true })
   end
   return Util.warn("No live agent is available to fork")
+end
+
+--- Reference another running agent in the current agent without copying its conversation.
+--- The target receives a small file reference containing the source agent and session ids,
+--- plus a command it can use to query that live agent when needed.
+--- By default, `<a-a>` opens the source picker in terminal mode and `<leader>ba`
+--- opens it in normal mode. The current panel agent is always the default target.
+---@param opts? sidekick.cli.AgentReferenceOpts
+function M.reference(opts)
+  return require("sidekick.cli.agent_reference").select(opts)
 end
 
 --- Fuzzy-select an agent tab in the current Sidekick container.

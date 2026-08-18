@@ -364,6 +364,7 @@ local defaults = {
         hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the agent container" },
         hide_ctrl_z   = { "<c-z>", "blur"      , mode = "nt", desc = "go back to the previous window without hiding the agent container" },
         prompt        = { "<c-p>", "prompt"    , mode = "t" , desc = "insert prompt or context" },
+        agent_ref_t    = { "<a-a>", "reference" , mode = "t" , desc = "reference another running agent" },
         agent_fork_t  = { "<a-f>", "fork"       , mode = "t" , desc = "fork the current agent conversation" },
         stopinsert    = { "<c-q>", "stopinsert", mode = "t" , desc = "enter normal mode" },
         normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter normal mode" },
@@ -374,6 +375,7 @@ local defaults = {
         agent_move_l  = { "[B"          , "move_prev"       , mode = "n", desc = "move agent tab left" },
         agent_move_r  = { "]B"          , "move_next"       , mode = "n", desc = "move agent tab right" },
         agent_pick    = { "<leader>bj"  , "pick"            , mode = "n", desc = "pick an agent" },
+        agent_ref     = { "<leader>ba"  , "reference"       , mode = "n", desc = "reference another running agent" },
         agent_fork    = { "<leader>bf"  , "fork"            , mode = "n", desc = "fork the current agent conversation" },
         agent_back    = { "<leader>bb"  , "previous"        , mode = "n", desc = "previously active agent" },
         agent_back_bt = { "<leader>`"   , "previous"        , mode = "n", desc = "previously active agent" },
@@ -420,6 +422,15 @@ local defaults = {
       -- max lines to capture when dumping a multiplexer pane for scrollback support
       -- more lines means slower loading of the scrollback
       dump = 2000,
+    },
+    --- Limits for content returned only when an agent follows a running-agent reference.
+    --- The reference sent to the target contains no conversation content.
+    ---@class sidekick.cli.AgentReference
+    ---@field max_lines integer Maximum terminal lines returned by an on-demand query
+    ---@field max_bytes integer Maximum terminal bytes returned by an on-demand query
+    agent_reference = {
+      max_lines = 2000,
+      max_bytes = 256 * 1024,
     },
     --- Actual cli tool config is loaded from the runtime path `sk/cli/{tool}.lua` and merged with the config below.
     --- For default configs, see https://github.com/folke/sidekick.nvim/tree/main/sk/cli
@@ -779,6 +790,19 @@ require("sidekick.cli").prev()
 ---@param opts? sidekick.cli.Prompt|{cb:nil}
 ---@overload fun(cb:fun(msg?:string))
 require("sidekick.cli").prompt(opts)
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli reference</code> Reference another running agent in the current agent without copying its conversation.
+The target receives a small file reference containing the source agent and session ids,
+plus a command it can use to query that live agent when needed.
+By default, `<a-a>` opens the source picker in terminal mode and `<leader>ba`
+opens it in normal mode. The current panel agent is always the default target.</td><td>
+
+
+```lua
+---@param opts? sidekick.cli.AgentReferenceOpts
+require("sidekick.cli").reference(opts)
 ```
 
 </td></tr>

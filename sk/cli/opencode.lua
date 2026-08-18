@@ -72,6 +72,36 @@ function M:submit()
   })
 end
 
+--- Return a text-only view of the current conversation for agent references.
+function M:dump()
+  local conversation = self.conversation
+  local id = conversation and conversation.id
+  if type(id) ~= "string" or not id:match("^[%w_.%-]+$") then
+    return
+  end
+  local Util = require("sidekick.util")
+  local response = Util.curl(self.base_url .. "/session/" .. id .. "/message")
+  local ok, messages = pcall(vim.json.decode, response or "")
+  if not ok or type(messages) ~= "table" or not vim.islist(messages) then
+    return
+  end
+  local ret = {}
+  for _, message in ipairs(messages) do
+    local parts = {}
+    for _, part in ipairs(type(message.parts) == "table" and message.parts or {}) do
+      if part.type == "text" and type(part.text) == "string" and part.text ~= "" then
+        parts[#parts + 1] = part.text
+      end
+    end
+    if #parts > 0 then
+      local role = message.info and message.info.role or "message"
+      role = type(role) == "string" and role or "message"
+      ret[#ret + 1] = ("[%s]\n%s"):format(role, table.concat(parts, "\n"))
+    end
+  end
+  return #ret > 0 and table.concat(ret, "\n\n") or nil
+end
+
 -- only register on Unix-like systems with lsof available
 if vim.fn.has("win32") == 0 and vim.fn.executable("lsof") == 1 then
   require("sidekick.cli.session").register("opencode", M)
