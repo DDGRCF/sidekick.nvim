@@ -168,10 +168,28 @@ describe("cli conversation fork", function()
     assert.are.equal("exact", mode)
   end)
 
-  it("matches the native Codex and Claude fork command shapes", function()
+  it("matches the native fork command shapes", function()
+    local Managed = require("sidekick.cli.managed_sessions")
+    local old_uuid = Managed.uuid
+    restore = function()
+      Managed.uuid = old_uuid
+    end
+    Managed.uuid = function()
+      return "child-conversation"
+    end
     for _, case in ipairs({
       { name = "codex", expected = { "codex", "fork", "conversation-42" } },
-      { name = "claude", expected = { "claude", "--resume", "conversation-42", "--fork-session" } },
+      {
+        name = "claude",
+        expected = {
+          "claude",
+          "--resume",
+          "conversation-42",
+          "--fork-session",
+          "--session-id",
+          "child-conversation",
+        },
+      },
       {
         name = "opencode",
         expected = { "opencode", "--port", "0", "--session", "conversation-42", "--fork" },
@@ -192,6 +210,14 @@ describe("cli conversation fork", function()
   end)
 
   it("does not carry Claude's managed id into a fork command", function()
+    local Managed = require("sidekick.cli.managed_sessions")
+    local old_uuid = Managed.uuid
+    restore = function()
+      Managed.uuid = old_uuid
+    end
+    Managed.uuid = function()
+      return "019fd4cb-881f-74a2-bb84-571584e30dd5"
+    end
     local config = assert(loadfile("sk/cli/claude.lua"))()
     local id = "019fd4cb-881f-74a2-bb84-571584e30dd4"
     local tool = {
@@ -202,7 +228,14 @@ describe("cli conversation fork", function()
 
     local cmd, mode = Fork.command(tool, { provider = "claude", id = id, resumable = true })
 
-    assert.are.same({ "claude", "--resume", id, "--fork-session" }, cmd)
+    assert.are.same({
+      "claude",
+      "--resume",
+      id,
+      "--fork-session",
+      "--session-id",
+      "019fd4cb-881f-74a2-bb84-571584e30dd5",
+    }, cmd)
     assert.are.equal("exact", mode)
   end)
 
@@ -465,16 +498,32 @@ describe("cli conversation fork", function()
     assert.is_nil(source._sidekick_forking)
   end)
 
-  it("closes an unverified child when the provider reuses the source id", function()
+  it("keeps a running child when its independent id is not available yet", function()
     local source, terminal, state = stub_start(conversation())
+
+    Fork.start(source)
+    local _, _, events, errors = state()
+
+    assert.is_not_true(terminal.closed)
+    assert.is_nil(source._sidekick_forking)
+    assert.are.same({ event = "SidekickCliFork", data = { id = terminal.id, source_id = source.id } }, events[1])
+    assert.matches("not yet verified", errors[1])
+    assert.is_false(source.closed)
+  end)
+
+  it("closes a child that exits before its independent id is available", function()
+    local source, terminal, state = stub_start(conversation())
+    terminal.is_running = function()
+      return false
+    end
 
     Fork.start(source)
     local _, _, events, errors = state()
 
     assert.is_true(terminal.closed)
     assert.is_nil(source._sidekick_forking)
-    assert.are.same({}, events)
-    assert.matches("reused the source conversation id", errors[1])
+    assert.are.equal(0, #events)
+    assert.matches("child exited", errors[1])
     assert.is_false(source.closed)
   end)
 end)

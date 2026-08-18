@@ -105,10 +105,11 @@ return {
   fork = {
     command = function(tool, conversation)
       -- `--fork-session` creates a new id from the resumed conversation. Do
-      -- not carry the parent's managed `--session-id` into the child command,
-      -- or capture will keep reporting the parent's id.
+      -- not carry the parent's managed `--session-id` into the child command.
+      -- Assign a fresh id so the child remains identifiable while Claude is
+      -- still showing startup or workspace-trust prompts.
       local cmd = without_arg(vim.deepcopy(tool.cmd), "--session-id")
-      vim.list_extend(cmd, { "--resume", conversation.id, "--fork-session" })
+      vim.list_extend(cmd, { "--resume", conversation.id, "--fork-session", "--session-id", Managed.uuid() })
       return cmd
     end,
   },

@@ -200,6 +200,34 @@ describe("cli provider sessions", function()
     vim.fn.delete(root, "rf")
   end)
 
+  it("ignores the parent file while capturing a forked Claude session", function()
+    local root = vim.fn.tempname()
+    local project = root .. "/-tmp-project"
+    vim.fn.mkdir(project, "p")
+    local parent = "019fd4cb-881f-74a2-bb84-571584e30dd5"
+    local child = "019fd4cb-881f-74a2-bb84-571584e30dd6"
+    local parent_file = assert(io.open(project .. "/" .. parent .. ".jsonl", "wb"))
+    parent_file:write(vim.json.encode({ sessionId = parent }) .. "\n")
+    parent_file:flush()
+    local child_file = assert(io.open(project .. "/" .. child .. ".jsonl", "wb"))
+    child_file:write(vim.json.encode({ sessionId = child }) .. "\n")
+    child_file:flush()
+    local old_root = Provider.roots.claude
+    Provider.roots.claude = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("claude", {
+      pids = { vim.fn.getpid() },
+      forked_from = { provider = "claude", id = parent },
+      tool = { cmd = { "claude", "--fork-session" } },
+    })
+
+    assert.are.equal(child, conversation.id)
+    parent_file:close()
+    child_file:close()
+    Provider.roots.claude = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
   it("blocks Codex resume while another process holds the thread writer lock", function()
     local home = vim.fn.tempname()
     local locks = home .. "/thread-writer-locks"
@@ -334,6 +362,34 @@ describe("cli provider sessions", function()
     vim.fn.delete(state_root, "rf")
   end)
 
+  it("captures Antigravity's current conversation from its open CLI log", function()
+    local state_root = vim.fn.tempname()
+    local root = state_root .. "/conversations"
+    local log_root = state_root .. "/log"
+    vim.fn.mkdir(root, "p")
+    vim.fn.mkdir(log_root, "p")
+    local parent = "b98bb537-9e1f-4780-8fb4-2f4f0a3b9712"
+    local child = "d01a6fc4-1693-44c0-942b-f593f591c236"
+    local parent_file = sqlite(root .. "/" .. parent .. ".db", "trajectory_meta", {})
+    parent_file:close()
+    local child_file = sqlite(root .. "/" .. child .. ".db", "trajectory_meta", {})
+    child_file:close()
+    local log = assert(io.open(log_root .. "/cli-20260819_001545.log", "wb"))
+    log:write("Streaming conversation " .. parent .. "\n")
+    log:write("Streaming conversation " .. child .. "\n")
+    log:flush()
+    local old_root = Provider.roots.antigravity
+    Provider.roots.antigravity = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("antigravity", { pids = { vim.fn.getpid() } })
+
+    assert.are.equal(child, conversation.id)
+    assert.are.equal(root .. "/" .. child .. ".db", conversation.data.path)
+    log:close()
+    Provider.roots.antigravity = old_root
+    vim.fn.delete(state_root, "rf")
+  end)
+
   it("captures and verifies the Grok session id rendered by its process", function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")
@@ -354,6 +410,31 @@ describe("cli provider sessions", function()
     assert.are.equal("grok", conversation.provider)
     assert.is_true(Provider.verify("grok", conversation))
 
+    vim.api.nvim_buf_delete(buf, { force = true })
+    file:close()
+    Provider.roots.grok = old_root
+    vim.fn.delete(root, "rf")
+  end)
+
+  it("ignores the parent id while capturing a forked Grok session", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root, "p")
+    local parent = "a1b2c3d4e5f6"
+    local child = "b2c3d4e5f6a7"
+    local path = root .. "/grok.db"
+    local file = sqlite(path, "sessions", { parent, child })
+    local buf = buffer({ "Grok Code", parent, child })
+    local old_root = Provider.roots.grok
+    Provider.roots.grok = vim.fs.normalize(root)
+
+    local conversation = Provider.capture("grok", {
+      pids = { vim.fn.getpid() },
+      buf = buf,
+      forked_from = { provider = "grok", id = parent },
+      tool = { cmd = { "grok", "--fork-session" } },
+    })
+
+    assert.are.equal(child, conversation.id)
     vim.api.nvim_buf_delete(buf, { force = true })
     file:close()
     Provider.roots.grok = old_root

@@ -221,10 +221,19 @@ local function verify_child(source, terminal, expected, tool, after_start)
   end
 
   terminal._sidekick_fork_timer = timer
-  local function finish(ok, reason)
+  local function finish(ok, reason, keep_running)
     stop_timer(terminal)
     source._sidekick_forking = nil
     if not ok then
+      if keep_running then
+        -- A live CLI can legitimately wait at authentication, workspace-trust,
+        -- or migration UI before it creates the child conversation. Keep the
+        -- usable terminal instead of making it disappear at the verification
+        -- timeout; later workspace/status captures can still attach its id.
+        Session.persist(terminal)
+        Util.emit("SidekickCliFork", { id = terminal.id, source_id = source.id })
+        return Util.warn(("Fork of `%s` is running but not yet verified: %s"):format(source.tool.name, reason))
+      end
       if not terminal.closed then
         terminal:close()
       end
@@ -243,7 +252,7 @@ local function verify_child(source, terminal, expected, tool, after_start)
     if conversation and conversation.provider == expected.provider and type(conversation.id) == "string" then
       if conversation.id == expected.id then
         if vim.uv.now() - started >= timeout then
-          return finish(false, "provider reused the source conversation id")
+          return finish(false, "an independent conversation id is not available yet", true)
         end
         timer:start(250, 0, vim.schedule_wrap(check))
         return
@@ -252,7 +261,7 @@ local function verify_child(source, terminal, expected, tool, after_start)
     end
 
     if vim.uv.now() - started >= timeout then
-      return finish(false, "child conversation id could not be verified")
+      return finish(false, "the child conversation id is not available yet", true)
     end
     timer:start(250, 0, vim.schedule_wrap(check))
   end

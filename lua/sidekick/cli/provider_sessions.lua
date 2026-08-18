@@ -164,6 +164,18 @@ local function read_prefix(path)
   return data
 end
 
+local function read_tail(path)
+  local file = io.open(path, "rb")
+  if not file then
+    return
+  end
+  local size = file:seek("end") or 0
+  file:seek("set", math.max(0, size - 256 * 1024))
+  local data = file:read("*all")
+  file:close()
+  return data
+end
+
 crush_config_data_dir = function(tool, cwd)
   cwd = vim.fs.normalize(cwd or vim.fn.getcwd())
   local checked = {}
@@ -283,6 +295,36 @@ local function valid_antigravity(path)
     and data:sub(1, 16) == "SQLite format 3\0"
     and data:find("trajectory_meta", 1, true) ~= nil
     and data:find("CREATE TABLE", 1, true) ~= nil
+end
+
+local function is_antigravity_log(path, session_root)
+  local state_root = session_root and vim.fs.dirname(session_root) or nil
+  local log_root = state_root and vim.fs.joinpath(state_root, "log") or nil
+  path = vim.fs.normalize(path)
+  return log_root ~= nil and path:sub(1, #log_root + 1) == log_root .. "/" and path:match("/cli%-%d+_%d+%.log$") ~= nil
+end
+
+local function antigravity_log_id(path, session_root)
+  if not is_antigravity_log(path, session_root) then
+    return
+  end
+  local data = read_tail(path)
+  if not data then
+    return
+  end
+  local id
+  for current in data:gmatch("Streaming conversation ([%w%-]+)") do
+    id = current
+  end
+  if not id then
+    for line in data:gmatch("[^\r\n]+") do
+      local current = line:match("Created conversation ([%w%-]+)") or line:match("Resuming conversation ([%w%-]+)")
+      if current then
+        id = current
+      end
+    end
+  end
+  return id
 end
 
 local function antigravity_project_id(id)
@@ -748,6 +790,7 @@ function M.capture(provider, session)
     end
   end
   local found = {}
+  local logs = {}
   local scanned = {}
   local function scan(pid)
     if scanned[pid] then
@@ -765,12 +808,34 @@ function M.capture(provider, session)
             found[id] = path
           end
         end
+      elseif provider == "antigravity" and is_antigravity_log(path, session_root) then
+        logs[path] = true
       end
     end
   end
   for _, root_pid in ipairs(session.pids or {}) do
     for _, pid in ipairs(Procs.pids(root_pid)) do
       scan(pid)
+    end
+  end
+  if provider == "antigravity" then
+    local current = {}
+    for path in pairs(logs) do
+      local id = antigravity_log_id(path, session_root)
+      local conversation_path = id and vim.fs.joinpath(session_root, id .. ".db") or nil
+      if conversation_path and valid_antigravity(conversation_path) then
+        current[id] = conversation_path
+      end
+    end
+    local current_ids = vim.tbl_keys(current)
+    if #current_ids == 1 then
+      local id = current_ids[1]
+      return {
+        id = id,
+        provider = provider,
+        resumable = true,
+        data = { path = current[id], project_id = antigravity_project_id(id) },
+      }
     end
   end
   if provider == "grok" then
@@ -780,6 +845,14 @@ function M.capture(provider, session)
       if id then
         candidates[id] = path
       end
+    end
+    local forked_from = session.forked_from
+    local source_id = type(forked_from) == "table"
+      and forked_from.provider == provider
+      and type(forked_from.id) == "string"
+      and forked_from.id
+    if source_id then
+      candidates[source_id] = nil
     end
     local candidate_ids = vim.tbl_keys(candidates)
     if #candidate_ids == 1 then
@@ -799,6 +872,9 @@ function M.capture(provider, session)
     end
     local path = paths[1]
     local candidates = output_ids(provider, session)
+    if source_id then
+      candidates[source_id] = nil
+    end
     local ids = vim.tbl_keys(candidates)
     if #ids ~= 1 then
       return
@@ -809,6 +885,10 @@ function M.capture(provider, session)
       resumable = true,
       data = { path = path },
     }
+  end
+  local forked_from = session.forked_from
+  if type(forked_from) == "table" and forked_from.provider == provider and type(forked_from.id) == "string" then
+    found[forked_from.id] = nil
   end
   local ids = vim.tbl_keys(found)
   if #ids ~= 1 then
