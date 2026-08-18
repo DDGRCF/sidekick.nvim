@@ -1,8 +1,8 @@
 ---@module 'luassert'
 
+local Fork = require("sidekick.cli.fork")
 local Managed = require("sidekick.cli.managed_sessions")
 local Resume = require("sidekick.cli.resume")
-local Util = require("sidekick.util")
 
 describe("managed CLI conversations", function()
   it("generates deterministic valid version 4 UUIDs", function()
@@ -17,7 +17,6 @@ describe("managed CLI conversations", function()
     local cases = {
       copilot = { "copilot", "--resume" },
       pi = { "pi", "--session" },
-      qwen = { "qwen", "--resume" },
     }
     local id = Managed.uuid("resume-test")
     for provider, expected in pairs(cases) do
@@ -28,7 +27,7 @@ describe("managed CLI conversations", function()
         config = { resume = adapter },
       }
       local cmd, mode = Resume.command(tool, {
-        conversation = { id = id, provider = provider, resumable = true },
+        conversation = { id = id, provider = provider, resumable = true, data = {} },
       })
       local wanted = vim.deepcopy(expected)
       wanted[#wanted + 1] = id
@@ -37,12 +36,108 @@ describe("managed CLI conversations", function()
     end
   end)
 
-  it("preserves an explicit exact session id", function()
-    local id = Managed.uuid("explicit-test")
-    local adapter = Managed.adapter("qwen")
-    local prepared = adapter.prepare({ cmd = { "qwen", "--session-id", id } }, { instance_id = "agent" })
-    assert.are.same({ "qwen", "--session-id", id }, prepared.cmd)
-    assert.are.equal(id, prepared.conversation.id)
+  it("captures Oh My Pi's provider-generated session id", function()
+    local adapter = Managed.adapter("omp")
+    local prepared = adapter.prepare({ cmd = { "omp" } }, { instance_id = "agent" })
+    assert.are.equal("omp", prepared.cmd[1])
+    assert.are.equal("--extension", prepared.cmd[2])
+    assert.are.equal("--sidekick-session-file", prepared.cmd[4])
+    assert.are.equal(prepared.env.SIDEKICK_OMP_SESSION_FILE, prepared.cmd[5])
+    assert.is_nil(prepared.conversation)
+    assert.is_not_nil(prepared.env.SIDEKICK_OMP_SESSION_FILE)
+
+    local id = "1f9d2a6b9c0d1234"
+    local path = "/tmp/omp-session.jsonl"
+    local control = assert(io.open(prepared.env.SIDEKICK_OMP_SESSION_FILE, "w"))
+    control:write(vim.json.encode({ id = id, file = path }))
+    control:close()
+    local tool = { cmd = prepared.cmd, env = prepared.env, config = { env = {} } }
+
+    local conversation = adapter.capture(tool, { tool = tool, pids = {} })
+
+    vim.fn.delete(prepared.env.SIDEKICK_OMP_SESSION_FILE)
+    assert.are.equal(id, conversation.id)
+    assert.are.equal("omp", conversation.provider)
+    assert.are.equal(path, conversation.data.path)
+    assert.are.equal(prepared.env.SIDEKICK_OMP_SESSION_FILE, conversation.data.control)
+  end)
+
+  it("resumes Oh My Pi by exact id with session tracking enabled", function()
+    local adapter = Managed.adapter("omp")
+    local id = "1f9d2a6b9c0d1234"
+    local control = vim.fn.tempname()
+    local tool = { name = "omp", cmd = { "omp" }, config = { resume = adapter } }
+
+    local cmd, mode = Resume.command(tool, {
+      conversation = {
+        id = id,
+        provider = "omp",
+        resumable = true,
+        data = { control = control },
+      },
+    })
+
+    assert.are.equal("exact", mode)
+    assert.are.equal("omp", cmd[1])
+    assert.are.equal("--extension", cmd[2])
+    assert.are.equal("--sidekick-session-file", cmd[4])
+    assert.are.equal(control, cmd[5])
+    assert.are.same({ "--resume", id }, { cmd[6], cmd[7] })
+  end)
+
+  it("tracks Oh My Pi continue commands without replacing them", function()
+    local adapter = Managed.adapter("omp")
+    local prepared = adapter.prepare({ cmd = { "omp", "--continue" } }, { instance_id = "continue-agent" })
+
+    assert.are.equal("--continue", prepared.cmd[2])
+    assert.are.equal("--extension", prepared.cmd[3])
+    assert.are.equal("--sidekick-session-file", prepared.cmd[5])
+    assert.is_nil(prepared.conversation)
+  end)
+
+  it("loads the Oh My Pi tracker when extension discovery is disabled", function()
+    local adapter = Managed.adapter("omp")
+    local prepared = adapter.prepare({ cmd = { "omp", "--no-extensions" } }, { instance_id = "explicit-extension" })
+    local config = assert(loadfile("sk/cli/omp.lua"))()
+    local available = Fork.available({
+      name = "omp",
+      cmd = { "omp", "--no-extensions" },
+      config = config,
+    })
+
+    assert.are.equal("--no-extensions", prepared.cmd[2])
+    assert.are.equal("--extension", prepared.cmd[3])
+    assert.is_true(available)
+  end)
+
+  it("disables Oh My Pi session features when persistence is disabled", function()
+    local adapter = Managed.adapter("omp")
+    local config = assert(loadfile("sk/cli/omp.lua"))()
+    local available = Fork.available({
+      name = "omp",
+      cmd = { "omp", "--no-session" },
+      config = config,
+    })
+
+    assert.is_nil(adapter.prepare({ cmd = { "omp", "--no-session" } }, { instance_id = "no-session" }))
+    assert.is_false(available)
+  end)
+
+  it("forks Oh My Pi from an exact id with independent session tracking", function()
+    local config = assert(loadfile("sk/cli/omp.lua"))()
+    local tool = { name = "omp", cmd = config.cmd, config = config }
+
+    local cmd, mode = Fork.command(tool, {
+      id = "1f9d2a6b9c0d1234",
+      provider = "omp",
+      resumable = true,
+    })
+
+    assert.are.equal("exact", mode)
+    assert.are.equal("omp", cmd[1])
+    assert.are.equal("--extension", cmd[2])
+    assert.are.equal("--sidekick-session-file", cmd[4])
+    assert.are.same({ "--fork", "1f9d2a6b9c0d1234" }, { cmd[6], cmd[7] })
   end)
 
   it("creates Pi sessions with the dedicated exact-id flag", function()
@@ -78,50 +173,21 @@ describe("managed CLI conversations", function()
     assert.is_nil(adapter.prepare({ cmd = { "pi", "--resume" } }, { instance_id = "agent" }))
   end)
 
-  it("checks Qwen JSON Lines in the saved working directory", function()
-    local old_exec = Util.exec
-    local old_executable = vim.fn.executable
-    local id = Managed.uuid("qwen-existing")
-    local cwd
-    Util.exec = function(_, opts)
-      cwd = opts.cwd
-      return {
-        vim.json.encode({ sessionId = Managed.uuid("another") }),
-        vim.json.encode({ sessionId = id }),
-      }
-    end
-    vim.fn.executable = function(name)
-      return name == "qwen" and 1 or old_executable(name)
-    end
-
-    local ok = Managed.adapter("qwen").preflight(nil, { id = id }, { cwd = "/tmp/qwen-project" })
-
-    Util.exec = old_exec
-    vim.fn.executable = old_executable
-    assert.is_true(ok)
-    assert.are.equal("/tmp/qwen-project", cwd)
-  end)
-
-  it("tracks Qwen's provider-owned active writer after an in-TUI resume", function()
+  it("verifies Oh My Pi sessions by their JSONL header", function()
     local root = vim.fn.tempname()
-    local locks = root .. "/tmp/session-writer-locks"
-    vim.fn.mkdir(locks, "p")
-    local launched = Managed.uuid("qwen-launched")
-    local active = Managed.uuid("qwen-active")
-    local file = assert(io.open(locks .. "/" .. active .. ".lock", "w"))
-    file:write(vim.json.encode({ state = "active", pid = vim.fn.getpid(), session_id = active }))
+    vim.fn.mkdir(root .. "/project", "p")
+    local id = "1f9d2a6b9c0d1234"
+    local path = root .. "/project/2026-08-19_" .. id .. ".jsonl"
+    local file = assert(io.open(path, "w"))
+    file:write(vim.json.encode({ type = "session", version = 3, id = id, cwd = "/tmp/omp-project" }) .. "\n")
     file:close()
-    local adapter = Managed.adapter("qwen")
-    local tool = {
-      cmd = { "qwen", "--session-id", launched },
-      env = { QWEN_RUNTIME_DIR = root },
-      config = { env = {} },
-    }
 
-    local conversation = adapter.capture(tool, { tool = tool, pids = { vim.fn.getpid() } })
+    local adapter = Managed.adapter("omp")
+    local tool = { cmd = { "omp", "--session-dir", root }, config = { env = {} } }
+    local ok = adapter.preflight(tool, { id = id, data = { path = path } }, { cwd = "/tmp/omp-project" })
 
     vim.fn.delete(root, "rf")
-    assert.are.equal(active, conversation.id)
+    assert.is_true(ok)
   end)
 
   it("never restores Copilot's old conversation after an ambiguous TUI switch", function()

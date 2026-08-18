@@ -17,6 +17,13 @@ local layout_options = {
   { value = "float", label = "Float", icon = "□" },
 }
 
+local function format_layout(item, supports_chunks)
+  if supports_chunks then
+    return { { item.icon .. " ", "Special" }, { item.label } }
+  end
+  return ("%s %s"):format(item.icon, item.label)
+end
+
 ---@class sidekick.cli.Panel
 ---@field tab integer
 ---@field win? integer
@@ -1306,15 +1313,14 @@ end
 local function pick_layout()
   local select = vim.ui.select
   local ok, Snacks = pcall(require, "snacks")
-  if Config.cli.picker == "snacks" and ok and Snacks.picker and Snacks.picker.select then
+  local provider = Config.cli.agent_picker.provider
+  if provider ~= "native" and ok and Snacks.picker and Snacks.picker.select then
     select = Snacks.picker.select
   end
   select(layout_options, {
     prompt = "Select panel layout:",
     kind = "sidekick_cli_layout",
-    format_item = function(item)
-      return ("%s %s"):format(item.icon, item.label)
-    end,
+    format_item = format_layout,
   }, function(item)
     if item then
       M.move(item.value)

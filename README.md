@@ -341,9 +341,9 @@ local defaults = {
           crush = "󰛡",
           cursor = "󰅴",
           grok = "󱚥",
+          omp = "󰠭",
           opencode = "󰄛",
           pi = "󰠭",
-          qwen = "󱚠",
         }, ---@type table<string, string>
         status = { ---@type table<sidekick.cli.ActivityStatus, string>
           idle = "○",
@@ -432,9 +432,9 @@ local defaults = {
       crush       = {},
       cursor      = {},
       grok        = {},
+      omp         = {},
       opencode    = {},
       pi          = {},
-      qwen        = {},
     },
     --- Add custom context. See `lua/sidekick/context/init.lua`
     ---@type table<string, sidekick.context.Fn>
@@ -678,8 +678,11 @@ in a new terminal. A failed or unsupported resume is reported and never replaced
 metadata-only tab. Use `:Sidekick cli workspace save|restore|status|clear` to manage the
 snapshot explicitly. Exact provider conversation IDs can be supplied by a tool's
 `resume` adapter. Antigravity, Claude, Codex, Cursor, Crush, Grok Build, and OpenCode include exact discovery adapters;
-Copilot, Pi, and Qwen receive a Sidekick-managed UUID at launch so multiple agents of the same type
-can be restored without relying on a provider's “latest conversation” shortcut.
+Copilot and Pi receive a Sidekick-managed UUID at launch, while Oh My Pi reports its provider-generated
+session ID through a bundled extension. Multiple agents of the same type can therefore be restored without
+relying on a provider's “latest conversation” shortcut.
+Oh My Pi also uses its native `--fork <id>` command for Sidekick forks, with a separate tracking file for
+the child conversation; `--continue`, exact resume, and in-TUI session switches remain trackable as well.
 Crush resumes with its exact session UUID when the running process exposes it or its data directory contains
 one session; ambiguous databases are left unavailable instead of guessing. Its current CLI does not expose
 a native conversation-fork API, so Sidekick keeps fork unavailable instead of cloning or reusing the parent session.
@@ -1020,8 +1023,8 @@ Sidekick preconfigures popular AI CLIs. Run `:checkhealth sidekick` to see which
 | [`crush`](https://github.com/charmbracelet/crush)           | Charm's AI assistant | See [installation](https://github.com/charmbracelet/crush)                                                             |
 | [`cursor`](https://cursor.com/cli)                          | Cursor CLI agent     | See [Cursor docs](https://cursor.com/cli)                                                                              |
 | [`grok`](https://github.com/xai-org/grok-build)              | Grok Build CLI       | `curl -fsSL https://x.ai/cli/install.sh \| bash`                                                                       |
+| [`omp`](https://github.com/can1357/oh-my-pi)                | Oh My Pi CLI         | `bun install -g @oh-my-pi/pi-coding-agent`                                                                             |
 | [`opencode`](https://github.com/anomalyco/opencode)        | OpenCode CLI         | `npm install -g opencode`                                                                                              |
-| [`qwen`](https://github.com/QwenLM/qwen-code)               | Alibaba Qwen Code    | See [repo](https://github.com/QwenLM/qwen-code)                                                                        |
 
 > [!TIP]
 > After installing tools, restart Neovim or run `:Sidekick cli select` to see them available.

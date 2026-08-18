@@ -941,11 +941,11 @@ describe("cli agent panel", function()
   end)
 
   it("shows icons in the panel layout picker", function()
-    local old_picker = Config.cli.picker
+    local old_provider = Config.cli.agent_picker.provider
     local old_select = vim.ui.select
     local seen_items
     local seen_opts
-    Config.cli.picker = "telescope"
+    Config.cli.agent_picker.provider = "native"
     local select_callback
     vim.ui.select = function(items, opts, cb)
       seen_items = items
@@ -958,7 +958,7 @@ describe("cli agent panel", function()
     Panel.move()
     select_callback(seen_items[5])
 
-    Config.cli.picker = old_picker
+    Config.cli.agent_picker.provider = old_provider
     vim.ui.select = old_select
     assert.are.same(
       { "left", "right", "top", "bottom", "float" },
@@ -969,6 +969,28 @@ describe("cli agent panel", function()
     assert.matches("^← Left$", seen_opts.format_item(seen_items[1]))
     assert.matches("^□ Float$", seen_opts.format_item(seen_items[5]))
     assert.are.equal("float", Panel.layout())
+  end)
+
+  it("preserves layout icons in the Snacks picker formatter", function()
+    local Snacks = require("snacks")
+    local old_provider = Config.cli.agent_picker.provider
+    local old_select = Snacks.picker.select
+    local seen_items
+    local seen_opts
+    Config.cli.agent_picker.provider = "snacks"
+    Snacks.picker.select = function(items, opts)
+      seen_items = items
+      seen_opts = opts
+    end
+
+    local first = fake("layout-picker-snacks", "codex", "Layout picker Snacks")
+    Panel.show(first)
+    Panel.move()
+
+    Config.cli.agent_picker.provider = old_provider
+    Snacks.picker.select = old_select
+    assert.are.same({ { "← ", "Special" }, { "Left" } }, seen_opts.format_item(seen_items[1], true))
+    assert.are.same({ { "□ ", "Special" }, { "Float" } }, seen_opts.format_item(seen_items[5], true))
   end)
 
   it("restores tab order and pin state", function()

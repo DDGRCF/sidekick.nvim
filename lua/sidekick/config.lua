@@ -107,9 +107,9 @@ local defaults = {
           crush = "󰛡",
           cursor = "󰅴",
           grok = "󱚥",
+          omp = "󰠭",
           opencode = "󰄛",
           pi = "󰠭",
-          qwen = "󱚠",
         }, ---@type table<string, string>
         status = { ---@type table<sidekick.cli.ActivityStatus, string>
           idle = "○",
@@ -200,9 +200,9 @@ local defaults = {
       crush       = {},
       cursor      = {},
       grok        = {},
+      omp         = {},
       opencode    = {},
       pi          = {},
-      qwen        = {},
     },
     --- Add custom context. See `lua/sidekick/context/init.lua`
     ---@type table<string, sidekick.context.Fn>
@@ -464,9 +464,9 @@ function M.set_hl()
     CliToolCrush = "Type",
     CliToolCursor = "Function",
     CliToolGrok = "Keyword",
+    CliToolOmp = "Number",
     CliToolOpencode = "PreProc",
     CliToolPi = "Number",
-    CliToolQwen = "Label",
     LocDelim = "Delimiter",
     LocFile = "@markup.link",
     LocNum = "@attribute",

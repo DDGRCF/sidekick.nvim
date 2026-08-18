@@ -10,9 +10,9 @@ local highlights = {
   crush = "SidekickCliToolCrush",
   cursor = "SidekickCliToolCursor",
   grok = "SidekickCliToolGrok",
+  omp = "SidekickCliToolOmp",
   opencode = "SidekickCliToolOpencode",
   pi = "SidekickCliToolPi",
-  qwen = "SidekickCliToolQwen",
 }
 
 ---@param name string

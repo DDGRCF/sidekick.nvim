@@ -90,7 +90,7 @@ describe("cli sessions", function()
   end)
 
   it("assigns exact provider conversation ids to managed CLIs", function()
-    for _, name in ipairs({ "copilot", "pi", "qwen" }) do
+    for _, name in ipairs({ "copilot", "pi" }) do
       local session = Session.new({ tool = name, backend = "terminal" })
       assert.are.equal(name, session.conversation.provider)
       assert.is_true(session.conversation.resumable)

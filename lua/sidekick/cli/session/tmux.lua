@@ -187,7 +187,7 @@ function M:send(text)
   end
 
   if self.tool.mux_focus then
-    -- Send focus-in event first (some TUI apps like qwen ignore input when unfocused)
+    -- Send focus-in first for TUI apps that ignore input while unfocused.
     Util.exec({ "tmux", "send-keys", "-t", self.tmux_pane_id, "Escape", "[", "I" })
     vim.defer_fn(send, 50) -- slight delay to ensure focus event is processed first
   else

@@ -1,5 +1,3 @@
-local Util = require("sidekick.util")
-
 local M = {}
 
 local providers = {
@@ -15,11 +13,10 @@ local providers = {
     selectors = { "--session-id", "--session" },
     blockers = { "--continue", "--resume", "-c", "-r" },
   },
-  qwen = {
-    new = { "--session-id" },
+  omp = {
     resume = { "--resume" },
-    selectors = { "--session-id", "--resume", "-r" },
-    blockers = { "--continue", "-c" },
+    selectors = { "--resume", "--session", "-r" },
+    blockers = { "--no-session" },
   },
 }
 
@@ -80,18 +77,6 @@ local function env_value(tool, name)
   return type(value) == "string" and value or vim.env[name]
 end
 
-local function system_env(tool)
-  local ret = {}
-  for key, value in
-    pairs(vim.tbl_extend("force", {}, tool and tool.config and tool.config.env or {}, tool and tool.env or {}))
-  do
-    if type(value) == "string" or type(value) == "number" then
-      ret[key] = tostring(value)
-    end
-  end
-  return ret
-end
-
 local function process_id(session, spec)
   local id = selected_id(session.tool.cmd, spec.selectors)
   if id or not session.pids then
@@ -126,64 +111,50 @@ local function resolve_path(path, cwd)
   return vim.fs.normalize(absolute and path or vim.fs.joinpath(cwd or vim.fn.getcwd(), path))
 end
 
-local function qwen_roots(tool, cwd)
-  local home = resolve_path(env_value(tool, "QWEN_HOME") or "~/.qwen", cwd)
-  local project = read_json(vim.fs.joinpath(cwd or vim.fn.getcwd(), ".qwen", "settings.json"))
-  local global = home and read_json(vim.fs.joinpath(home, "settings.json")) or nil
-  local configured = project and project.advanced and project.advanced.runtimeOutputDir
-    or global and global.advanced and global.advanced.runtimeOutputDir
-  local roots, seen = {}, {}
-  local function add(root)
-    if root and not seen[root] then
-      roots[#roots + 1] = root
-      seen[root] = true
-    end
-  end
-  add(resolve_path(env_value(tool, "QWEN_RUNTIME_DIR"), cwd))
-  add(resolve_path(configured, cwd))
-  add(home)
-  return roots
-end
-
-local function qwen_active_id(session, tool)
-  local pids = {}
-  for _, pid in ipairs(session.pids or {}) do
-    pids[pid] = true
-  end
-  if vim.tbl_isempty(pids) then
-    return
-  end
-  for _, root in ipairs(qwen_roots(tool, session.cwd)) do
-    local locks = vim.fs.joinpath(root, "tmp", "session-writer-locks")
-    for _, path in ipairs(vim.fn.globpath(locks, "*.lock", false, true)) do
-      local record = read_json(path)
-      if record and record.state == "active" and pids[tonumber(record.pid)] and M.valid_id(record.session_id) then
-        return record.session_id
-      end
-    end
-  end
-end
-
 local function pi_control_id(session)
   local control = session.conversation and session.conversation.data and session.conversation.data.control
   local record = type(control) == "string" and read_json(control) or nil
   return record and M.valid_id(record.id) and record.id or nil
 end
 
+local function valid_omp_id(id)
+  return type(id) == "string" and id ~= "" and #id <= 4096 and not id:find("[%c%s]")
+end
+
+local function omp_control_id(session, tool)
+  local control = session.conversation and session.conversation.data and session.conversation.data.control
+    or tool and arg_value(tool.cmd, "--sidekick-session-file")
+    or env_value(tool, "SIDEKICK_OMP_SESSION_FILE")
+  local record = type(control) == "string" and read_json(control) or nil
+  return record and valid_omp_id(record.id) and record.id or nil, record and record.file or nil, control
+end
+
+local function omp_control_path(key)
+  local control = vim.fs.joinpath(vim.fn.stdpath("state"), "sidekick", "omp", key .. ".json")
+  vim.fn.mkdir(vim.fs.dirname(control), "p")
+  return control
+end
+
+local function track_omp(cmd, extension, control)
+  if extension and control then
+    vim.list_extend(cmd, { "--extension", extension, "--sidekick-session-file", control })
+  end
+end
+
 local function current_id(provider, session, spec, tool)
-  if provider == "qwen" then
-    return qwen_active_id(session, tool) or process_id(session, spec)
-  elseif provider == "pi" then
+  if provider == "pi" then
     return pi_control_id(session) or process_id(session, spec)
+  elseif provider == "omp" then
+    return omp_control_id(session, tool)
   end
   return process_id(session, spec)
 end
 
 local function verified_id(provider, session, spec, tool, conversation)
-  if provider == "qwen" then
-    return qwen_active_id(session, tool)
-  elseif provider == "pi" and conversation.data and conversation.data.control then
+  if provider == "pi" and conversation.data and conversation.data.control then
     return pi_control_id(session)
+  elseif provider == "omp" then
+    return omp_control_id(session, tool)
   end
   return process_id(session, spec)
 end
@@ -243,18 +214,32 @@ local function pi_exists(id, cwd, tool)
   return #vim.fn.globpath(root, "**/*_" .. id .. ".jsonl", false, true) > 0
 end
 
-local function qwen_exists(id, cwd, tool)
-  local executable = tool and tool.cmd[1] or "qwen"
-  if vim.fn.executable(executable) ~= 1 then
+local function omp_file_id(path)
+  local file = io.open(path, "r")
+  local raw = file and file:read("*l") or nil
+  if file then
+    file:close()
+  end
+  local ok, record = pcall(vim.json.decode, raw or "")
+  return ok and type(record) == "table" and record.type == "session" and valid_omp_id(record.id) and record.id or nil
+end
+
+local function omp_exists(id, cwd, tool, conversation)
+  if not valid_omp_id(id) then
     return false
   end
-  local lines = Util.exec(
-    { executable, "sessions", "list", "--json", "--limit", "2147483647" },
-    { notify = false, cwd = cwd, env = system_env(tool) }
-  )
-  for _, line in ipairs(lines or {}) do
-    local ok, session = pcall(vim.json.decode, line)
-    if ok and type(session) == "table" and (session.sessionId == id or session.id == id) then
+  local path = conversation and conversation.data and conversation.data.path
+  if type(path) == "string" and omp_file_id(path) == id then
+    return true
+  end
+  local root = tool and arg_value(tool.cmd, "--session-dir") or env_value(tool, "PI_CODING_AGENT_SESSION_DIR")
+  if not root then
+    local agent = resolve_path(env_value(tool, "PI_CODING_AGENT_DIR") or "~/.omp/agent")
+    root = agent and vim.fs.joinpath(agent, "sessions")
+  end
+  root = resolve_path(root or "~/.omp/agent/sessions", cwd)
+  for _, candidate in ipairs(vim.fn.globpath(root, "**/*.jsonl", false, true)) do
+    if omp_file_id(candidate) == id then
       return true
     end
   end
@@ -263,20 +248,26 @@ end
 
 local exists = {
   copilot = copilot_exists,
+  omp = omp_exists,
   pi = pi_exists,
-  qwen = qwen_exists,
 }
 
----@param provider "copilot"|"pi"|"qwen"
+---@param provider "copilot"|"omp"|"pi"
 function M.adapter(provider)
   local spec = assert(providers[provider], "unknown managed CLI provider: " .. provider)
-  local extension = provider == "pi" and vim.api.nvim_get_runtime_file("sk/extensions/pi-sidekick.ts", false)[1] or nil
+  local extension_name = ({ omp = "omp-sidekick.ts", pi = "pi-sidekick.ts" })[provider]
+  local extension = extension_name and vim.api.nvim_get_runtime_file("sk/extensions/" .. extension_name, false)[1]
+    or nil
   return {
     args = spec.resume,
     prepare = function(tool, session)
       local cmd = vim.deepcopy(tool.cmd)
-      local id = selected_id(cmd, spec.selectors)
-      if not id then
+      local id = provider ~= "omp" and selected_id(cmd, spec.selectors) or nil
+      if provider == "omp" then
+        if has_arg(cmd, spec.blockers) then
+          return
+        end
+      elseif not id then
         if has_arg(cmd, vim.list_extend(vim.deepcopy(spec.selectors), spec.blockers)) then
           return
         end
@@ -286,22 +277,28 @@ function M.adapter(provider)
       end
       local data = { managed = true }
       local env
-      if provider == "pi" and extension then
-        local control = vim.fs.joinpath(vim.fn.stdpath("state"), "sidekick", "pi", id .. ".json")
+      if (provider == "pi" or provider == "omp") and extension then
+        local control_id = provider == "omp" and session.instance_id or id
+        local control = provider == "omp" and omp_control_path(control_id)
+          or vim.fs.joinpath(vim.fn.stdpath("state"), "sidekick", provider, control_id .. ".json")
         vim.fn.mkdir(vim.fs.dirname(control), "p")
-        vim.list_extend(cmd, { "--extension", extension })
+        if provider == "omp" then
+          track_omp(cmd, extension, control)
+        else
+          vim.list_extend(cmd, { "--extension", extension })
+        end
         data.control = control
-        env = { SIDEKICK_PI_SESSION_FILE = control }
+        env = { [provider == "omp" and "SIDEKICK_OMP_SESSION_FILE" or "SIDEKICK_PI_SESSION_FILE"] = control }
       end
       return {
         cmd = cmd,
         env = env,
-        conversation = {
+        conversation = provider ~= "omp" and {
           id = id,
           provider = provider,
           resumable = true,
           data = data,
-        },
+        } or nil,
       }
     end,
     capture = function(tool, session)
@@ -320,11 +317,13 @@ function M.adapter(provider)
           data = data,
         }
       end
-      local id = current_id(provider, session, spec, tool)
+      local id, path, control = current_id(provider, session, spec, tool)
       id = type(tui_id) == "string" and tui_id or id
       if id then
         local data = vim.deepcopy(session.conversation and session.conversation.data or {})
         data.managed = true
+        data.path = path or data.path
+        data.control = control or data.control
         return { id = id, provider = provider, resumable = true, data = data }
       end
       if session.conversation and session.conversation.provider == provider then
@@ -332,26 +331,31 @@ function M.adapter(provider)
       end
     end,
     preflight = function(tool, conversation, saved)
-      return M.valid_id(conversation.id) and exists[provider](conversation.id, saved and saved.cwd, tool)
+      local valid = provider == "omp" and valid_omp_id(conversation.id) or M.valid_id(conversation.id)
+      return valid and exists[provider](conversation.id, saved and saved.cwd, tool, conversation)
     end,
-    command = provider == "pi" and function(tool, conversation)
+    command = (provider == "pi" or provider == "omp") and function(tool, conversation)
       local cmd = vim.deepcopy(tool.cmd)
       if extension and conversation.data and conversation.data.control then
-        vim.list_extend(cmd, { "--extension", extension })
+        if provider == "omp" then
+          track_omp(cmd, extension, conversation.data.control)
+        else
+          vim.list_extend(cmd, { "--extension", extension })
+        end
       end
-      vim.list_extend(cmd, { "--session", conversation.id })
+      vim.list_extend(cmd, { provider == "omp" and "--resume" or "--session", conversation.id })
       return cmd
     end or nil,
-    env = provider == "pi" and function(_, conversation)
+    env = (provider == "pi" or provider == "omp") and function(_, conversation)
       local control = conversation.data and conversation.data.control
-      return type(control) == "string" and { SIDEKICK_PI_SESSION_FILE = control } or nil
+      local name = provider == "omp" and "SIDEKICK_OMP_SESSION_FILE" or "SIDEKICK_PI_SESSION_FILE"
+      return type(control) == "string" and { [name] = control } or nil
     end or nil,
     verify = function(tool, terminal, conversation)
       local logical = terminal.parent or terminal
-      if
-        not M.valid_id(conversation and conversation.id)
-        or not exists[provider](conversation.id, logical.cwd, tool)
-      then
+      local valid = provider == "omp" and valid_omp_id(conversation and conversation.id)
+        or M.valid_id(conversation and conversation.id)
+      if not valid or not exists[provider](conversation.id, logical.cwd, tool, conversation) then
         return false
       end
       local matched = false
@@ -366,6 +370,29 @@ function M.adapter(provider)
         return matched
       end, 50)
       return matched
+    end,
+  }
+end
+
+function M.fork(provider)
+  assert(provider == "omp", "unknown managed CLI fork provider: " .. provider)
+  local extension = vim.api.nvim_get_runtime_file("sk/extensions/omp-sidekick.ts", false)[1]
+  return {
+    available = function(tool)
+      if not extension then
+        return false, "the bundled Oh My Pi session extension is unavailable"
+      end
+      if has_arg(tool.cmd, providers.omp.blockers) then
+        return false, "Oh My Pi session persistence is disabled"
+      end
+      return true
+    end,
+    command = function(tool, conversation)
+      local cmd = vim.deepcopy(tool.cmd)
+      local control = omp_control_path(M.uuid())
+      track_omp(cmd, extension, control)
+      vim.list_extend(cmd, { "--fork", conversation.id })
+      return cmd
     end,
   }
 end
