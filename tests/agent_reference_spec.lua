@@ -182,6 +182,40 @@ describe("cli agent references", function()
 
     assert.are.same({ source }, selected_items)
     assert.are.equal("sidekick_agent_reference", select_opts.kind)
+    assert.is_string(select_opts.format_item(source))
+    assert.is_table(select_opts.format_item(source, true))
+    assert.is_table(select_opts.snacks.format(source))
     assert.are.same({ source, target }, sent)
+  end)
+
+  it("formats Codex references with icon, status, session, backend, and project", function()
+    local source = agent({
+      id = "terminal: codex",
+      instance_id = "codex123",
+      name = "codex",
+      conversation_id = "019fe6a3-e835-7772-8959-fd1213bf1392",
+      cwd = "/tmp/project",
+      title = "Implement references",
+    })
+    source.status = "working"
+    source.mux_backend = "tmux"
+    local icon = Config.cli.win.tabs.icons.codex
+
+    local native = AgentReference.format(source, false)
+    local chunks = AgentReference.format(source, true)
+    local rendered = table.concat(vim.tbl_map(function(chunk)
+      return chunk[1]
+    end, chunks))
+
+    assert.is_not_nil(native:find(vim.trim(icon), 1, true))
+    assert.is_not_nil(native:find("codex", 1, true))
+    assert.is_not_nil(native:find("Implement references", 1, true))
+    assert.is_not_nil(native:find("working", 1, true))
+    assert.is_not_nil(native:find("[tmux]", 1, true))
+    assert.is_not_nil(native:find("session 019fe6a3", 1, true))
+    assert.is_not_nil(native:find("/tmp/project", 1, true))
+    assert.are.equal(native, rendered)
+    assert.are.equal("SidekickCliToolCodex", chunks[1][2])
+    assert.are.equal("SidekickCliStatusWorking", chunks[4][2])
   end)
 end)

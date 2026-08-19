@@ -1,4 +1,5 @@
 local Config = require("sidekick.config")
+local Icons = require("sidekick.cli.icons")
 local Loc = require("sidekick.cli.context.location")
 local Session = require("sidekick.cli.session")
 local Terminal = require("sidekick.cli.terminal")
@@ -127,15 +128,52 @@ function M.sources(target)
 end
 
 ---@param session sidekick.cli.Session
+---@param supports_chunks? boolean
+---@return string|snacks.picker.Highlight[]
+function M.format(session, supports_chunks)
+  local root = logical(session)
+  local name = session.tool.name
+  local title = one_line(session.title or root.title)
+  local status = one_line(session.status or root.status or "idle")
+  local state = status:gsub("^%l", string.upper)
+  local status_hl = "SidekickCliStatus" .. state
+  local status_icon = Config.cli.win.tabs.status[status]
+  status_icon = type(status_icon) == "string" and vim.trim(status_icon) or ""
+  status_icon = status_icon ~= "" and status_icon or "•"
+  local icon = Icons.tool(name)
+  local icon_hl = icon and Icons.highlight(name) or "SidekickCliInstalled"
+  icon = icon or Config.ui.icons.installed
+  icon = type(icon) == "string" and vim.trim(icon) or ""
+  local backend = one_line(session.mux_backend or root.mux_backend or root.backend or session.backend or "terminal")
+  local cwd = vim.fn.fnamemodify(session.cwd or root.cwd or "", ":p:~")
+  cwd = cwd:gsub("/$", "")
+  local identity = one_line(session_id(session))
+  local ret = {} ---@type snacks.picker.Highlight[]
+  if icon ~= "" then
+    ret[#ret + 1] = { icon .. " ", icon_hl }
+  end
+  ret[#ret + 1] = { name, Icons.highlight(name) }
+  if title ~= "" then
+    ret[#ret + 1] = { " · " .. title, "Title" }
+  end
+  ret[#ret + 1] = { "  " .. status_icon .. " " .. status, status_hl }
+  ret[#ret + 1] = { "  [" .. backend .. "]", "Special" }
+  ret[#ret + 1] = { "  session " .. identity, "Comment" }
+  if cwd ~= "" then
+    ret[#ret + 1] = { "  " .. cwd, "Directory" }
+  end
+  if supports_chunks then
+    return ret
+  end
+  return table.concat(vim.tbl_map(function(chunk)
+    return chunk[1]
+  end, ret))
+end
+
+---@param session sidekick.cli.Session
 ---@return string
 function M.label(session)
-  local title = one_line(session.title or logical(session).title)
-  local ret = { session.tool.name }
-  if title ~= "" then
-    ret[#ret + 1] = title
-  end
-  ret[#ret + 1] = "session " .. one_line(session_id(session))
-  return table.concat(ret, " · ")
+  return M.format(session, false) --[[@as string]]
 end
 
 local function query_command(ref)
@@ -358,7 +396,9 @@ function M.select(opts)
     return not same(session, target)
   end, sessions)
   table.sort(sources, function(a, b)
-    return M.label(a) < M.label(b)
+    local a_name = table.concat({ a.tool.name, one_line(a.title), session_id(a) }, "\31")
+    local b_name = table.concat({ b.tool.name, one_line(b.title), session_id(b) }, "\31")
+    return a_name < b_name
   end)
   if #sources == 0 then
     return Util.warn("No other running agent is available to reference")
@@ -366,7 +406,12 @@ function M.select(opts)
   vim.ui.select(sources, {
     prompt = "Reference running agent:",
     kind = "sidekick_agent_reference",
-    format_item = M.label,
+    format_item = M.format,
+    snacks = {
+      format = function(session)
+        return M.format(session, true)
+      end,
+    },
   }, function(selected)
     if selected then
       M.send(selected, target, opts)
