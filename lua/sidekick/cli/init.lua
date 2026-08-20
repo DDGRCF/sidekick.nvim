@@ -116,7 +116,12 @@ function M.select(opts)
   opts.cb = opts.cb
     or function(state)
       if state then
-        State.attach(state, { show = true, focus = opts.focus, cwd = cwd })
+        -- UI select providers may finish restoring the previous window and
+        -- mode after invoking their callback. Defer focusing the terminal so
+        -- that cleanup cannot leave a selected conversation in normal mode.
+        vim.schedule(function()
+          State.attach(state, { show = true, focus = opts.focus, cwd = cwd })
+        end)
       end
     end
   require("sidekick.cli.ui.select").select(opts)

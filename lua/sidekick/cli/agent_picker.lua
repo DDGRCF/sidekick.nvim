@@ -905,6 +905,99 @@ function M.items(items, on_update)
   end, items)
 end
 
+---@class sidekick.cli.EmptyAction
+---@field icon string
+---@field label string
+---@field description string
+---@field hl string
+---@field run fun()
+
+---@param cwd string
+---@return sidekick.cli.EmptyAction[]
+local function empty_actions(cwd)
+  return {
+    {
+      icon = "󰐕",
+      label = "New",
+      description = "Start a new independent agent",
+      hl = "SidekickCliInstalled",
+      run = function()
+        require("sidekick.cli").new({ cwd = cwd })
+      end,
+    },
+    {
+      icon = "󰑓",
+      label = "Resume",
+      description = "Restore the saved agent workspace",
+      hl = "SidekickCliStarted",
+      run = function()
+        require("sidekick.cli").workspace("restore")
+      end,
+    },
+    {
+      icon = "󰋼",
+      label = "Health",
+      description = "Check Sidekick and its dependencies",
+      hl = "DiagnosticInfo",
+      run = function()
+        vim.api.nvim_cmd({ cmd = "checkhealth", args = { "sidekick" } }, {})
+      end,
+    },
+  }
+end
+
+---@param action? sidekick.cli.EmptyAction
+local function run_empty_action(action)
+  if action then
+    vim.schedule(action.run)
+  end
+end
+
+---@param actions sidekick.cli.EmptyAction[]
+local function empty_native(actions)
+  vim.ui.select(actions, {
+    prompt = "No Sidekick agents are running:",
+    kind = "sidekick_cli_empty",
+    ---@param action sidekick.cli.EmptyAction
+    format_item = function(action)
+      return ("%s  %s  ·  %s"):format(action.icon, action.label, action.description)
+    end,
+  }, run_empty_action)
+end
+
+---@param Snacks snacks
+---@param actions sidekick.cli.EmptyAction[]
+local function empty_snacks(Snacks, actions)
+  Snacks.picker.pick({
+    source = "sidekick_empty",
+    title = "Sidekick · No Agents",
+    finder = function()
+      return vim.tbl_map(function(action)
+        return {
+          text = action.label .. " " .. action.description,
+          action = action,
+        }
+      end, actions)
+    end,
+    format = function(item)
+      local action = item.action
+      return {
+        { action.icon .. "  ", action.hl },
+        { action.label, "Title" },
+        { "  " .. action.description, "Comment" },
+      }
+    end,
+    confirm = function(picker, item)
+      picker:close()
+      run_empty_action(item and item.action)
+    end,
+    layout = {
+      preset = "select",
+      layout = { max_width = 72 },
+    },
+  })
+end
+
 ---@param items? {id:string,label:string,key:string,terminal:sidekick.cli.Terminal}[]
 ---@param opts? {fork?:boolean}
 function M.open(items, opts)
@@ -914,9 +1007,13 @@ function M.open(items, opts)
       return Util.warn("No live agent is available to fork")
     end
     local cwd = require("sidekick.cli.session").cwd()
-    return vim.schedule(function()
-      require("sidekick.cli").new({ cwd = cwd })
-    end)
+    local actions = empty_actions(cwd)
+    local provider = Config.cli.agent_picker.provider
+    local ok, Snacks = pcall(require, "snacks")
+    if provider ~= "native" and ok and Snacks.picker and Snacks.picker.pick then
+      return empty_snacks(Snacks, actions)
+    end
+    return empty_native(actions)
   end
   local provider = Config.cli.agent_picker.provider
   local ok, Snacks = pcall(require, "snacks")

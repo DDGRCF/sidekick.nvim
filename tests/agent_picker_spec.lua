@@ -17,7 +17,12 @@ describe("cli agent picker", function()
   local old_schedule
   local old_icons
   local old_resume_capture
+  local old_cli_new
+  local old_cli_workspace
+  local old_nvim_cmd
+  local old_session_cwd
   local Terminal = require("sidekick.cli.terminal")
+  local Session = require("sidekick.cli.session")
   local registered = {}
 
   local function register(t)
@@ -37,6 +42,10 @@ describe("cli agent picker", function()
     old_schedule = vim.schedule
     old_icons = Config.cli.win.tabs.icons
     old_resume_capture = Resume.capture
+    old_cli_new = Cli.new
+    old_cli_workspace = Cli.workspace
+    old_nvim_cmd = vim.api.nvim_cmd
+    old_session_cwd = Session.cwd
   end)
 
   after_each(function()
@@ -49,6 +58,10 @@ describe("cli agent picker", function()
     vim.schedule = old_schedule
     Config.cli.win.tabs.icons = old_icons
     Resume.capture = old_resume_capture
+    Cli.new = old_cli_new
+    Cli.workspace = old_cli_workspace
+    vim.api.nvim_cmd = old_nvim_cmd
+    Session.cwd = old_session_cwd
     Usage.clear()
     for _, t in ipairs(registered) do
       Terminal.terminals[t.id] = nil
@@ -59,30 +72,73 @@ describe("cli agent picker", function()
     registered = {}
   end)
 
-  it("opens the new-agent picker when no agents are available", function()
-    local original_new = Cli.new
-    local original_schedule = vim.schedule
-    local original_cwd = require("sidekick.cli.session").cwd
+  it("shows New, Resume, and Health actions when no agents are available", function()
+    Config.cli.agent_picker.provider = "native"
+    local select
     local new_calls = 0
     local cwd
-    require("sidekick.cli.session").cwd = function()
+    local workspace_action
+    local health_cmd
+    Session.cwd = function()
       return "/tmp/sidekick-source"
     end
     Cli.new = function(opts)
       new_calls = new_calls + 1
       cwd = opts.cwd
     end
+    Cli.workspace = function(action)
+      workspace_action = action
+    end
+    vim.api.nvim_cmd = function(cmd)
+      health_cmd = cmd
+    end
     vim.schedule = function(cb)
       cb()
     end
+    vim.ui.select = function(items, opts, cb)
+      select = { items = items, opts = opts, cb = cb }
+    end
+
+    Picker.open({})
+    assert.matches("No Sidekick agents", select.opts.prompt)
+    assert.are.same(
+      { "New", "Resume", "Health" },
+      vim.tbl_map(function(action)
+        return action.label
+      end, select.items)
+    )
+
+    select.cb(select.items[1])
+    select.cb(select.items[2])
+    select.cb(select.items[3])
+
+    assert.are.equal(1, new_calls)
+    assert.are.equal("/tmp/sidekick-source", cwd)
+    assert.are.equal("restore", workspace_action)
+    assert.are.same({ cmd = "checkhealth", args = { "sidekick" } }, health_cmd)
+  end)
+
+  it("uses a compact Snacks layout for the empty state", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+        end,
+      },
+    }
 
     Picker.open({})
 
-    Cli.new = original_new
-    vim.schedule = original_schedule
-    require("sidekick.cli.session").cwd = original_cwd
-    assert.are.equal(1, new_calls)
-    assert.are.equal("/tmp/sidekick-source", cwd)
+    assert.are.equal("sidekick_empty", opts.source)
+    assert.are.equal("Sidekick · No Agents", opts.title)
+    assert.are.equal("select", opts.layout.preset)
+    local items = opts.finder()
+    assert.are.equal(3, #items)
+    local formatted = opts.format(items[1])
+    assert.are.equal("New", formatted[2][1])
+    assert.matches("independent agent", formatted[3][1])
   end)
 
   it("falls back to vim.ui.select and activates the chosen agent", function()

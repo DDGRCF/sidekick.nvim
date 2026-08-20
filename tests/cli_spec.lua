@@ -162,6 +162,55 @@ describe("cli routing", function()
     assert.are.equal(source_cwd, attached.cwd)
   end)
 
+  it("focuses a selected conversation after the picker callback returns", function()
+    local original_get = State.get
+    local original_attach = State.attach
+    local original_select = vim.ui.select
+    local original_schedule = vim.schedule
+    local original_after_restore = Workspace.after_restore
+    local scheduled
+    local selecting = false
+    local attached = false
+    local state = {
+      tool = { name = "codex" },
+      installed = true,
+      session = { id = "conversation-42" },
+    }
+
+    State.get = function()
+      return { state }
+    end
+    State.attach = function(selected, opts)
+      assert.is_false(selecting)
+      assert.are.equal(state, selected)
+      assert.is_true(opts.show)
+      attached = true
+    end
+    Workspace.after_restore = function()
+      return false
+    end
+    vim.schedule = function(cb)
+      scheduled = cb
+    end
+    vim.ui.select = function(items, _, cb)
+      selecting = true
+      cb(items[1])
+      assert.is_false(attached)
+      selecting = false
+    end
+
+    Cli.select()
+    assert.is_function(scheduled)
+    scheduled()
+
+    State.get = original_get
+    State.attach = original_attach
+    vim.ui.select = original_select
+    vim.schedule = original_schedule
+    Workspace.after_restore = original_after_restore
+    assert.is_true(attached)
+  end)
+
   it("does not auto-attach an agent from another cwd", function()
     local original_attached = Session.attached
     local original_active = require("sidekick.cli.panel").active
