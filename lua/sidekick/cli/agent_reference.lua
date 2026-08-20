@@ -84,6 +84,29 @@ local function live()
   return vim.tbl_filter(running, Session.sessions())
 end
 
+---@param session sidekick.cli.Session
+---@param value string
+local function matches(session, value)
+  local root = logical(session)
+  local current = conversation(session)
+  return session.id == value
+    or session.instance_id == value
+    or root.id == value
+    or root.instance_id == value
+    or (current and current.id == value)
+end
+
+---@param sessions sidekick.cli.Session[]
+---@param value string
+---@return sidekick.cli.Session?
+local function find(sessions, value)
+  for _, session in pairs(sessions) do
+    if matches(session, value) then
+      return session
+    end
+  end
+end
+
 ---@param value? sidekick.cli.Session|string
 ---@param sessions? sidekick.cli.Session[]
 ---@return sidekick.cli.Session?
@@ -99,18 +122,13 @@ function M.resolve(value, sessions)
   if terminal then
     return terminal
   end
-  for _, session in ipairs(sessions or live()) do
-    local current = conversation(session)
-    if
-      session.id == value
-      or session.instance_id == value
-      or logical(session).id == value
-      or logical(session).instance_id == value
-      or (current and current.id == value)
-    then
-      return session
-    end
+  if sessions then
+    return find(sessions, value)
   end
+  -- References use an instance id, while Terminal.get() is keyed by the
+  -- Sidekick session id. Check the in-memory terminals before running the
+  -- comparatively expensive external backend discovery.
+  return find(Terminal.sessions(), value) or find(live(), value)
 end
 
 ---@param target sidekick.cli.Session
@@ -265,11 +283,21 @@ local function strip_terminal_sequences(text)
     :gsub("[%z\1-\8\11\12\14-\31\127]", "")
 end
 
+---@return integer max_lines
+---@return integer max_bytes
+local function output_limits()
+  local opts = Config.cli.agent_reference or {}
+  return math.max(1, tonumber(opts.max_lines) or 2000), math.max(1024, tonumber(opts.max_bytes) or 256 * 1024)
+end
+
 ---@param source sidekick.cli.Session
+---@param max_lines integer
 ---@return string?
-local function output(source)
+local function output(source, max_lines)
   if source.buf and vim.api.nvim_buf_is_valid(source.buf) then
-    return table.concat(vim.api.nvim_buf_get_lines(source.buf, 0, -1, false), "\n")
+    local line_count = vim.api.nvim_buf_line_count(source.buf)
+    local first = math.max(0, line_count - max_lines)
+    return table.concat(vim.api.nvim_buf_get_lines(source.buf, first, line_count, false), "\n")
   end
   local root = logical(source)
   local owner = type(source.dump) == "function" and source or type(root.dump) == "function" and root or nil
@@ -279,10 +307,7 @@ local function output(source)
   end
 end
 
-local function trim_output(text)
-  local opts = Config.cli.agent_reference or {}
-  local max_lines = math.max(1, tonumber(opts.max_lines) or 2000)
-  local max_bytes = math.max(1024, tonumber(opts.max_bytes) or 256 * 1024)
+local function trim_output(text, max_lines, max_bytes)
   local lines = vim.split(strip_terminal_sequences(text), "\n", { plain = true })
   lines = vim.list_slice(lines, math.max(1, #lines - max_lines + 1))
   local ret, bytes = {}, 0
@@ -303,8 +328,12 @@ local function trim_output(text)
       end
       line = line:sub(start)
     end
-    table.insert(ret, 1, line)
+    ret[#ret + 1] = line
     bytes = bytes + #line + 1
+  end
+  for i = 1, math.floor(#ret / 2) do
+    local other = #ret - i + 1
+    ret[i], ret[other] = ret[other], ret[i]
   end
   return vim.trim(table.concat(ret, "\n"))
 end
@@ -320,8 +349,9 @@ function M.query(ref)
   local current = ensure_conversation(source)
   local identity = current and current.id or session_id(source)
   local header = ("Agent: %s\nSession: %s\nWorking directory: %s"):format(source.tool.name, identity, source.cwd or "")
-  local text = output(source)
-  text = text and trim_output(text) or ""
+  local max_lines, max_bytes = output_limits()
+  local text = output(source, max_lines)
+  text = text and trim_output(text, max_lines, max_bytes) or ""
   if text == "" then
     return header .. "\n\nLive terminal output is unavailable for this session backend."
   end

@@ -194,6 +194,7 @@ end
 ---@field method? "GET"|"POST"|"PUT"|"DELETE" HTTP method
 ---@field headers? table<string, string> HTTP headers
 ---@field data? any Request body
+---@field timeout_ms? integer Maximum request time in milliseconds
 
 ---@param url string
 ---@param opts? sidekick.util.Curl
@@ -205,6 +206,11 @@ function M.curl(url, opts)
 
   if opts.method then
     vim.list_extend(cmd, { "-X", opts.method })
+  end
+
+  if opts.timeout_ms then
+    local seconds = math.max(1, opts.timeout_ms) / 1000
+    vim.list_extend(cmd, { "--max-time", ("%.3f"):format(seconds) })
   end
 
   for key, value in pairs(opts.headers or {}) do

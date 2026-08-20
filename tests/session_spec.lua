@@ -193,8 +193,10 @@ describe("cli sessions", function()
     local Util = require("sidekick.util")
     local old_curl = Util.curl
     local requested
-    Util.curl = function(url)
+    local requested_opts
+    Util.curl = function(url, opts)
       requested = url
+      requested_opts = opts
       return vim.json.encode({
         { info = { role = "user" }, parts = { { type = "text", text = "Find the bug" } } },
         {
@@ -216,8 +218,45 @@ describe("cli sessions", function()
 
     Util.curl = old_curl
     assert.is_true(ok)
-    assert.are.equal("http://127.0.0.1:12345/session/ses_abcdef1234567890/message", requested)
+    assert.are.equal("http://127.0.0.1:12345/session/ses_abcdef1234567890/message?limit=100", requested)
+    assert.are.same({ timeout_ms = 2000 }, requested_opts)
     assert.are.equal("[user]\nFind the bug\n\n[assistant]\nThe parser is fixed", output)
+  end)
+
+  it("discovers OpenCode ports without querying every listening process", function()
+    local Procs = require("sidekick.cli.procs")
+    local Util = require("sidekick.util")
+    local old_exec, old_cwd, old_pids, old_get_proc = Util.exec, Procs.cwd, Procs.pids, vim.api.nvim_get_proc
+    local command
+    Util.exec = function(cmd)
+      command = cmd
+      return {
+        "p123",
+        "copencode",
+        "n127.0.0.1:4321",
+        "p456",
+        "cnode",
+        "n127.0.0.1:5678",
+      }
+    end
+    Procs.cwd = function(pid)
+      return "/tmp/opencode-" .. pid
+    end
+    Procs.pids = function(pid)
+      return { pid }
+    end
+    vim.api.nvim_get_proc = function()
+      error("nvim_get_proc should not be called")
+    end
+
+    local ok, sessions = pcall(Session.backends.opencode.sessions)
+
+    Util.exec, Procs.cwd, Procs.pids, vim.api.nvim_get_proc = old_exec, old_cwd, old_pids, old_get_proc
+    assert.is_true(ok)
+    assert.is_true(vim.tbl_contains(command, "-Fc"))
+    assert.are.equal(1, #sessions)
+    assert.are.equal(123, sessions[1].pid)
+    assert.are.equal(4321, sessions[1].port)
   end)
 
   it("skips managed session preparation for provider-native forks", function()

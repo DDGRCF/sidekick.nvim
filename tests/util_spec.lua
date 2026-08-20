@@ -93,3 +93,27 @@ describe("split_graphemes", function()
     )
   end)
 end)
+
+describe("curl", function()
+  it("passes millisecond timeouts to curl", function()
+    local old_exec = Util.exec
+    local command
+    Util.exec = function(cmd)
+      command = cmd
+      return { "response" }
+    end
+
+    local response = Util.curl("http://127.0.0.1/test", { timeout_ms = 1500 })
+
+    Util.exec = old_exec
+    assert.are.equal("response", response)
+    assert.are.same({
+      "curl",
+      "-s",
+      "-S",
+      "--max-time",
+      "1.500",
+      "http://127.0.0.1/test",
+    }, command)
+  end)
+end)

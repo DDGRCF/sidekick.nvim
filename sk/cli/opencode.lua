@@ -13,19 +13,28 @@ function M.sessions()
 
   -- Get listening port for this PID
   -- Get all listening ports with PIDs in one call
-  local lines = Util.exec({ "lsof", "-w", "-iTCP", "-sTCP:LISTEN", "-P", "-n", "-Fn", "-Fp" }, { notify = false }) or {}
+  local lines = Util.exec(
+    { "lsof", "-w", "-iTCP", "-sTCP:LISTEN", "-P", "-n", "-Fc", "-Fn", "-Fp" },
+    { notify = false }
+  ) or {}
 
-  -- Parse lsof output to build pid -> port mapping
+  -- Parse command and port from the same lsof call. Calling nvim_get_proc for
+  -- every listening process is considerably slower on some platforms.
   local ports = {} ---@type table<number, number>
+  local commands = {} ---@type table<number, string>
   local current_pid ---@type number?
 
   for _, line in ipairs(lines) do
     local pid = line:match("^p(%d+)$")
     if pid then
       current_pid = tonumber(pid)
-    else
+    elseif current_pid then
+      local command = line:match("^c(.+)$")
+      if command then
+        commands[current_pid] = command
+      end
       local port = line:match("^n.*:(%d+)$")
-      if port and current_pid then
+      if port then
         ports[current_pid] = tonumber(port)
       end
     end
@@ -35,8 +44,7 @@ function M.sessions()
   local ret = {} ---@type sidekick.cli.session.State[]
 
   for pid, port in pairs(ports) do
-    local proc = vim.api.nvim_get_proc(pid)
-    if proc and proc.name == "opencode" then
+    if commands[pid] == "opencode" then
       ret[#ret + 1] = {
         id = "opencode-" .. pid,
         pid = pid,
@@ -80,7 +88,12 @@ function M:dump()
     return
   end
   local Util = require("sidekick.util")
-  local response = Util.curl(self.base_url .. "/session/" .. id .. "/message")
+  local opts = require("sidekick.config").cli.agent_reference or {}
+  local limit = math.max(1, tonumber(opts.max_messages) or 100)
+  local timeout_ms = math.max(1, tonumber(opts.timeout_ms) or 2000)
+  local response = Util.curl(self.base_url .. "/session/" .. id .. "/message?limit=" .. limit, {
+    timeout_ms = timeout_ms,
+  })
   local ok, messages = pcall(vim.json.decode, response or "")
   if not ok or type(messages) ~= "table" or not vim.islist(messages) then
     return

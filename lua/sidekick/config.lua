@@ -195,9 +195,13 @@ local defaults = {
     ---@class sidekick.cli.AgentReference
     ---@field max_lines integer Maximum terminal lines returned by an on-demand query
     ---@field max_bytes integer Maximum terminal bytes returned by an on-demand query
+    ---@field max_messages integer Maximum recent provider messages requested by an on-demand query
+    ---@field timeout_ms integer Maximum time spent querying a provider
     agent_reference = {
       max_lines = 2000,
       max_bytes = 256 * 1024,
+      max_messages = 100,
+      timeout_ms = 2000,
     },
     --- Actual cli tool config is loaded from the runtime path `sk/cli/{tool}.lua` and merged with the config below.
     --- For default configs, see https://github.com/folke/sidekick.nvim/tree/main/sk/cli

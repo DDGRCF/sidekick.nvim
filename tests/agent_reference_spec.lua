@@ -5,6 +5,7 @@ local Config = require("sidekick.config")
 local Panel = require("sidekick.cli.panel")
 local Resume = require("sidekick.cli.resume")
 local Session = require("sidekick.cli.session")
+local Terminal = require("sidekick.cli.terminal")
 local Text = require("sidekick.text")
 local Util = require("sidekick.util")
 
@@ -46,6 +47,7 @@ describe("cli agent references", function()
     old.send = AgentReference.send
     old.reference = Config.cli.agent_reference
     old.capture = Resume.capture
+    old.get_lines = vim.api.nvim_buf_get_lines
     AgentReference.root = root
   end)
 
@@ -58,6 +60,7 @@ describe("cli agent references", function()
     AgentReference.send = old.send
     Config.cli.agent_reference = old.reference
     Resume.capture = old.capture
+    vim.api.nvim_buf_get_lines = old.get_lines
     vim.fn.delete(root, "rf")
   end)
 
@@ -104,6 +107,13 @@ describe("cli agent references", function()
       return { source }
     end
     Config.cli.agent_reference = { max_lines = 1, max_bytes = 4096 }
+    local requested
+    vim.api.nvim_buf_get_lines = function(buf, first, last, strict)
+      if buf == source.buf then
+        requested = { first, last }
+      end
+      return old.get_lines(buf, first, last, strict)
+    end
 
     local result = AgentReference.query("source123")
 
@@ -112,6 +122,53 @@ describe("cli agent references", function()
     assert.is_not_nil(result:find("current result", 1, true))
     assert.is_nil(result:find("old line", 1, true))
     assert.is_nil(result:find("\27", 1, true))
+    assert.are.same({ 1, 2 }, requested)
+    vim.api.nvim_buf_delete(source.buf, { force = true })
+  end)
+
+  it("resolves terminal instance ids without discovering external sessions", function()
+    local source = agent({ id = "terminal: fast-reference", instance_id = "fast-reference" })
+    Terminal.terminals[source.id] = source
+    Session.sessions = function()
+      error("external sessions should not be discovered")
+    end
+
+    local resolved = AgentReference.resolve(source.instance_id)
+
+    Terminal.terminals[source.id] = nil
+    assert.are.equal(source, resolved)
+  end)
+
+  it("preserves the order of the configured output tail", function()
+    local source = agent()
+    source.buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(source.buf, 0, -1, false, { "discarded", "line one", "line two", "line three" })
+    Session.sessions = function()
+      return { source }
+    end
+    Config.cli.agent_reference = { max_lines = 3, max_bytes = 4096 }
+
+    local result = AgentReference.query(source.instance_id)
+
+    assert.is_nil(result:find("discarded", 1, true))
+    assert.is_not_nil(result:find("line one\nline two\nline three", 1, true))
+    vim.api.nvim_buf_delete(source.buf, { force = true })
+  end)
+
+  it("does not split UTF-8 characters at the byte limit", function()
+    local source = agent()
+    source.buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(source.buf, 0, -1, false, { string.rep("é", 600) })
+    Session.sessions = function()
+      return { source }
+    end
+    Config.cli.agent_reference = { max_lines = 1, max_bytes = 1024 }
+
+    local result = AgentReference.query(source.instance_id)
+    local body = assert(result:match("\n\n(.+)$"))
+
+    assert.is_true(#body <= 1024)
+    assert.is_true(pcall(vim.str_utfindex, body))
     vim.api.nvim_buf_delete(source.buf, { force = true })
   end)
 
