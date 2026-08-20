@@ -226,7 +226,10 @@ describe("cli sessions", function()
   it("discovers OpenCode ports without querying every listening process", function()
     local Procs = require("sidekick.cli.procs")
     local Util = require("sidekick.util")
-    local old_exec, old_cwd, old_pids, old_get_proc = Util.exec, Procs.cwd, Procs.pids, vim.api.nvim_get_proc
+    local old_exec, old_cwd, old_pids, old_named = Util.exec, Procs.cwd, Procs.pids, Procs.named
+    Procs.named = function()
+      return { 123 }
+    end
     local command
     Util.exec = function(cmd)
       command = cmd
@@ -245,18 +248,119 @@ describe("cli sessions", function()
     Procs.pids = function(pid)
       return { pid }
     end
-    vim.api.nvim_get_proc = function()
-      error("nvim_get_proc should not be called")
-    end
-
     local ok, sessions = pcall(Session.backends.opencode.sessions)
 
-    Util.exec, Procs.cwd, Procs.pids, vim.api.nvim_get_proc = old_exec, old_cwd, old_pids, old_get_proc
+    Util.exec, Procs.cwd, Procs.pids, Procs.named = old_exec, old_cwd, old_pids, old_named
     assert.is_true(ok)
     assert.is_true(vim.tbl_contains(command, "-Fc"))
     assert.are.equal(1, #sessions)
     assert.are.equal(123, sessions[1].pid)
     assert.are.equal(4321, sessions[1].port)
+  end)
+
+  it("skips OpenCode port discovery when no OpenCode process is running", function()
+    local Procs = require("sidekick.cli.procs")
+    local Util = require("sidekick.util")
+    local old_exec = Util.exec
+    local old_named = Procs.named
+    Procs.named = function()
+      return {}
+    end
+    local executed = false
+    Util.exec = function()
+      executed = true
+      return {}
+    end
+
+    local sessions = Session.backends.opencode.sessions()
+
+    Procs.named = old_named
+    Util.exec = old_exec
+    assert.are.same({}, sessions)
+    assert.is_false(executed)
+  end)
+
+  it("falls back to OpenCode port discovery without a proc filesystem", function()
+    local Procs = require("sidekick.cli.procs")
+    local Util = require("sidekick.util")
+    local old_exec, old_named = Util.exec, Procs.named
+    Procs.named = function()
+      return nil
+    end
+    local executed = false
+    Util.exec = function()
+      executed = true
+      return {}
+    end
+
+    local sessions = Session.backends.opencode.sessions()
+
+    Procs.named = old_named
+    Util.exec = old_exec
+    assert.are.same({}, sessions)
+    assert.is_true(executed)
+  end)
+
+  it("finds the current process by its native command name", function()
+    local Procs = require("sidekick.cli.procs")
+    local process = vim.api.nvim_get_proc(vim.fn.getpid())
+    local pids = process and Procs.named(process.name)
+
+    if pids then
+      assert.is_true(vim.tbl_contains(pids, vim.fn.getpid()))
+    end
+  end)
+
+  it("checks whether OpenCode sessions are running without process inspection", function()
+    local backend = assert(Session.backends.opencode)
+    local opencode = setmetatable({ pid = vim.fn.getpid() }, backend)
+
+    assert.is_true(opencode:is_running())
+    opencode.pid = 2147483647
+    assert.is_false(opencode:is_running())
+  end)
+
+  it("skips process discovery when tmux has no panes", function()
+    local Procs = require("sidekick.cli.procs")
+    local Tmux = require("sidekick.cli.session.tmux")
+    local old_panes, old_clients, old_new = Tmux.panes, Tmux.clients, Procs.new
+    Tmux.panes = function()
+      return {}
+    end
+    Tmux.clients = function()
+      error("clients should not be queried without panes")
+    end
+    Procs.new = function()
+      error("processes should not be queried without panes")
+    end
+
+    local ok, sessions = pcall(Tmux.sessions)
+
+    Tmux.panes, Tmux.clients, Procs.new = old_panes, old_clients, old_new
+    assert.is_true(ok)
+    assert.are.same({}, sessions)
+  end)
+
+  it("skips process discovery when Zellij has no managed sessions", function()
+    local Procs = require("sidekick.cli.procs")
+    local Util = require("sidekick.util")
+    local Zellij = require("sidekick.cli.session.zellij")
+    local old_exec, old_get_state, old_new = Util.exec, Util.get_state, Procs.new
+    Util.exec = function()
+      return { "unmanaged-session" }
+    end
+    Util.get_state = function()
+      return nil
+    end
+    Procs.new = function()
+      error("processes should not be queried without managed sessions")
+    end
+
+    local ok, sessions = pcall(Zellij.sessions)
+
+    Util.exec, Util.get_state, Procs.new = old_exec, old_get_state, old_new
+    assert.is_true(ok)
+    assert.are.same({}, sessions)
   end)
 
   it("skips managed session preparation for provider-native forks", function()

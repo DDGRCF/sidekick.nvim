@@ -9,6 +9,10 @@ M.external = true
 
 function M.sessions()
   local Procs = require("sidekick.cli.procs")
+  local pids = Procs.named("opencode")
+  if pids and #pids == 0 then
+    return {}
+  end
   local Util = require("sidekick.util")
 
   -- Get listening port for this PID
@@ -63,7 +67,7 @@ end
 function M:attach() end
 
 function M:is_running()
-  return self.pid and vim.api.nvim_get_proc(self.pid) ~= nil
+  return self.pid ~= nil and vim.uv.kill(self.pid, 0) == 0
 end
 
 function M:send(text)

@@ -92,8 +92,13 @@ function M.sessions()
   local sessions = Util.exec({ "zellij", "list-sessions", "-ns" }, { notify = false }) or {}
   local ret = {} ---@type sidekick.cli.session.State[]
   local Procs = require("sidekick.cli.procs")
-  local procs = Procs.new()
+  local procs ---@type sidekick.cli.Procs?
   local pid_cache = {}
+
+  local function processes()
+    procs = procs or Procs.new()
+    return procs
+  end
 
   local function find_pids(state, session_name)
     local cwd = require("sidekick.cli.session").cwd({ cwd = state.cwd })
@@ -102,7 +107,7 @@ function M.sessions()
       local tool = Config.tools()[state.tool]
       pid_cache[key] = {}
       if tool then
-        for _, proc in ipairs(procs:list()) do
+        for _, proc in ipairs(processes():list()) do
           local env = proc.env or {}
           if
             tool:is_proc(proc)

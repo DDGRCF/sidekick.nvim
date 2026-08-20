@@ -139,6 +139,22 @@ describe("cli agent references", function()
     assert.are.equal(source, resolved)
   end)
 
+  it("resolves attached external instance ids without rediscovering sessions", function()
+    local source = agent({ id = "opencode: fast-reference", instance_id = "external-fast-reference" })
+    source.backend = "opencode"
+    source.external = true
+    Session._attached[source.id] = source
+    Session.sessions = function()
+      error("external sessions should not be rediscovered")
+    end
+
+    local ok, resolved = pcall(AgentReference.resolve, source.instance_id)
+
+    Session._attached[source.id] = nil
+    assert.is_true(ok)
+    assert.are.equal(source, resolved)
+  end)
+
   it("preserves the order of the configured output tail", function()
     local source = agent()
     source.buf = vim.api.nvim_create_buf(false, true)

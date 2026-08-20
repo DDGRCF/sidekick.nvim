@@ -100,6 +100,45 @@ end
 
 local proc_fields = { env = M.env, cwd = M.cwd }
 
+--- Find processes by their exact native command name without spawning `ps`.
+--- Returns nil when the platform does not expose a readable proc filesystem.
+---@param name string
+---@return integer[]?
+function M.named(name)
+  if not have_proc then
+    return
+  end
+  local scan = vim.uv.fs_scandir("/proc")
+  if not scan then
+    return
+  end
+  local ret = {} ---@type integer[]
+  local complete = true
+  while true do
+    local entry = vim.uv.fs_scandir_next(scan)
+    if not entry then
+      break
+    end
+    local pid = tonumber(entry)
+    if pid then
+      local fd, _, code = vim.uv.fs_open("/proc/" .. entry .. "/comm", "r", 438)
+      if fd then
+        local command = vim.uv.fs_read(fd, 256, 0)
+        vim.uv.fs_close(fd)
+        if command and vim.trim(command) == name then
+          ret[#ret + 1] = pid
+        end
+        complete = complete and command ~= nil
+      elseif code ~= "ENOENT" then
+        -- Permission-restricted proc mounts may hide the process we need.
+        -- Let callers fall back to their complete platform-specific scan.
+        complete = false
+      end
+    end
+  end
+  return complete and ret or nil
+end
+
 ---@class sidekick.cli.Proc
 ---@field pid number
 ---@field ppid number

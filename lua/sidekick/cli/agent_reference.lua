@@ -125,10 +125,10 @@ function M.resolve(value, sessions)
   if sessions then
     return find(sessions, value)
   end
-  -- References use an instance id, while Terminal.get() is keyed by the
-  -- Sidekick session id. Check the in-memory terminals before running the
-  -- comparatively expensive external backend discovery.
-  return find(Terminal.sessions(), value) or find(live(), value)
+  -- References use an instance id, while Terminal.get() and Session.get()
+  -- are keyed by Sidekick session ids. Check in-memory sessions before
+  -- running the comparatively expensive external backend discovery.
+  return find(Terminal.sessions(), value) or find(Session._attached, value) or find(live(), value)
 end
 
 ---@param target sidekick.cli.Session

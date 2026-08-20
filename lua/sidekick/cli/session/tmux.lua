@@ -129,6 +129,9 @@ end
 
 function M.sessions()
   local panes = M.panes()
+  if #panes == 0 then
+    return {}
+  end
   local ret = {} ---@type sidekick.cli.session.State[]
   local tools = Config.tools()
 
