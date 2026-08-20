@@ -67,7 +67,13 @@ end
 function M:attach() end
 
 function M:is_running()
-  return self.pid ~= nil and vim.uv.kill(self.pid, 0) == 0
+  if self.pid == nil then
+    return false
+  end
+  local result, _, code = vim.uv.kill(self.pid, 0)
+  -- Signal 0 checks for existence without sending a signal. EPERM still
+  -- means the process exists; the caller simply cannot signal its owner.
+  return result == 0 or code == "EPERM"
 end
 
 function M:send(text)

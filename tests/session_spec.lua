@@ -313,11 +313,34 @@ describe("cli sessions", function()
 
   it("checks whether OpenCode sessions are running without process inspection", function()
     local backend = assert(Session.backends.opencode)
-    local opencode = setmetatable({ pid = vim.fn.getpid() }, backend)
+    local opencode = setmetatable({ pid = 42 }, backend)
+    local old_kill = vim.uv.kill
+    local ok, err = pcall(function()
+      vim.uv.kill = function(pid, signal)
+        assert.are.equal(42, pid)
+        assert.are.equal(0, signal)
+        return 0
+      end
+      assert.is_true(opencode:is_running())
 
-    assert.is_true(opencode:is_running())
-    opencode.pid = 2147483647
-    assert.is_false(opencode:is_running())
+      vim.uv.kill = function()
+        return nil, "EPERM: operation not permitted", "EPERM"
+      end
+      assert.is_true(opencode:is_running())
+
+      vim.uv.kill = function()
+        return nil, "ESRCH: no such process", "ESRCH"
+      end
+      assert.is_false(opencode:is_running())
+
+      opencode.pid = nil
+      vim.uv.kill = function()
+        error("kill should not be called without a pid")
+      end
+      assert.is_false(opencode:is_running())
+    end)
+    vim.uv.kill = old_kill
+    assert.is_true(ok, err)
   end)
 
   it("skips process discovery when tmux has no panes", function()
