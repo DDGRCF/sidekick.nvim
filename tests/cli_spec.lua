@@ -11,6 +11,10 @@ local State = require("sidekick.cli.state")
 local Workspace = require("sidekick.cli.workspace")
 
 describe("cli routing", function()
+  it("includes the Git diff in the review changes prompt", function()
+    assert.is_not_nil(Config.cli.prompts.review_changes:find("{git_diff}", 1, true))
+  end)
+
   it("waits for asynchronous context before sending", function()
     local original_context_get = Context.get
     local original_cwd = Session.cwd
@@ -152,7 +156,7 @@ describe("cli routing", function()
       cb(items[1])
     end
 
-    Cli.new()
+    Cli.new({ proposal = false })
 
     Config.tools = original_tools
     State.attach = original_attach
@@ -549,7 +553,7 @@ describe("cli routing", function()
       attached = state
     end
 
-    Cli.new({ name = name })
+    Cli.new({ name = name, proposal = false })
 
     Config.tools = original_tools
     State.attach = original_attach

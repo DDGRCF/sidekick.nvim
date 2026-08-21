@@ -57,6 +57,10 @@ local defaults = {
       restore_tabpages = true,
       resume_timeout_ms = 15000,
     },
+    proposal = {
+      --- Start new Git-backed agents in an isolated worktree so their changes can be reviewed.
+      enabled = true,
+    },
     agent_picker = {
       provider = "auto", ---@type "auto"|"snacks"|"native"
       preview_lines = 80,
@@ -225,7 +229,7 @@ local defaults = {
     -- stylua: ignore
     ---@type table<string, sidekick.Prompt|string|fun(ctx:sidekick.context.ctx):(string?)>
     prompts = {
-      changes         = "Can you review my changes?",
+      review_changes  = "Review the following Git changes for correctness, regressions, and missing tests.\n\n{git_diff}",
       diagnostics     = "Can you help me fix the diagnostics in {file}?\n{diagnostics}",
       diagnostics_all = "Can you help me fix these diagnostics?\n{diagnostics_all}",
       document        = "Add documentation to {function|line}",
