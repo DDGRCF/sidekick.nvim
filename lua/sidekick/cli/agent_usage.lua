@@ -1,8 +1,29 @@
+local Util = require("sidekick.util")
+
 local M = {}
 
 local CACHE_MS = 1500
 local CACHE_MAX = 64
+local FILE_READ_MAX = 512 * 1024
+local FILE_CACHE_MAX = 64
 local cache = {} ---@type table<string,{at:number,pending?:boolean,ready?:boolean,value?:sidekick.cli.ContextUsage}>
+local file_cache = {} ---@type table<string,{at:number,size:integer,stamp:string,dev?:integer,ino?:integer,partial?:string,value?:sidekick.cli.ContextUsage}>
+
+---@param keep? string
+local function prune_file_cache(keep)
+  while vim.tbl_count(file_cache) > FILE_CACHE_MAX do
+    local oldest_key, oldest_at
+    for key, entry in pairs(file_cache) do
+      if key ~= keep and (not oldest_at or entry.at < oldest_at) then
+        oldest_key, oldest_at = key, entry.at
+      end
+    end
+    if not oldest_key then
+      break
+    end
+    file_cache[oldest_key] = nil
+  end
+end
 
 ---@class sidekick.cli.ContextUsage
 ---@field used number
@@ -170,22 +191,69 @@ end
 ---@param path string
 ---@param parser fun(output?:string):sidekick.cli.ContextUsage?
 ---@param cb fun(value?:sidekick.cli.ContextUsage)
-local function read_tail(path, parser, cb)
-  vim.uv.fs_open(path, "r", 438, function(open_err, fd)
-    if open_err or not fd then
+local function read_incremental(path, parser, cb)
+  local key = path .. "\31" .. tostring(parser)
+  vim.uv.fs_stat(path, function(stat_err, stat)
+    if stat_err or not stat then
+      file_cache[key] = nil
       cb()
       return
     end
-    vim.uv.fs_fstat(fd, function(stat_err, stat)
-      if stat_err or not stat then
-        vim.uv.fs_close(fd)
-        cb()
+
+    local mtime = stat.mtime or {}
+    local stamp = table.concat({ stat.dev or "", stat.ino or "", mtime.sec or "", mtime.nsec or "" }, ":")
+    local previous = file_cache[key]
+    local same_file = previous and previous.dev == stat.dev and previous.ino == stat.ino
+    if previous and same_file and previous.size == stat.size and previous.stamp == stamp then
+      previous.at = vim.uv.now()
+      cb(previous.value)
+      return
+    end
+
+    local incremental = same_file and previous.size < stat.size and stat.size - previous.size <= FILE_READ_MAX
+    local offset = incremental and previous.size or math.max(0, stat.size - FILE_READ_MAX)
+    local size = stat.size - offset
+    if size == 0 then
+      file_cache[key] = { at = vim.uv.now(), size = stat.size, stamp = stamp, dev = stat.dev, ino = stat.ino }
+      prune_file_cache(key)
+      cb()
+      return
+    end
+
+    vim.uv.fs_open(path, "r", 438, function(open_err, fd)
+      if open_err or not fd then
+        cb(previous and previous.value or nil)
         return
       end
-      local size = math.min(stat.size, 512 * 1024)
-      vim.uv.fs_read(fd, size, stat.size - size, function(read_err, data)
+      vim.uv.fs_read(fd, size, offset, function(read_err, data)
         vim.uv.fs_close(fd)
-        cb(read_err and nil or parser(data))
+        if read_err or not data then
+          cb(previous and previous.value or nil)
+          return
+        end
+
+        -- A capped initial read may begin in the middle of a JSONL record.
+        if not incremental and offset > 0 then
+          local newline = data:find("\n", 1, true)
+          data = newline and data:sub(newline + 1) or ""
+        end
+        if incremental and previous and previous.partial and previous.partial ~= "" then
+          data = previous.partial .. data
+        end
+
+        local value = parser(data)
+        local partial = data:match("([^\n]*)$")
+        file_cache[key] = {
+          at = vim.uv.now(),
+          size = stat.size,
+          stamp = stamp,
+          dev = stat.dev,
+          ino = stat.ino,
+          partial = partial and partial:sub(-64 * 1024) or nil,
+          value = value or (incremental and previous and previous.value or nil),
+        }
+        prune_file_cache(key)
+        cb(file_cache[key].value)
       end)
     end)
   end)
@@ -257,15 +325,21 @@ function M.get(terminal)
   vim.schedule(function()
     local completed = false
     local function done(value)
-      if completed then
+      if completed or cache[key] ~= entry then
         return
       end
       completed = true
+      local previous = entry.value
       entry.at = vim.uv.now()
       entry.pending = false
       entry.ready = true
       entry.value = valid(value)
       prune()
+      if not vim.deep_equal(previous, entry.value) then
+        vim.schedule(function()
+          Util.emit("SidekickCliUsage", { id = terminal.id, usage = entry.value })
+        end)
+      end
     end
     local ok = pcall(fetch, terminal, done)
     if not ok then
@@ -285,7 +359,7 @@ function M.codex(_, terminal, cb)
   if type(path) ~= "string" or path == "" then
     return
   end
-  read_tail(path, M.parse_codex, cb)
+  read_incremental(path, M.parse_codex, cb)
   return true
 end
 
@@ -299,7 +373,7 @@ function M.claude(_, terminal, cb)
   if type(path) ~= "string" or path == "" then
     return
   end
-  read_tail(path, M.parse_claude, cb)
+  read_incremental(path, M.parse_claude, cb)
   return true
 end
 
@@ -344,6 +418,7 @@ end
 
 function M.clear()
   cache = {}
+  file_cache = {}
 end
 
 return M

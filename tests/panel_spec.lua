@@ -56,6 +56,29 @@ describe("cli agent panel", function()
     Config.cli.win.tabs.icons = {}
   end)
 
+  it("selects refresh targets by session or native tab", function()
+    local Refresh = require("sidekick.cli.panel.refresh")
+    local panels = {
+      [11] = { tab = 11, order = { "one", "shared" } },
+      [22] = { tab = 22, order = { "two", "shared" } },
+      [33] = { tab = 33, order = { "three" }, active = "active-only" },
+    }
+    local function selected(target)
+      local ret = {}
+      Refresh.each(panels, target, function(tab)
+        ret[#ret + 1] = tab
+      end)
+      table.sort(ret)
+      return ret
+    end
+
+    assert.are.same({ 11 }, selected("one"))
+    assert.are.same({ 11, 22 }, selected("shared"))
+    assert.are.same({ 33 }, selected("active-only"))
+    assert.are.same({ 22 }, selected(22))
+    assert.are.same({ 11, 22, 33 }, selected())
+  end)
+
   after_each(function()
     Panel.hide()
     Panel.panels[vim.api.nvim_get_current_tabpage()] = nil

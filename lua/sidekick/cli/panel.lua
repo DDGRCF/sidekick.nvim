@@ -1,6 +1,7 @@
 local Config = require("sidekick.config")
 local History = require("sidekick.cli.history")
 local Icons = require("sidekick.cli.icons")
+local Refresh = require("sidekick.cli.panel.refresh")
 local Util = require("sidekick.util")
 
 local M = {}
@@ -35,9 +36,11 @@ end
 ---@field opts? sidekick.win.Opts
 ---@field sizes table<string, {width?:integer,height?:integer,row?:integer,col?:integer}>
 ---@field has_remembered_layout boolean
+---@field clicks? integer[]
 
 M.panels = {} ---@type table<integer, sidekick.cli.Panel>
 M.clicks = {} ---@type table<integer, {action:string,id?:string,tab?:integer}>
+M._next_click = 0
 M.synced_keys = {} ---@type table<integer, table<string, string>>
 M.did_setup = false
 
@@ -590,9 +593,23 @@ local function priority(t, pinned)
     or t.status == "error"
 end
 
+---@param p sidekick.cli.Panel
+local function clear_clicks(p)
+  for _, token in ipairs(p.clicks or {}) do
+    M.clicks[token] = nil
+  end
+  p.clicks = {}
+  if next(M.clicks) == nil then
+    M._next_click = 0
+  end
+end
+
 local function click(action, p, id)
-  local token = #M.clicks + 1
+  M._next_click = M._next_click + 1
+  local token = M._next_click
   M.clicks[token] = { action = action, id = id, tab = p.tab }
+  p.clicks = p.clicks or {}
+  p.clicks[#p.clicks + 1] = token
   return ("%%%d@v:lua.SidekickCliTabClick@"):format(token)
 end
 
@@ -851,6 +868,7 @@ end
 
 ---@param p sidekick.cli.Panel
 function M.render(p)
+  clear_clicks(p)
   if not valid(p.win) or not Config.cli.win.tabs.enabled then
     return ""
   end
@@ -971,17 +989,17 @@ local function refresh_panel(p)
   end
 end
 
----@param id? string
-function M.refresh(_)
-  M.clicks = {}
+---@param target? string|integer Session id or native tabpage id.
+function M.refresh(target)
   update_activity_blink()
-  for tab, p in pairs(M.panels) do
+  Refresh.each(M.panels, target, function(tab, p)
     if not vim.api.nvim_tabpage_is_valid(tab) then
+      clear_clicks(p)
       M.panels[tab] = nil
     else
       refresh_panel(p)
     end
-  end
+  end)
 end
 
 ---@param p sidekick.cli.Panel
@@ -1082,7 +1100,7 @@ function M.show(t, focus)
   if changed or focus then
     require("sidekick.cli.activity").ack(t)
   end
-  M.refresh()
+  M.refresh(p.tab)
   if changed then
     Util.emit("SidekickCliActivate", { id = t.id, tab = p.tab })
   end
@@ -1179,7 +1197,7 @@ function M.reorder(step)
     local id = table.remove(p.order, idx)
     table.insert(p.order, to, id)
     persist_tabs(p)
-    M.refresh()
+    M.refresh(p.tab)
     Util.emit("SidekickCliPanel", { tab = p.tab, order = vim.deepcopy(p.order) })
   end
 end
@@ -1191,7 +1209,7 @@ function M.pin(id)
   if p and id and contains(p.order, id) then
     p.pinned[id] = not p.pinned[id] or nil
     persist_tabs(p)
-    M.refresh()
+    M.refresh(p.tab)
     Util.emit("SidekickCliPanel", { tab = p.tab, pinned = vim.deepcopy(p.pinned) })
   end
 end
@@ -1387,7 +1405,7 @@ function M.resize(opts)
     return Util.error("Failed to resize Sidekick panel: " .. tostring(err))
   end
   p.sizes[p.layout] = size
-  M.refresh()
+  M.refresh(p.tab)
   Util.emit("SidekickCliPanel", { tab = p.tab, layout = p.layout, size = size })
 end
 
@@ -1635,7 +1653,16 @@ function M.setup()
   })
   vim.api.nvim_create_autocmd("WinResized", {
     group = Config.augroup,
-    callback = M.refresh,
+    callback = function()
+      M.refresh()
+    end,
+  })
+  vim.api.nvim_create_autocmd("User", {
+    group = Config.augroup,
+    pattern = "SidekickCliUsage",
+    callback = function(ev)
+      M.refresh(ev.data and ev.data.id or nil)
+    end,
   })
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = Config.augroup,

@@ -384,6 +384,35 @@ describe("cli routing", function()
     assert.are.equal(session, states[1].session)
   end)
 
+  it("keeps only the highest-priority session for overlapping pids", function()
+    local original = Session.sessions
+    local cwd = Session.cwd()
+    local function session(id, priority)
+      return {
+        id = id,
+        tool = Config.get_tool("codex"),
+        cwd = cwd,
+        backend = "test",
+        priority = priority,
+        pids = { 42, priority },
+        started = true,
+        external = false,
+        is_attached = function()
+          return false
+        end,
+      }
+    end
+    Session.sessions = function()
+      return { session("low", 10), session("high", 50) }
+    end
+
+    local states = State.get({ name = "codex" })
+
+    Session.sessions = original
+    assert.are.equal(1, #states)
+    assert.are.equal("high", states[1].session.id)
+  end)
+
   it("keeps a new-tool choice alongside an external session", function()
     local original = Session.sessions
     local session = {

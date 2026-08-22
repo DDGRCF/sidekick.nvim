@@ -75,13 +75,24 @@ function M.get(filter)
   local sessions = filter.attached and Session.attached() or Session.sessions()
   local cwd = type(filter.cwd) == "string" and Session.cwd({ cwd = filter.cwd }) or Session.cwd()
 
+  -- Resolve overlapping processes once instead of comparing every session
+  -- with every other session.
+  local pid_priority = {} ---@type table<integer,number>
+  if not filter.attached then
+    for _, session in pairs(sessions) do
+      for _, pid in ipairs(session.pids or {}) do
+        pid_priority[pid] = math.max(pid_priority[pid] or -math.huge, session.priority or 0)
+      end
+    end
+  end
+
   for _, s in pairs(sessions) do
     -- if not attached, skip if another session with higher priority
     -- is running with overlapping pids
     local skip = false
     if not s:is_attached() then
-      for _, s2 in pairs(sessions) do
-        if s2 ~= s and Util.overlaps(s2.pids or {}, s.pids or {}) and s2.priority > s.priority then
+      for _, pid in ipairs(s.pids or {}) do
+        if (pid_priority[pid] or -math.huge) > (s.priority or 0) then
           skip = true
           break
         end

@@ -1,4 +1,5 @@
 local Config = require("sidekick.config")
+local Registry = require("sidekick.cli.session.registry")
 local Util = require("sidekick.util")
 
 local M = {}
@@ -211,6 +212,7 @@ function M.register(name, backend)
   setmetatable(backend, B)
   backend.backend = name
   M.backends[name] = backend
+  Registry.invalidate()
 end
 
 function M.setup()
@@ -228,28 +230,43 @@ function M.setup()
   M.register("terminal", require("sidekick.cli.terminal"))
 end
 
-function M.sessions()
+---@param opts? {refresh?:boolean,ttl_ms?:integer}
+---@return sidekick.cli.Session[]
+function M.sessions(opts)
   M.setup()
-  local ret = {} ---@type sidekick.cli.Session[]
-  local ids = {} ---@type table<string,boolean>
-  for name, backend in pairs(M.backends) do
-    for _, s in pairs(backend:sessions()) do
-      s.backend = name
-      s.started = true
-      ret[#ret + 1] = M.new(s)
-      assert(not ids[s.id], "duplicate session id: " .. s.id)
-      ids[s.id] = true
-      if M._attached[s.id] then
-        M._attached[s.id] = ret[#ret] -- update to latest session instance
+  local snapshot = Registry.get(function()
+    local ret = {} ---@type sidekick.cli.Session[]
+    local ids = {} ---@type table<string,boolean>
+    for name, backend in pairs(M.backends) do
+      for _, s in pairs(backend:sessions()) do
+        s.backend = name
+        s.started = true
+        ret[#ret + 1] = M.new(s)
+        assert(not ids[s.id], "duplicate session id: " .. s.id)
+        ids[s.id] = true
+        if M._attached[s.id] then
+          M._attached[s.id] = ret[#ret] -- update to latest session instance
+        end
       end
     end
-  end
-  for id in pairs(M._attached) do
-    if not ids[id] then -- session is no longer running
-      M.detach(M._attached[id])
+    for id in pairs(M._attached) do
+      if not ids[id] then -- session is no longer running
+        M.detach(M._attached[id])
+      end
     end
-  end
-  return ret
+    return ret
+  end, opts)
+  return snapshot
+end
+
+--- Mark provider discovery stale. The next query rebuilds the snapshot.
+function M.invalidate()
+  Registry.invalidate()
+end
+
+---@return integer
+function M.generation()
+  return Registry.generation()
 end
 
 ---@param session sidekick.cli.Session
@@ -257,6 +274,7 @@ function M.detach(session)
   if M._attached[session.id] then
     M._attached[session.id] = nil
     session:detach()
+    Registry.invalidate()
     vim.schedule(function()
       Util.emit("SidekickCliDetach", { id = session.id })
     end)
@@ -295,6 +313,7 @@ function M.attach(session)
     session:start()
   end
   M._attached[session.id] = session
+  Registry.invalidate()
   Util.emit("SidekickCliAttach", { id = session.id })
   return session
 end

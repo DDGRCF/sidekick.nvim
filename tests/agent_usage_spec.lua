@@ -91,6 +91,90 @@ describe("cli agent usage", function()
     vim.fn.delete(path)
   end)
 
+  it("reads only appended native usage after the initial snapshot", function()
+    local path = vim.fn.tempname()
+    local first = vim.json.encode({
+      type = "assistant",
+      message = { usage = { input_tokens = 1000 } },
+    })
+    local latest = vim.json.encode({
+      type = "assistant",
+      message = { usage = { input_tokens = 9000, output_tokens = 500 } },
+    })
+    local file = assert(io.open(path, "wb"))
+    file:write(first)
+    file:close()
+
+    local reads = {}
+    local original_read = vim.uv.fs_read
+    vim.uv.fs_read = function(fd, size, offset, cb)
+      reads[#reads + 1] = { size = size, offset = offset }
+      return original_read(fd, size, offset, cb)
+    end
+
+    local first_value, latest_value
+    local ok, err = pcall(function()
+      Usage.claude(nil, { conversation = { data = { path = path } } }, function(value)
+        first_value = value
+      end)
+      assert.is_true(vim.wait(100, function()
+        return first_value ~= nil
+      end, 10))
+
+      file = assert(io.open(path, "ab"))
+      file:write("\n" .. latest)
+      file:close()
+      Usage.claude(nil, { conversation = { data = { path = path } } }, function(value)
+        latest_value = value
+      end)
+      assert.is_true(vim.wait(100, function()
+        return latest_value ~= nil
+      end, 10))
+    end)
+    vim.uv.fs_read = original_read
+    Usage.clear()
+    vim.fn.delete(path)
+
+    assert.is_true(ok, err)
+    assert.are.same({ used = 1000 }, first_value)
+    assert.are.same({ used = 9500 }, latest_value)
+    assert.are.equal(2, #reads)
+    assert.are.equal(#first, reads[2].offset)
+    assert.are.equal(#latest + 1, reads[2].size)
+  end)
+
+  it("emits a usage event when asynchronous usage changes", function()
+    local seen
+    local group = vim.api.nvim_create_augroup("sidekick_test_usage_event", { clear = true })
+    vim.api.nvim_create_autocmd("User", {
+      group = group,
+      pattern = "SidekickCliUsage",
+      callback = function(ev)
+        seen = ev.data
+      end,
+    })
+    local terminal = {
+      id = "usage-event",
+      instance_id = "one",
+      tool = {
+        config = {
+          usage = function()
+            return { used = 32, max = 128 }
+          end,
+        },
+      },
+    }
+
+    Usage.get(terminal)
+    assert.is_true(vim.wait(100, function()
+      return seen ~= nil
+    end, 10))
+    vim.api.nvim_del_augroup_by_id(group)
+
+    assert.are.equal("usage-event", seen.id)
+    assert.are.same({ used = 32, max = 128, percent = 25 }, seen.usage)
+  end)
+
   it("loads native OpenCode usage from the active local server", function()
     local called, value
     vim.system = function(cmd, opts, cb)

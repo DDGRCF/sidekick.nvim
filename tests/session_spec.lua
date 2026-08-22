@@ -8,6 +8,29 @@ describe("cli sessions", function()
     Session.setup()
   end)
 
+  it("reuses discovery snapshots until invalidated", function()
+    local Registry = require("sidekick.cli.session.registry")
+    local calls = 0
+    local function discover()
+      calls = calls + 1
+      return { { id = "snapshot-" .. calls } }
+    end
+
+    Registry.clear()
+    local first, generation = Registry.get(discover, { ttl_ms = 0 })
+    local second, same_generation, refreshed = Registry.get(discover, { ttl_ms = 0 })
+    Registry.invalidate()
+    local third, next_generation = Registry.get(discover, { ttl_ms = 0 })
+    Registry.clear()
+
+    assert.are.equal(first, second)
+    assert.are.equal(2, calls)
+    assert.are.equal(generation, same_generation)
+    assert.is_false(refreshed)
+    assert.are_not.equal(first, third)
+    assert.are.equal(generation + 1, next_generation)
+  end)
+
   it("initializes the terminal backend for direct first-session creation", function()
     local old_backends = Session.backends
     local old_did_setup = Session.did_setup
