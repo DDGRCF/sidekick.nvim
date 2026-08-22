@@ -139,6 +139,10 @@ return {
     continue = true,
     managed_session = false,
   },
+  docs = {
+    description = "OpenCode CLI",
+    install = "npm install -g opencode",
+  },
   env = {
     -- HACK: https://github.com/sst/opencode/issues/445
     OPENCODE_THEME = "system",

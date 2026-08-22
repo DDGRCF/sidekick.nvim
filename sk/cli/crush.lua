@@ -7,6 +7,10 @@ return {
     continue = false,
     managed_session = false,
   },
+  docs = {
+    description = "Charm's AI assistant",
+    install = "See [installation](https://github.com/charmbracelet/crush)",
+  },
   is_proc = "\\<crush\\>",
   keys = {
     prompt = { "<a-p>", "prompt" },

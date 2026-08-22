@@ -1042,18 +1042,22 @@ The default keymaps are:
 
 Sidekick preconfigures popular AI CLIs. Run `:checkhealth sidekick` to see which ones are installed.
 
-| Tool                                                        | Description          | Installation                                                                                                           |
-| ----------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [`antigravity`](https://antigravity.google/download#antigravity-cli) | Google Antigravity CLI | `curl -fsSL https://antigravity.google/cli/install.sh \| bash`                                              |
-| [`claude`](https://github.com/anthropics/claude-code)       | Claude Code CLI      | [See Claude Code docs](https://code.claude.com/docs/en/overview#get-started)
-| [`codex`](https://github.com/openai/codex)                  | OpenAI Codex CLI     | See [OpenAI docs](https://github.com/openai/codex)                                                                     |
-| [`copilot`](https://github.com/github/copilot-cli)          | GitHub Copilot CLI   | `npm install -g @githubnext/github-copilot-cli`                                                                        |
-| [`crush`](https://github.com/charmbracelet/crush)           | Charm's AI assistant | See [installation](https://github.com/charmbracelet/crush)                                                             |
-| [`cursor`](https://cursor.com/cli)                          | Cursor CLI agent     | See [Cursor docs](https://cursor.com/cli)                                                                              |
-| [`grok`](https://github.com/xai-org/grok-build)              | Grok Build CLI       | `curl -fsSL https://x.ai/cli/install.sh \| bash`                                                                       |
-| [`omp`](https://github.com/can1357/oh-my-pi)                | Oh My Pi CLI         | `bun install -g @oh-my-pi/pi-coding-agent`                                                                             |
-| [`pi`](https://github.com/badlogic/pi-mono)                | Pi coding agent      | See [installation](https://github.com/badlogic/pi-mono)                                                              |
-| [`opencode`](https://github.com/anomalyco/opencode)        | OpenCode CLI         | `npm install -g opencode`                                                                                              |
+<!-- providers:start -->
+
+| Tool | Description | Installation | Resume | Fork | Continue | Managed session |
+| ---- | ----------- | ------------ | :----: | :--: | :------: | :-------------: |
+| [`antigravity`](https://antigravity.google/download#antigravity-cli) | Google Antigravity CLI | curl -fsSL https://antigravity.google/cli/install.sh \| bash | yes | yes | yes | - |
+| [`claude`](https://github.com/anthropics/claude-code) | Claude Code CLI | See [Claude Code docs](https://code.claude.com/docs/en/overview#get-started) | yes | yes | yes | - |
+| [`codex`](https://github.com/openai/codex) | OpenAI Codex CLI | See [OpenAI docs](https://github.com/openai/codex) | yes | yes | yes | - |
+| [`copilot`](https://github.com/github/copilot-cli) | GitHub Copilot CLI | npm install -g @githubnext/github-copilot-cli | yes | - | yes | yes |
+| [`crush`](https://github.com/charmbracelet/crush) | Charm's AI assistant | See [installation](https://github.com/charmbracelet/crush) | yes | - | - | - |
+| [`cursor`](https://cursor.com/cli) | Cursor CLI agent | See [Cursor docs](https://cursor.com/cli) | yes | yes | - | - |
+| [`grok`](https://github.com/xai-org/grok-build) | Grok Build CLI | curl -fsSL https://x.ai/cli/install.sh \| bash | yes | yes | - | - |
+| [`omp`](https://github.com/can1357/oh-my-pi) | Oh My Pi CLI | bun install -g @oh-my-pi/pi-coding-agent | yes | yes | yes | yes |
+| [`opencode`](https://github.com/anomalyco/opencode) | OpenCode CLI | npm install -g opencode | yes | yes | yes | - |
+| [`pi`](https://github.com/badlogic/pi-mono) | Pi coding agent | See [installation](https://github.com/badlogic/pi-mono) | yes | - | yes | yes |
+
+<!-- providers:end -->
 
 > [!TIP]
 > After installing tools, restart Neovim or run `:Sidekick cli select` to see them available.

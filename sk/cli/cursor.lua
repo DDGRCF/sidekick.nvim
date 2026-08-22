@@ -7,6 +7,10 @@ return {
     continue = false,
     managed_session = false,
   },
+  docs = {
+    description = "Cursor CLI agent",
+    install = "See [Cursor docs](https://cursor.com/cli)",
+  },
   is_proc = "\\<cursor-agent\\>",
   url = "https://cursor.com/cli",
   resume = require("sidekick.cli.provider_sessions").adapter("cursor", { "--resume" }),

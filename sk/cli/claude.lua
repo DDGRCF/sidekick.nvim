@@ -104,6 +104,10 @@ return {
     continue = true,
     managed_session = false,
   },
+  docs = {
+    description = "Claude Code CLI",
+    install = "See [Claude Code docs](https://code.claude.com/docs/en/overview#get-started)",
+  },
   is_proc = "\\<claude\\>",
   url = "https://github.com/anthropics/claude-code",
   usage = require("sidekick.cli.agent_usage").claude,

@@ -9,6 +9,10 @@ return {
     continue = true,
     managed_session = true,
   },
+  docs = {
+    description = "GitHub Copilot CLI",
+    install = "npm install -g @githubnext/github-copilot-cli",
+  },
   is_proc = function(_, proc)
     return re:match_str(proc.cmd) and not proc.cmd:find("language%-server") or false
   end,

@@ -7,6 +7,10 @@ return {
     continue = true,
     managed_session = false,
   },
+  docs = {
+    description = "Google Antigravity CLI",
+    install = "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+  },
   is_proc = "\\<agy\\>",
   url = "https://antigravity.google/download#antigravity-cli",
   resume = require("sidekick.cli.provider_sessions").adapter("antigravity", { "--conversation" }),

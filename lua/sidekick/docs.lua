@@ -12,6 +12,7 @@ function M.update()
     setup_blink = Docs.extract("tests/fixtures/readme.lua", "local blink = ({.-\n})"),
     setup_lualine = Docs.extract("tests/fixtures/readme.lua", "local lualine = ({.-\n})"),
     snacks_picker = Docs.extract("tests/fixtures/readme.lua", "local snacks_picker = ({.-\n})"),
+    providers = { content = M.providers() },
     api_cli = { content = M.mod("cli") },
     api_nes = { content = M.mod("nes") },
   })
@@ -66,6 +67,47 @@ function M.mod(mod)
     )
   end
   lines[#lines + 1] = "</table>"
+  return table.concat(lines, "\n")
+end
+
+function M.providers()
+  local tools = require("sidekick.config").tools()
+  local names = vim.tbl_keys(tools) ---@type string[]
+  table.sort(names)
+
+  local lines = {
+    "| Tool | Description | Installation | Resume | Fork | Continue | Managed session |",
+    "| ---- | ----------- | ------------ | :----: | :--: | :------: | :-------------: |",
+  }
+  ---@param value boolean
+  local function capability(value)
+    return value and "yes" or "-"
+  end
+  ---@param value string
+  local function cell(value)
+    return tostring(value):gsub("|", "\\|")
+  end
+
+  for _, name in ipairs(names) do
+    local tool = tools[name]
+    ---@cast tool sidekick.cli.Tool
+    local provider = tool.config.docs
+    ---@cast provider sidekick.cli.ProviderDocs
+    if provider then
+      local capabilities = tool.config.capabilities
+      ---@cast capabilities sidekick.cli.Capabilities
+      local label = tool.config.url and ("[`%s`](%s)"):format(name, tool.config.url) or ("`%s`"):format(name)
+      lines[#lines + 1] = table.concat({
+        "| " .. label,
+        cell(provider.description),
+        cell(provider.install),
+        capability(capabilities.resume),
+        capability(capabilities.fork),
+        capability(capabilities.continue),
+        capability(capabilities.managed_session) .. " |",
+      }, " | ")
+    end
+  end
   return table.concat(lines, "\n")
 end
 
