@@ -3,6 +3,12 @@ local re = vim.regex("\\<copilot\\>")
 ---@type sidekick.cli.Config
 return {
   cmd = { "copilot", "--banner" },
+  capabilities = {
+    resume = true,
+    fork = false,
+    continue = true,
+    managed_session = true,
+  },
   is_proc = function(_, proc)
     return re:match_str(proc.cmd) and not proc.cmd:find("language%-server") or false
   end,

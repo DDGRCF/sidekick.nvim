@@ -16,6 +16,12 @@ local M = {}
 ---@field prompt? string
 ---@field text? sidekick.Text[]
 
+---@class sidekick.cli.Capabilities
+---@field resume boolean Supports restoring an exact persisted conversation.
+---@field fork boolean Supports creating a native child conversation.
+---@field continue boolean Supports resuming the provider's most recent conversation.
+---@field managed_session boolean Sidekick creates and tracks the provider's conversation id.
+
 ---@class sidekick.cli.Config
 ---@field cmd string[] Command to run the CLI tool
 ---@field env? table<string, string|false> Environment variables to set when running the command
@@ -27,6 +33,7 @@ local M = {}
 ---@field native_scroll? boolean whether the tool handles scrolling natively
 ---@field status? fun(self:sidekick.cli.Tool,event:sidekick.cli.ActivityEvent):sidekick.cli.ActivityStatus? exact activity status adapter
 ---@field usage? fun(self:sidekick.cli.Tool,session:sidekick.cli.Terminal,cb:fun(value?:sidekick.cli.ContextUsage)):sidekick.cli.ContextUsage?|boolean? async context-usage adapter; return `true` when it will invoke `cb`
+---@field capabilities? sidekick.cli.Capabilities Declared provider capabilities used by integrations and documentation.
 ---@field resume? string[]|sidekick.cli.ResumeAdapter|fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
 ---@field fork? false|string[]|sidekick.cli.ForkAdapter|fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,source:sidekick.cli.Terminal):string[]?
 ---@field continue? string[] native CLI arguments for resuming the most recent conversation

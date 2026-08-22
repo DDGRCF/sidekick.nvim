@@ -1,6 +1,12 @@
 ---@type sidekick.cli.Config
 return {
   cmd = { "crush" },
+  capabilities = {
+    resume = true,
+    fork = false,
+    continue = false,
+    managed_session = false,
+  },
   is_proc = "\\<crush\\>",
   keys = {
     prompt = { "<a-p>", "prompt" },

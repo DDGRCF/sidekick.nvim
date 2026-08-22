@@ -1052,6 +1052,7 @@ Sidekick preconfigures popular AI CLIs. Run `:checkhealth sidekick` to see which
 | [`cursor`](https://cursor.com/cli)                          | Cursor CLI agent     | See [Cursor docs](https://cursor.com/cli)                                                                              |
 | [`grok`](https://github.com/xai-org/grok-build)              | Grok Build CLI       | `curl -fsSL https://x.ai/cli/install.sh \| bash`                                                                       |
 | [`omp`](https://github.com/can1357/oh-my-pi)                | Oh My Pi CLI         | `bun install -g @oh-my-pi/pi-coding-agent`                                                                             |
+| [`pi`](https://github.com/badlogic/pi-mono)                | Pi coding agent      | See [installation](https://github.com/badlogic/pi-mono)                                                              |
 | [`opencode`](https://github.com/anomalyco/opencode)        | OpenCode CLI         | `npm install -g opencode`                                                                                              |
 
 > [!TIP]

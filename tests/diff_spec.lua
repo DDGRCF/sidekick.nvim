@@ -31,7 +31,7 @@ local function stub_ts()
 
   return function()
     TS.get_virtual_lines = original.get_virtual_lines
-    TS.highlight_block = original.highlight_ws
+    TS.highlight_block = original.highlight_block
   end,
     calls
 end

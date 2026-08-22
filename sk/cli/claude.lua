@@ -98,6 +98,12 @@ end
 ---@type sidekick.cli.Config
 return {
   cmd = { "claude" },
+  capabilities = {
+    resume = true,
+    fork = true,
+    continue = true,
+    managed_session = false,
+  },
   is_proc = "\\<claude\\>",
   url = "https://github.com/anthropics/claude-code",
   usage = require("sidekick.cli.agent_usage").claude,

@@ -25,6 +25,20 @@ local base = setmetatable({}, {
 function M.get(name)
   local config =
     vim.tbl_deep_extend("force", vim.deepcopy(base[name] or {}), vim.deepcopy(Config.cli.tools[name] or {}))
+  local capabilities = config.capabilities or {}
+  if capabilities.resume == nil then
+    capabilities.resume = config.resume ~= nil
+  end
+  if capabilities.fork == nil then
+    capabilities.fork = config.fork ~= nil and config.fork ~= false
+  end
+  if capabilities.continue == nil then
+    capabilities.continue = config.continue ~= nil
+  end
+  if capabilities.managed_session == nil then
+    capabilities.managed_session = false
+  end
+  config.capabilities = capabilities
   local self = setmetatable(vim.deepcopy(config), M) --[[@as sidekick.cli.Tool]]
   self.config = config
   self.is_proc = nil

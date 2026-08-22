@@ -20,6 +20,14 @@ local MOUSE_SCROLL_UP = vim.keycode("<ScrollWheelUp>")
 local MOUSE_SCROLL_DOWN = vim.keycode("<ScrollWheelDown>")
 local MOUSE_CLICK = vim.keycode("<LeftMouse>")
 
+-- Changing the local scrollback option forces the open terminal buffer to redraw.
+-- Without it, the copied mux output can briefly flicker.
+---@param buf integer
+local function refresh_terminal_buffer(buf)
+  vim.bo[buf].scrollback = 9999
+  vim.bo[buf].scrollback = 9998
+end
+
 -- track mouse scrolling
 vim.on_key(function(key, typed)
   key = typed or key
@@ -135,9 +143,7 @@ function M:open(win_pos)
 
   vim.api.nvim_chan_send(term, text)
 
-  -- HACK: this forces a refresh of the terminal buffer and prevents flickering
-  vim.bo[self.buf].scrollback = 9999
-  vim.bo[self.buf].scrollback = 9998
+  refresh_terminal_buffer(self.buf)
 
   self:scroll(win_pos)
 end

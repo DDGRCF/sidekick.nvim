@@ -133,6 +133,12 @@ end
 ---@type sidekick.cli.Config
 return {
   cmd = { "opencode", "--port", "0" },
+  capabilities = {
+    resume = true,
+    fork = true,
+    continue = true,
+    managed_session = false,
+  },
   env = {
     -- HACK: https://github.com/sst/opencode/issues/445
     OPENCODE_THEME = "system",

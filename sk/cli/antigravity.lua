@@ -1,6 +1,12 @@
 ---@type sidekick.cli.Config
 return {
   cmd = { "agy" },
+  capabilities = {
+    resume = true,
+    fork = true,
+    continue = true,
+    managed_session = false,
+  },
   is_proc = "\\<agy\\>",
   url = "https://antigravity.google/download#antigravity-cli",
   resume = require("sidekick.cli.provider_sessions").adapter("antigravity", { "--conversation" }),

@@ -1,6 +1,12 @@
 ---@type sidekick.cli.Config
 return {
   cmd = { "cursor-agent" },
+  capabilities = {
+    resume = true,
+    fork = true,
+    continue = false,
+    managed_session = false,
+  },
   is_proc = "\\<cursor-agent\\>",
   url = "https://cursor.com/cli",
   resume = require("sidekick.cli.provider_sessions").adapter("cursor", { "--resume" }),
