@@ -134,6 +134,7 @@ local lualine = {
   opts = function(_, opts)
     opts.sections = opts.sections or {}
     opts.sections.lualine_c = opts.sections.lualine_c or {}
+    opts.sections.lualine_x = opts.sections.lualine_x or {}
 
     -- Copilot status
     table.insert(opts.sections.lualine_c, {
@@ -182,6 +183,7 @@ local lualine = {
 }
 
 local snacks_picker = {
+  -- This extends an existing Snacks installation; it does not install Snacks.
   "folke/snacks.nvim",
   optional = true,
   opts = {
@@ -197,6 +199,7 @@ local snacks_picker = {
             ["<a-a>"] = {
               "sidekick_send",
               mode = { "n", "i" },
+              desc = "Send selection to Sidekick",
             },
           },
         },

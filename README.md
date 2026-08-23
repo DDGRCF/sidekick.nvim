@@ -301,9 +301,13 @@ local defaults = {
       resume_timeout_ms = 15000,
     },
     agent_picker = {
+      -- `auto` uses Snacks when available and falls back to `vim.ui.select`.
       provider = "auto", ---@type "auto"|"snacks"|"native"
+      -- Maximum terminal-output tail shown in the agent preview.
       preview_lines = 80,
+      -- Maximum bytes retained by terminal and multiplexer previews.
       preview_bytes = 64 * 1024,
+      -- Keep pinned agents when running the completed-agent cleanup action.
       preserve_pinned = true,
     },
     ---@class sidekick.win.Opts
@@ -376,7 +380,7 @@ local defaults = {
         agent_ref_t    = { "<a-a>", "reference" , mode = "t" , desc = "reference another running agent" },
         agent_fork_t  = { "<a-f>", "fork"       , mode = "t" , desc = "fork the current agent conversation" },
         stopinsert    = { "<c-q>", "stopinsert", mode = "t" , desc = "enter normal mode" },
-        normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter normal mode" },
+        normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter terminal mode" },
         agent_prev    = { "<s-h>"       , "prev"            , mode = "n", desc = "previous agent" },
         agent_prev_b  = { "[b"          , "prev"            , mode = "n", desc = "previous agent" },
         agent_next    = { "<s-l>"       , "next"            , mode = "n", desc = "next agent" },
@@ -691,10 +695,17 @@ and the hidden counts are shown. The active agent receives prompts first, so nor
 send/prompt actions do not ask for a target again.
 
 Use `:Sidekick cli new [tool]` to start another agent and `:Sidekick cli switch` (or
-`<leader>bj`) for fuzzy tab selection when Snacks picker is configured. Tab status is
-`○` idle, `◌` starting, `●` working/done/error (colored by state), and `◐` waiting;
-completed background agents turn green until selected. The container can move between
-left, right, top, bottom, and float layouts and can be resized at runtime.
+`<leader>bj`) for fuzzy tab selection. Add `filter=attention` to jump directly to agents
+that are unread, waiting for input, or failed; command-line completion lists every
+available filter. Tab status is `○` idle, `◌` starting, `●` working, `◐` waiting,
+`✓` done, and `!` error. Background output gets an unread marker until the agent is
+viewed. The container can move between left, right, top, bottom, and float layouts and
+can be resized at runtime.
+
+Sidekick notifies when a background agent starts waiting or exits with an error. Done
+notifications are disabled by default because generic status adapters infer completion
+from a quiet-output timeout. Configure individual states with `cli.status.notify`, or
+set it to `false` to disable all agent-status notifications.
 
 Agent workspaces are saved automatically. On restart, Sidekick first reattaches a live
 tmux/zellij session; if the process is gone, it starts the tool's native resume command
@@ -713,12 +724,19 @@ a native conversation-fork API, so Sidekick keeps fork unavailable instead of cl
 If no stable ID is available, Sidekick reports that agent as failed instead of
 substituting a latest session or interactive browser.
 
-The agent switcher uses Snacks when available, with terminal-output preview and actions
-for pin (`<C-p>`), rename (`<C-r>`), close (`<C-x>`), and completed-agent cleanup
-(`<C-d>`). Search also indexes `@tool`, `#status`, `%project`, worktree branch, and known
-changed files when that metadata is available. If Snacks is unavailable or
-`cli.agent_picker.provider = "native"`, it falls back to a two-step `vim.ui.select`
-agent/action menu.
+The agent switcher uses Snacks automatically when available. Its live preview follows
+local terminal output without polling and periodically refreshes multiplexer output. The
+preview header shows status, context usage when the provider exposes it, directory,
+backend, and fork availability. Search indexes `@tool`, `#status`, `%project`, worktree
+branch, and known changed files when that metadata is available.
+
+Press `<A-t>` to cycle through All, Open, Working, Done, Errors, New (unread output),
+Attention (unread, waiting, or error), and Pinned views. Picker actions include open
+(`<CR>`), fork (`<C-f>`), pin (`<C-p>`), rename (`<C-r>`), close (`<C-x>`), mark read
+(`<C-a>`), and clean completed agents (`<C-d>`); `<Esc>` closes or cancels a rename.
+If Snacks is unavailable or `cli.agent_picker.provider = "native"`, Sidekick falls back
+to a filtered two-step `vim.ui.select` agent/action menu and shows the active filter in
+its prompt.
 
 <!-- api_cli:start -->
 
@@ -969,7 +987,10 @@ current file, selection, diagnostics, and more.
 
 ### Snacks.nvim Picker Integration
 
-If you're using [snacks.nvim](https://github.com/folke/snacks.nvim), you can send picker selections directly to Sidekick's AI CLI tools. This is useful for sending search results, grep matches, or file selections as context.
+The Sidekick agent switcher uses [snacks.nvim](https://github.com/folke/snacks.nvim)
+automatically; no extra Snacks configuration is needed for it. The example below is a
+separate integration for sending selections from any other Snacks picker—such as files,
+grep results, or search results—to the active Sidekick agent.
 
 <details><summary>Example Snacks picker configuration</summary>
 
@@ -977,6 +998,7 @@ If you're using [snacks.nvim](https://github.com/folke/snacks.nvim), you can sen
 
 ```lua
 {
+  -- This extends an existing Snacks installation; it does not install Snacks.
   "folke/snacks.nvim",
   optional = true,
   opts = {
@@ -992,6 +1014,7 @@ If you're using [snacks.nvim](https://github.com/folke/snacks.nvim), you can sen
             ["<a-a>"] = {
               "sidekick_send",
               mode = { "n", "i" },
+              desc = "Send selection to Sidekick",
             },
           },
         },
@@ -1003,7 +1026,10 @@ If you're using [snacks.nvim](https://github.com/folke/snacks.nvim), you can sen
 
 <!-- snacks_picker:end -->
 
-With this configuration, pressing `<a-a>` in any Snacks picker will send the selected items to your current AI CLI session. The integration automatically handles:
+With this configuration, pressing `<A-a>` in any Snacks picker sends the selected items
+to the current AI CLI session. Because the spec is marked `optional`, it extends an
+existing Snacks installation and does not install Snacks by itself. The integration
+automatically handles:
 
 - File selections with full paths
 - Grep results with line numbers and positions
@@ -1014,13 +1040,26 @@ With this configuration, pressing `<a-a>` in any Snacks picker will send the sel
 
 ### CLI Keymaps
 
-You can customize the keymaps for the CLI window by setting the `cli.win.keys` option.
-The default keymaps are:
+You can customize or disable any CLI-window mapping with `cli.win.keys`. The defaults are
+grouped below; terminal mode is used unless another mode is stated.
 
-- `q` (in normal mode): Hide the agent container.
-- `<c-q>` (in terminal mode): Hide the agent container.
-- `<c-z>`: Leave the CLI window.
-- `<c-p>`: Insert prompt or context.
+- Session controls: `<C-b>` opens the buffer picker, `<C-f>` opens the file picker,
+  `<C-p>` inserts a prompt/context, `<A-a>` references another agent, and `<A-f>` forks
+  the current conversation.
+- Window controls: `<C-.>` hides the container, `<C-z>` returns to the previous window
+  without hiding it, and `<C-h/j/k/l>` navigates to another window when one exists.
+  In normal mode, `q` and `<C-q>` hide the container; in terminal mode, `<C-q>` enters
+  normal mode.
+- Agent navigation in normal mode: `<S-h>`/`[b` and `<S-l>`/`]b` select the previous or
+  next agent; `[B` and `]B` reorder tabs; `<leader>bj` opens the agent switcher;
+  `<leader>bb` or leader + backtick returns to the previously active agent.
+- Agent actions in normal mode: `<leader>ba` references, `<leader>bf` forks,
+  `<leader>bp` pins, and `<leader>bd` closes the current agent. `<leader>bo`,
+  `<leader>bl`, `<leader>br`, `<leader>bP`, `<leader>bi`, and `<leader>bD` close other,
+  left, right, unpinned, invisible, or current-agent-plus-container targets respectively.
+- Resize in normal mode with `<M-Left>`, `<M-Right>`, `<M-Down>`, and `<M-Up>`.
+- In terminal normal mode, `<CR>` sends Enter to the terminal and returns to terminal
+  input mode.
 
 <details><summary>Example of how to override the default keymaps
 </summary>
@@ -1177,8 +1216,10 @@ Here are some examples of how to use the `:Sidekick` command:
 
 ## 📟 Statusline Integration
 
-Using the `require("sidekick.status")` API, you can easily integrate **Copilot LSP**
-and **CLI sessions** in your statusline.
+Using the `require("sidekick.status")` API, you can integrate **Copilot LSP** and
+**CLI sessions** in your statusline. The example displays total and attention counts,
+changes color for errors/attention/working agents, and opens the current agent switcher
+with an attention filter when clicked.
 
 <details>
 <summary>Example for <a href="https://github.com/nvim-lualine/lualine.nvim">lualine.nvim</a></summary>
@@ -1191,6 +1232,7 @@ and **CLI sessions** in your statusline.
   opts = function(_, opts)
     opts.sections = opts.sections or {}
     opts.sections.lualine_c = opts.sections.lualine_c or {}
+    opts.sections.lualine_x = opts.sections.lualine_x or {}
 
     -- Copilot status
     table.insert(opts.sections.lualine_c, {

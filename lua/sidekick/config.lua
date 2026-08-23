@@ -72,9 +72,13 @@ local defaults = {
       resume_timeout_ms = 15000,
     },
     agent_picker = {
+      -- `auto` uses Snacks when available and falls back to `vim.ui.select`.
       provider = "auto", ---@type "auto"|"snacks"|"native"
+      -- Maximum terminal-output tail shown in the agent preview.
       preview_lines = 80,
+      -- Maximum bytes retained by terminal and multiplexer previews.
       preview_bytes = 64 * 1024,
+      -- Keep pinned agents when running the completed-agent cleanup action.
       preserve_pinned = true,
     },
     ---@class sidekick.win.Opts
@@ -148,7 +152,7 @@ local defaults = {
         agent_ref_t    = { "<a-a>", "reference" , mode = "t" , desc = "reference another running agent" },
         agent_fork_t  = { "<a-f>", "fork"       , mode = "t" , desc = "fork the current agent conversation" },
         stopinsert    = { "<c-q>", "stopinsert", mode = "t" , desc = "enter normal mode" },
-        normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter normal mode" },
+        normal_cr     = { "<cr>" , "insert_cr" , mode = "n" , desc = "send <cr> to the terminal and enter terminal mode" },
         agent_prev    = { "<s-h>"       , "prev"            , mode = "n", desc = "previous agent" },
         agent_prev_b  = { "[b"          , "prev"            , mode = "n", desc = "previous agent" },
         agent_next    = { "<s-l>"       , "next"            , mode = "n", desc = "next agent" },
