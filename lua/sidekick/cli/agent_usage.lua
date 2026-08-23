@@ -6,7 +6,7 @@ local CACHE_MS = 1500
 local CACHE_MAX = 64
 local FILE_READ_MAX = 512 * 1024
 local FILE_CACHE_MAX = 64
-local cache = {} ---@type table<string,{at:number,pending?:boolean,ready?:boolean,value?:sidekick.cli.ContextUsage}>
+local cache = {} ---@type table<string,{at:number,pending?:boolean,ready?:boolean,value?:sidekick.cli.ContextUsage,source_buf?:integer,source_tick?:integer}>
 local file_cache = {} ---@type table<string,{at:number,size:integer,stamp:string,dev?:integer,ino?:integer,partial?:string,value?:sidekick.cli.ContextUsage}>
 
 ---@param keep? string
@@ -305,6 +305,17 @@ local function fetch(terminal, done)
   terminal_output(terminal, done)
 end
 
+local function fallback_source(terminal)
+  local usage = terminal.tool and terminal.tool.config and terminal.tool.config.usage
+  if type(usage) == "function" then
+    return
+  end
+  local buf = terminal.buf
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    return buf, vim.api.nvim_buf_get_changedtick(buf)
+  end
+end
+
 ---@param terminal sidekick.cli.Terminal
 ---@return sidekick.cli.ContextUsage?
 function M.get(terminal)
@@ -315,6 +326,11 @@ function M.get(terminal)
   local entry = cache[key]
   local now = vim.uv.now()
   if entry and (entry.pending or (entry.ready and now - entry.at <= CACHE_MS)) then
+    return entry.value
+  end
+  local source_buf, source_tick = fallback_source(terminal)
+  if entry and entry.ready and source_buf and entry.source_buf == source_buf and entry.source_tick == source_tick then
+    entry.at = now
     return entry.value
   end
   entry = entry or { at = 0 }
@@ -334,6 +350,8 @@ function M.get(terminal)
       entry.pending = false
       entry.ready = true
       entry.value = valid(value)
+      entry.source_buf = source_buf
+      entry.source_tick = source_tick
       prune()
       if not vim.deep_equal(previous, entry.value) then
         vim.schedule(function()

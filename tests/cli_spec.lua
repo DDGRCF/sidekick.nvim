@@ -124,6 +124,20 @@ describe("cli routing", function()
     assert.is_true(opened.opts.fork)
   end)
 
+  it("passes an initial filter to the agent switcher", function()
+    local Panel = require("sidekick.cli.panel")
+    local original_pick = Panel.pick
+    local received
+    Panel.pick = function(opts)
+      received = opts
+    end
+
+    Cli.switch({ filter = "attention" })
+
+    Panel.pick = original_pick
+    assert.are.same({ filter = "attention" }, received)
+  end)
+
   it("captures the cwd before opening the new-agent picker", function()
     local original_tools = Config.tools
     local original_attach = State.attach

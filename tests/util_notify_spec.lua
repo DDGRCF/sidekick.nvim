@@ -17,6 +17,16 @@ describe("util notify", function()
 
     Util.error("oops")
     Util.info("hello")
+    Util.notify("hidden", vim.log.levels.WARN, {
+      when = function()
+        return false
+      end,
+    })
+    Util.notify("broken guard", vim.log.levels.WARN, {
+      when = function()
+        error("guard failed")
+      end,
+    })
 
     vim.schedule = original_schedule
     vim.notify = original_notify

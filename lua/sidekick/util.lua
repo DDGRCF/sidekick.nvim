@@ -1,10 +1,20 @@
 local M = {}
 
+---@class sidekick.NotifyOpts
+---@field when? fun():boolean
+
 ---@param msg string|string[]
 ---@param level? vim.log.levels
-function M.notify(msg, level)
+---@param opts? sidekick.NotifyOpts
+function M.notify(msg, level, opts)
   msg = type(msg) == "table" and table.concat(msg, "\n") or msg
   vim.schedule(function()
+    if opts and opts.when then
+      local ok, show = pcall(opts.when)
+      if not ok or not show then
+        return
+      end
+    end
     vim.notify(msg, level or vim.log.levels.INFO, { title = "Sidekick" })
   end)
 end

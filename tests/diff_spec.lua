@@ -8,7 +8,7 @@ local TS = require("sidekick.treesitter")
 local function stub_ts()
   local original = {
     get_virtual_lines = TS.get_virtual_lines,
-    highlight_ws = TS.highlight_block,
+    highlight_block = TS.highlight_block,
   }
   local calls = { highlight_ws = {} }
 

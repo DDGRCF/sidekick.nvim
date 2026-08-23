@@ -5,6 +5,17 @@ local Config = require("sidekick.config")
 local Util = require("sidekick.util")
 
 describe("cli activity", function()
+  local original_notifications
+
+  before_each(function()
+    original_notifications = Config.cli.status.notify
+    Config.cli.status.notify = false
+  end)
+
+  after_each(function()
+    Config.cli.status.notify = original_notifications
+  end)
+
   local function terminal(status)
     return {
       id = "activity-test",
@@ -171,5 +182,91 @@ describe("cli activity", function()
 
     assert.are.equal("working", t.status)
     Activity.close(t)
+  end)
+
+  it("notifies configured background status transitions once", function()
+    local original_notify = Util.notify
+    local notifications = {}
+    Util.notify = function(msg, level)
+      notifications[#notifications + 1] = { msg = msg, level = level }
+    end
+    Config.cli.status.notify = { waiting = true, error = true, done = false }
+    local t = terminal("working")
+    t.title = "Fix tests"
+    t.tool.name = "codex"
+
+    Activity.set(t, "waiting")
+    Activity.set(t, "waiting")
+    Activity.set(t, "working")
+    Activity.set(t, "done")
+    Activity.set(t, "working")
+    Activity.set(t, "error", { code = 7 })
+
+    Util.notify = original_notify
+    assert.are.equal(2, #notifications)
+    assert.matches("codex", notifications[1].msg)
+    assert.matches("Fix tests", notifications[1].msg)
+    assert.matches("Waiting for input", notifications[1].msg)
+    assert.are.equal(vim.log.levels.INFO, notifications[1].level)
+    assert.matches("Exited with code 7", notifications[2].msg)
+    assert.are.equal(vim.log.levels.ERROR, notifications[2].level)
+  end)
+
+  it("does not notify focused or intentionally closing agents", function()
+    local original_notify = Util.notify
+    local notifications = 0
+    Util.notify = function()
+      notifications = notifications + 1
+    end
+    Config.cli.status.notify = { waiting = true, error = true, done = true }
+    local t = terminal("working")
+    t.is_focused = function()
+      return true
+    end
+
+    Activity.set(t, "waiting")
+    Activity.set(t, "error", { code = 1 })
+    local closing = terminal("working")
+    closing.closed = true
+    Activity.set(closing, "error", { code = -1 })
+
+    Util.notify = original_notify
+    assert.are.equal(0, notifications)
+  end)
+
+  it("supports opting into done notifications and disabling all notifications", function()
+    local original_notify = Util.notify
+    local notifications = {}
+    Util.notify = function(msg)
+      notifications[#notifications + 1] = msg
+    end
+    local t = terminal("working")
+    Config.cli.status.notify = { waiting = false, error = false, done = true }
+
+    Activity.set(t, "done")
+    Config.cli.status.notify = false
+    Activity.set(t, "working")
+    Activity.set(t, "error", { code = 1 })
+
+    Util.notify = original_notify
+    assert.are.equal(1, #notifications)
+    assert.matches("Finished", notifications[1])
+  end)
+
+  it("drops a queued notification when its status is no longer current", function()
+    local original_notify = Util.notify
+    local when
+    Util.notify = function(_, _, opts)
+      when = opts.when
+    end
+    Config.cli.status.notify = { waiting = true, error = true, done = false }
+    local t = terminal("working")
+
+    Activity.set(t, "waiting")
+    assert.is_true(when())
+    Activity.set(t, "working")
+
+    Util.notify = original_notify
+    assert.is_false(when())
   end)
 end)

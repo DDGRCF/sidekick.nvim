@@ -16,6 +16,11 @@ local function unread_icon()
   return type(icon) == "string" and vim.trim(icon) or "•"
 end
 
+---@alias sidekick.cli.AgentFilter "all"|"open"|"working"|"done"|"error"|"new"|"attention"|"pinned"
+---@class sidekick.cli.AgentPickerOpts
+---@field fork? boolean
+---@field filter? sidekick.cli.AgentFilter
+
 local FILTERS = {
   { name = "all", label = "All" },
   { name = "open", label = "Open" },
@@ -26,6 +31,24 @@ local FILTERS = {
   { name = "attention", label = "Attention" },
   { name = "pinned", label = "Pinned" },
 }
+
+---@param name? string
+---@return integer?
+local function find_filter(name)
+  name = name or "all"
+  for index, filter in ipairs(FILTERS) do
+    if filter.name == name then
+      return index
+    end
+  end
+end
+
+---@return string[]
+function M.filter_names()
+  return vim.tbl_map(function(filter)
+    return filter.name
+  end, FILTERS)
+end
 
 local function agent_title(item, terminal)
   local title = terminal.title
@@ -120,6 +143,27 @@ local function resolve(item)
   if t and not t.closed and (not item.instance_id or t.instance_id == item.instance_id) then
     return t
   end
+end
+
+---@param items {id:string,terminal:sidekick.cli.Terminal}[]
+---@param filter sidekick.cli.AgentFilter
+local function has_filter_match(items, filter)
+  for _, item in ipairs(items) do
+    local terminal = resolve(item)
+    if terminal then
+      local _, pinned = panel_state(item.id)
+      if
+        matches_filter({
+          status = terminal.status or "idle",
+          unread = terminal._sidekick_unread == true,
+          pinned = pinned,
+        }, filter)
+      then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 local function trim(lines)
@@ -297,11 +341,21 @@ end
 
 ---@param ctx snacks.picker.preview.ctx
 ---@param metadata table
-local function set_preview_winbar(ctx, metadata)
+---@param previous? string
+---@return string?
+local function set_preview_winbar(ctx, metadata, previous)
   if not (ctx.win and vim.api.nvim_win_is_valid(ctx.win)) then
-    return
+    return previous
   end
-  vim.api.nvim_set_option_value("winbar", preview_winbar(metadata), { win = ctx.win })
+  local value = preview_winbar(metadata)
+  if previous == value then
+    return previous
+  end
+  if vim.api.nvim_get_option_value("winbar", { win = ctx.win }) == value then
+    return value
+  end
+  vim.api.nvim_set_option_value("winbar", value, { win = ctx.win })
+  return value
 end
 
 local function preview_lines(item, on_update, Snacks)
@@ -404,19 +458,6 @@ local function show_preview_tail(ctx)
   end)
 end
 
----@param ctx snacks.picker.preview.ctx
----@param lines string[]
-local function set_preview_lines(ctx, lines)
-  if vim.api.nvim_buf_is_valid(ctx.buf) then
-    local current = vim.api.nvim_buf_get_lines(ctx.buf, 0, -1, false)
-    if vim.deep_equal(current, lines) then
-      return false
-    end
-  end
-  ctx.preview:set_lines(lines)
-  return true
-end
-
 local function selected(picker, item)
   local ret = {}
   for _, selected_item in ipairs(picker:selected({ fallback = true })) do
@@ -438,13 +479,21 @@ local function reopen(picker)
   end)
 end
 
----@param opts? {fork?:boolean}
+---@param opts? sidekick.cli.AgentPickerOpts
 local function snacks(items, Snacks, opts)
   local picker, group
-  local preview_timer
+  local preview_poll_timer
+  local preview_debounce_timer
+  local preview_debounce_pending = false
+  local preview_debounce_generation
+  local preview_polling = false
+  local preview_source ---@type {buf:integer,generation:integer}?
+  local preview_render
+  local preview_invalidate
+  local preview_refresh_pending = false
   local preview_generation = 0
   local refresh_pending = false
-  local filter_index = 1
+  local filter_index = find_filter(opts and opts.filter) or 1
   local renaming ---@type {agent:table,find:function,prompt:string|nil,title:string,pattern:string,search:string}|nil
   local function current_filter()
     return FILTERS[filter_index]
@@ -478,12 +527,53 @@ local function snacks(items, Snacks, opts)
     refresh_pending = true
     vim.schedule(function()
       refresh_pending = false
-      if picker and not picker.closed then
+      if picker and not picker.closed and type(picker.find) == "function" then
         -- `Picker:refresh()` clears multi-selection. Re-run only the finder
         -- so background metadata/status updates preserve selected agents.
         picker:find({ refresh = true })
       end
     end)
+  end
+  local function refresh_preview()
+    if preview_invalidate then
+      preview_invalidate()
+    end
+    if preview_refresh_pending or not preview_render or not picker or picker.closed then
+      return
+    end
+    preview_refresh_pending = true
+    vim.schedule(function()
+      preview_refresh_pending = false
+      if preview_render and picker and not picker.closed then
+        preview_render()
+      end
+    end)
+  end
+  local function stop_timer(timer)
+    if timer and not timer:is_closing() then
+      timer:stop()
+    end
+  end
+  local function close_timer(timer)
+    if timer and not timer:is_closing() then
+      timer:stop()
+      timer:close()
+    end
+  end
+  local function detach_preview_source()
+    local source = preview_source
+    preview_source = nil
+    if source and vim.api.nvim_buf_is_valid(source.buf) then
+      pcall(vim.api.nvim_buf_detach, source.buf)
+    end
+  end
+  local function stop_preview_updates()
+    preview_polling = false
+    preview_debounce_pending = false
+    preview_debounce_generation = nil
+    stop_timer(preview_poll_timer)
+    stop_timer(preview_debounce_timer)
+    detach_preview_source()
   end
   local function status_icon(status)
     local icon = Config.cli.win.tabs.status[status]
@@ -630,30 +720,152 @@ local function snacks(items, Snacks, opts)
       preview_generation = preview_generation + 1
       local generation = preview_generation
       local initialized = false
+      local title
+      local last_winbar
+      local last_lines
+      local last_source_buf
+      local last_source_tick
+      local ensure_updates
+      stop_preview_updates()
+      preview_invalidate = function()
+        if generation == preview_generation then
+          last_winbar = nil
+        end
+      end
+      local function source_buffer()
+        local terminal = resolve(ctx.item.agent)
+        return terminal and terminal.buf and vim.api.nvim_buf_is_valid(terminal.buf) and terminal.buf or nil
+      end
       local function render()
         if (not picker or not picker.closed) and generation == preview_generation then
-          local view = initialized and save_preview_view(ctx) or nil
           if not initialized then
             ctx.preview:reset()
           end
-          ctx.preview:set_title(ctx.item.agent.label)
-          local lines, metadata = preview_lines(ctx.item.agent, render, Snacks)
-          set_preview_lines(ctx, lines)
-          set_preview_winbar(ctx, metadata)
-          if view then
-            restore_preview_view(ctx, view)
+          local next_title = ctx.item.agent.label
+          if title ~= next_title then
+            ctx.preview:set_title(next_title)
+            title = next_title
+          end
+          local buf = source_buffer()
+          local tick = buf and vim.api.nvim_buf_get_changedtick(buf) or nil
+          local lines, metadata
+          if initialized and buf and buf == last_source_buf and tick == last_source_tick then
+            lines = last_lines
+            metadata = preview_metadata(ctx.item.agent, resolve(ctx.item.agent), Snacks)
           else
-            show_preview_tail(ctx)
+            lines, metadata = preview_lines(ctx.item.agent, render, Snacks)
+            last_source_buf = buf
+            last_source_tick = buf and vim.api.nvim_buf_get_changedtick(buf) or nil
+          end
+          local changed = not initialized or not vim.deep_equal(last_lines, lines)
+          local view = initialized and changed and save_preview_view(ctx) or nil
+          if changed then
+            ctx.preview:set_lines(lines)
+            last_lines = lines
+          end
+          last_winbar = set_preview_winbar(ctx, metadata, last_winbar)
+          if changed then
+            if view then
+              restore_preview_view(ctx, view)
+            else
+              show_preview_tail(ctx)
+            end
           end
           initialized = true
         end
       end
-      render()
-      if picker then
-        preview_timer = preview_timer or assert(vim.uv.new_timer())
-        preview_timer:stop()
-        preview_timer:start(500, 500, vim.schedule_wrap(render))
+      local function debounce_render()
+        if preview_debounce_pending or generation ~= preview_generation or not picker or picker.closed then
+          return
+        end
+        preview_debounce_pending = true
+        preview_debounce_generation = generation
+        preview_debounce_timer = preview_debounce_timer or assert(vim.uv.new_timer())
+        preview_debounce_timer:stop()
+        preview_debounce_timer:start(
+          50,
+          0,
+          vim.schedule_wrap(function()
+            if preview_debounce_generation ~= generation then
+              return
+            end
+            preview_debounce_pending = false
+            preview_debounce_generation = nil
+            if generation == preview_generation and picker and not picker.closed then
+              render()
+              ensure_updates()
+            end
+          end)
+        )
       end
+      local function attach_source(buf)
+        local source = { buf = buf, generation = generation }
+        preview_source = source
+        local ok, attached = pcall(vim.api.nvim_buf_attach, buf, false, {
+          on_lines = function()
+            if preview_source ~= source or generation ~= preview_generation then
+              return true
+            end
+            debounce_render()
+          end,
+          on_detach = function()
+            if preview_source == source then
+              preview_source = nil
+              vim.schedule(function()
+                if generation == preview_generation and picker and not picker.closed then
+                  ensure_updates()
+                end
+              end)
+            end
+          end,
+        })
+        if not ok or not attached then
+          if preview_source == source then
+            preview_source = nil
+          end
+          return false
+        end
+        return true
+      end
+      local function start_polling()
+        preview_poll_timer = preview_poll_timer or assert(vim.uv.new_timer())
+        preview_polling = true
+        preview_poll_timer:stop()
+        preview_poll_timer:start(
+          500,
+          500,
+          vim.schedule_wrap(function()
+            if generation == preview_generation and picker and not picker.closed then
+              render()
+              ensure_updates()
+            end
+          end)
+        )
+      end
+      ensure_updates = function()
+        if generation ~= preview_generation or not picker or picker.closed then
+          return
+        end
+        local buf = source_buffer()
+        if buf then
+          if not preview_source or preview_source.buf ~= buf or preview_source.generation ~= generation then
+            preview_polling = false
+            stop_timer(preview_poll_timer)
+            detach_preview_source()
+            if not attach_source(buf) then
+              start_polling()
+            end
+          end
+        else
+          detach_preview_source()
+          if not preview_polling then
+            start_polling()
+          end
+        end
+      end
+      preview_render = render
+      render()
+      ensure_updates()
     end,
     confirm = confirm,
     actions = {
@@ -742,10 +954,11 @@ local function snacks(items, Snacks, opts)
       },
     },
     on_close = function()
-      if preview_timer and not preview_timer:is_closing() then
-        preview_timer:stop()
-        preview_timer:close()
-      end
+      preview_render = nil
+      preview_invalidate = nil
+      stop_preview_updates()
+      close_timer(preview_poll_timer)
+      close_timer(preview_debounce_timer)
       for _, cached in pairs(preview_cache) do
         cached.waiter = nil
       end
@@ -765,8 +978,14 @@ local function snacks(items, Snacks, opts)
         "SidekickCliActivate",
         "SidekickCliPanel",
         "SidekickCliFork",
+        "SidekickCliUsage",
       },
-      callback = refresh,
+      callback = function(ev)
+        if ev.match ~= "SidekickCliUsage" then
+          refresh()
+        end
+        refresh_preview()
+      end,
     })
   end
 end
@@ -783,10 +1002,18 @@ function M.is_pinned(id)
   return false
 end
 
----@param opts? {fork?:boolean}
+---@param opts? sidekick.cli.AgentPickerOpts
 local function native(items, opts)
+  if opts and opts.filter and opts.filter ~= "all" then
+    items = vim.tbl_filter(function(item)
+      return matches_filter(item, opts.filter)
+    end, items)
+  end
+  local filter_index = find_filter(opts and opts.filter)
+  local prompt = filter_index and filter_index ~= 1 and ("Select agent · %s:"):format(FILTERS[filter_index].label)
+    or "Select agent:"
   vim.ui.select(items, {
-    prompt = "Select agent:",
+    prompt = prompt,
     kind = "sidekick_agent",
     format_item = function(item)
       return (item.unread and (unread_icon() .. " ") or "") .. item.label
@@ -999,11 +1226,23 @@ local function empty_snacks(Snacks, actions)
 end
 
 ---@param items? {id:string,label:string,key:string,terminal:sidekick.cli.Terminal}[]
----@param opts? {fork?:boolean}
+---@param opts? sidekick.cli.AgentPickerOpts
 function M.open(items, opts)
+  opts = opts or {}
   items = items or Panel.picker_items()
+  if opts.filter and not find_filter(opts.filter) then
+    return Util.warn(
+      ("Invalid Sidekick agent filter `%s`; expected one of: %s"):format(
+        opts.filter,
+        table.concat(M.filter_names(), ", ")
+      )
+    )
+  end
+  if opts.filter and opts.filter ~= "all" and not has_filter_match(items, opts.filter) then
+    return Util.info(("No Sidekick agents match the `%s` filter"):format(opts.filter))
+  end
   if #items == 0 then
-    if opts and opts.fork then
+    if opts.fork then
       return Util.warn("No live agent is available to fork")
     end
     local cwd = require("sidekick.cli.session").cwd()

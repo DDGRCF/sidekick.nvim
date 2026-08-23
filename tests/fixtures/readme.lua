@@ -155,14 +155,27 @@ local lualine = {
     -- CLI session status
     table.insert(opts.sections.lualine_x, 2, {
       function()
-        local status = require("sidekick.status").cli()
-        return " " .. (#status > 1 and #status or "")
+        local status = require("sidekick.status").summary()
+        local text = (" %d"):format(status.total)
+        return status.attention > 0 and (text .. (" !%d"):format(status.attention)) or text
       end,
       cond = function()
-        return #require("sidekick.status").cli() > 0
+        return require("sidekick.status").summary().total > 0
       end,
       color = function()
+        local status = require("sidekick.status").summary()
+        if status.error > 0 then
+          return "SidekickCliStatusError"
+        elseif status.attention > 0 then
+          return "SidekickCliAttention"
+        elseif status.working > 0 or status.starting > 0 then
+          return "SidekickCliStatusWorking"
+        end
         return "Special"
+      end,
+      on_click = function()
+        local status = require("sidekick.status").summary()
+        require("sidekick.cli").switch({ filter = status.attention > 0 and "attention" or "all" })
       end,
     })
   end,

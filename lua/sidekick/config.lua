@@ -4,6 +4,11 @@ local M = {}
 M.ns = vim.api.nvim_create_namespace("sidekick.ui")
 local derived_highlights = {} ---@type table<string,{attrs:table,custom:boolean}>
 
+---@class sidekick.cli.StatusNotify
+---@field waiting? boolean
+---@field error? boolean
+---@field done? boolean
+
 ---@class sidekick.Config
 local defaults = {
   nes = {
@@ -49,6 +54,15 @@ local defaults = {
       -- With no tool-specific status adapter, output becoming quiet after this
       -- delay marks a working agent as done.
       quiet_ms = 2000,
+      -- Notify when a background agent enters one of these states.
+      -- Set to `false` to disable all agent status notifications.
+      notify = {
+        waiting = true,
+        error = true,
+        -- Generic adapters infer `done` from `quiet_ms`, so this stays quiet
+        -- by default to avoid noisy or premature completion notifications.
+        done = false,
+      }, ---@type false|sidekick.cli.StatusNotify
     },
     workspace = {
       enabled = true,
@@ -334,6 +348,11 @@ function M.setup(opts)
 
     M.validate("cli.win.layout", { "float", "left", "bottom", "top", "right" })
     M.validate("cli.status.quiet_ms", "number")
+    if M.cli.status.notify ~= false and M.validate("cli.status.notify", "table") then
+      M.validate("cli.status.notify.waiting", "boolean")
+      M.validate("cli.status.notify.error", "boolean")
+      M.validate("cli.status.notify.done", "boolean")
+    end
     M.validate("cli.agent_picker.provider", { "auto", "snacks", "native" })
     M.validate("cli.agent_picker.preview_lines", "number")
     M.validate("cli.agent_picker.preview_bytes", "number")

@@ -255,4 +255,54 @@ describe("cli agent usage", function()
     assert.is_nil(Usage.get(terminal))
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("does not reparse unchanged terminal output after the cache expires", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Context usage: 32k / 128k" })
+    local terminal = {
+      id = "usage-changedtick",
+      instance_id = "one",
+      tool = { config = {} },
+      buf = buf,
+    }
+    local now = 0
+    local reads = 0
+    local old_now = vim.uv.now
+    local old_get_lines = vim.api.nvim_buf_get_lines
+    vim.uv.now = function()
+      return now
+    end
+    vim.api.nvim_buf_get_lines = function(...)
+      reads = reads + 1
+      return old_get_lines(...)
+    end
+
+    local ok, err = pcall(function()
+      assert.is_nil(Usage.get(terminal))
+      assert.is_true(vim.wait(100, function()
+        local value = Usage.get(terminal)
+        return value and value.percent == 25
+      end, 10))
+      assert.are.equal(1, reads)
+
+      now = 2000
+      assert.are.same({ used = 32000, max = 128000, percent = 25 }, Usage.get(terminal))
+      vim.wait(20)
+      assert.are.equal(1, reads)
+
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Context usage: 64k / 128k" })
+      now = 4001
+      assert.are.same({ used = 32000, max = 128000, percent = 25 }, Usage.get(terminal))
+      assert.is_true(vim.wait(100, function()
+        local value = Usage.get(terminal)
+        return value and value.percent == 50
+      end, 10))
+      assert.are.equal(2, reads)
+    end)
+
+    vim.uv.now = old_now
+    vim.api.nvim_buf_get_lines = old_get_lines
+    vim.api.nvim_buf_delete(buf, { force = true })
+    assert.is_true(ok, err)
+  end)
 end)

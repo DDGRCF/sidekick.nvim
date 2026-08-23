@@ -19,7 +19,9 @@ describe("cli agent picker", function()
   local old_resume_capture
   local old_cli_new
   local old_cli_workspace
+  local old_nvim_buf_get_lines
   local old_nvim_cmd
+  local old_nvim_set_option_value
   local old_session_cwd
   local Terminal = require("sidekick.cli.terminal")
   local Session = require("sidekick.cli.session")
@@ -44,7 +46,9 @@ describe("cli agent picker", function()
     old_resume_capture = Resume.capture
     old_cli_new = Cli.new
     old_cli_workspace = Cli.workspace
+    old_nvim_buf_get_lines = vim.api.nvim_buf_get_lines
     old_nvim_cmd = vim.api.nvim_cmd
+    old_nvim_set_option_value = vim.api.nvim_set_option_value
     old_session_cwd = Session.cwd
   end)
 
@@ -60,7 +64,9 @@ describe("cli agent picker", function()
     Resume.capture = old_resume_capture
     Cli.new = old_cli_new
     Cli.workspace = old_cli_workspace
+    vim.api.nvim_buf_get_lines = old_nvim_buf_get_lines
     vim.api.nvim_cmd = old_nvim_cmd
+    vim.api.nvim_set_option_value = old_nvim_set_option_value
     Session.cwd = old_session_cwd
     Usage.clear()
     for _, t in ipairs(registered) do
@@ -484,6 +490,131 @@ describe("cli agent picker", function()
     opts.on_close()
   end)
 
+  it("starts the Snacks picker on a requested attention filter", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local picker = { closed = false, id = "initial-filter-test" }
+    function picker:find() end
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return picker
+        end,
+      },
+    }
+    local idle = register({
+      id = "initial-filter-idle",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "idle",
+    })
+    local waiting = register({
+      id = "initial-filter-waiting",
+      tool = { name = "claude" },
+      cwd = "/tmp/project",
+      status = "waiting",
+    })
+    local items = vim.tbl_map(function(terminal)
+      return {
+        id = terminal.id,
+        key = terminal.id,
+        label = terminal.tool.name .. ": " .. terminal.id,
+        terminal = terminal,
+      }
+    end, { idle, waiting })
+
+    Picker.open(items, { filter = "attention" })
+
+    assert.are.equal("Sidekick Agents · Attention", opts.title)
+    assert.are.same(
+      { waiting.id },
+      vim.tbl_map(function(item)
+        return item.agent.id
+      end, opts.finder())
+    )
+    opts.actions.agent_filter(picker)
+    assert.are.equal("Sidekick Agents · Pinned", picker.title)
+    opts.on_close()
+  end)
+
+  it("filters the native picker before showing it", function()
+    Config.cli.agent_picker.provider = "native"
+    local selected
+    local select_opts
+    vim.ui.select = function(items, opts)
+      selected = items
+      select_opts = opts
+    end
+    local idle = register({
+      id = "native-filter-idle",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "idle",
+    })
+    local unread = register({
+      id = "native-filter-unread",
+      tool = { name = "claude" },
+      cwd = "/tmp/project",
+      status = "done",
+      _sidekick_unread = true,
+    })
+
+    Picker.open(
+      vim.tbl_map(function(terminal)
+        return {
+          id = terminal.id,
+          key = terminal.id,
+          label = terminal.tool.name .. ": " .. terminal.id,
+          terminal = terminal,
+        }
+      end, { idle, unread }),
+      { filter = "attention" }
+    )
+
+    assert.are.equal(1, #selected)
+    assert.are.equal(unread.id, selected[1].id)
+    assert.are.equal("Select agent · Attention:", select_opts.prompt)
+  end)
+
+  it("reports invalid or empty requested filters without opening a picker", function()
+    Config.cli.agent_picker.provider = "native"
+    local Util = require("sidekick.util")
+    local original_info, original_warn = Util.info, Util.warn
+    local messages = {}
+    Util.info = function(msg)
+      messages[#messages + 1] = msg
+    end
+    Util.warn = function(msg)
+      messages[#messages + 1] = msg
+    end
+    vim.ui.select = function()
+      error("unexpected picker")
+    end
+    local idle = register({
+      id = "empty-filter-idle",
+      tool = { name = "codex" },
+      cwd = "/tmp/project",
+      status = "idle",
+    })
+    local items = {
+      {
+        id = idle.id,
+        key = idle.id,
+        label = "Codex: Idle",
+        terminal = idle,
+      },
+    }
+
+    Picker.open(items, { filter = "attention" })
+    Picker.open(items, { filter = "bogus" })
+
+    Util.info, Util.warn = original_info, original_warn
+    assert.are.equal(2, #messages)
+    assert.matches("No Sidekick agents match", messages[1])
+    assert.matches("Invalid Sidekick agent filter", messages[2])
+  end)
+
   it("defers fork discovery during refreshes and keeps the fork title", function()
     Config.cli.agent_picker.provider = "snacks"
     local opts
@@ -664,6 +795,197 @@ describe("cli agent picker", function()
     assert.are.equal(0, sync_calls)
   end)
 
+  it("keeps polling previews that do not expose a local terminal buffer", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local output_callback
+    local poll_callback
+    local starts = {}
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return { closed = false, id = "mux-poll-test", find = function() end }
+        end,
+      },
+    }
+    local terminal = register({
+      id = "mux-poll",
+      tool = {
+        name = "codex",
+        config = {
+          usage = function()
+            return { used = 1, max = 10 }
+          end,
+        },
+      },
+      cwd = "/tmp/project",
+      status = "working",
+      backend = "tmux",
+      parent = {
+        dump_async = function(_, cb)
+          output_callback = cb
+        end,
+      },
+    })
+    vim.uv.new_timer = function()
+      return {
+        close = function() end,
+        is_closing = function()
+          return false
+        end,
+        start = function(_, timeout, repeat_, callback)
+          starts[#starts + 1] = { timeout = timeout, repeat_ = repeat_ }
+          poll_callback = callback
+        end,
+        stop = function() end,
+      }
+    end
+
+    Picker.open({
+      {
+        id = terminal.id,
+        key = terminal.id,
+        label = "Codex: Mux poll",
+        terminal = terminal,
+      },
+    })
+
+    local preview_buf = vim.api.nvim_create_buf(false, true)
+    local preview_win = vim.api.nvim_open_win(preview_buf, false, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 40,
+      height = 6,
+      style = "minimal",
+    })
+    local lines
+    opts.preview({
+      item = opts.finder()[1],
+      buf = preview_buf,
+      win = preview_win,
+      preview = {
+        reset = function() end,
+        set_title = function() end,
+        set_lines = function(_, value)
+          lines = value
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, value)
+        end,
+      },
+    })
+
+    assert.are.same({ { timeout = 500, repeat_ = 500 } }, starts)
+    assert.is_function(poll_callback)
+    assert.is_function(output_callback)
+    output_callback("old mux output\nlatest mux output")
+    assert.are.equal("latest mux output", lines[#lines])
+
+    opts.on_close()
+    vim.api.nvim_win_close(preview_win, true)
+    vim.api.nvim_buf_delete(preview_buf, { force = true })
+  end)
+
+  it("moves local output listeners when the selected agent changes", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local timer
+    local timer_starts = 0
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return { closed = false, id = "listener-switch-test", find = function() end }
+        end,
+      },
+    }
+    local first_buf = vim.api.nvim_create_buf(false, true)
+    local second_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(first_buf, 0, -1, false, { "first initial" })
+    vim.api.nvim_buf_set_lines(second_buf, 0, -1, false, { "second initial" })
+    local first = register({
+      id = "listener-first",
+      tool = { name = "codex", config = {} },
+      cwd = "/tmp/project",
+      status = "working",
+      buf = first_buf,
+      test_timer = vim.uv.new_timer(),
+    })
+    local second = register({
+      id = "listener-second",
+      tool = { name = "codex", config = {} },
+      cwd = "/tmp/project",
+      status = "working",
+      buf = second_buf,
+      test_timer = vim.uv.new_timer(),
+    })
+    vim.uv.new_timer = function()
+      return {
+        close = function() end,
+        is_closing = function()
+          return false
+        end,
+        start = function(_, timeout, repeat_, callback)
+          assert.are.equal(50, timeout)
+          assert.are.equal(0, repeat_)
+          timer_starts = timer_starts + 1
+          timer = callback
+        end,
+        stop = function() end,
+      }
+    end
+
+    Picker.open({
+      { id = first.id, key = first.id, label = "Codex: First", terminal = first },
+      { id = second.id, key = second.id, label = "Codex: Second", terminal = second },
+    })
+    local found = {}
+    for _, value in ipairs(opts.finder()) do
+      found[value.agent.id] = value
+    end
+    local preview_buf = vim.api.nvim_create_buf(false, true)
+    local preview_win = vim.api.nvim_open_win(preview_buf, false, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 40,
+      height = 6,
+      style = "minimal",
+    })
+    local preview = {
+      reset = function()
+        vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, {})
+      end,
+      set_title = function() end,
+      set_lines = function(_, lines)
+        vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, lines)
+      end,
+    }
+    opts.preview({ item = found[first.id], buf = preview_buf, win = preview_win, preview = preview })
+    opts.preview({ item = found[second.id], buf = preview_buf, win = preview_win, preview = preview })
+
+    vim.api.nvim_buf_set_lines(first_buf, -1, -1, false, { "stale first output" })
+    vim.wait(20)
+    assert.are.equal(0, timer_starts)
+
+    vim.api.nvim_buf_set_lines(second_buf, -1, -1, false, { "latest second output" })
+    assert.are.equal(1, timer_starts)
+    timer()
+    assert.is_true(vim.wait(100, function()
+      local lines = vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+      return lines[#lines] == "latest second output"
+    end, 10))
+
+    opts.on_close()
+    vim.api.nvim_buf_set_lines(second_buf, -1, -1, false, { "output after close" })
+    vim.wait(20)
+    assert.are.equal(1, timer_starts)
+    vim.api.nvim_win_close(preview_win, true)
+    vim.api.nvim_buf_delete(preview_buf, { force = true })
+    vim.api.nvim_buf_delete(first_buf, { force = true })
+    vim.api.nvim_buf_delete(second_buf, { force = true })
+  end)
+
   it("shows terminal preview tails and preserves a custom view while output updates", function()
     Config.cli.agent_picker.provider = "snacks"
     local opts
@@ -761,6 +1083,212 @@ describe("cli agent picker", function()
     assert.are.equal(before.lnum, after.lnum)
     assert.are.equal(before.topline, after.topline)
     opts.on_close()
+    vim.api.nvim_win_close(preview_win, true)
+    vim.api.nvim_buf_delete(preview_buf, { force = true })
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("keeps large streaming previews live without redrawing unchanged content", function()
+    Config.cli.agent_picker.provider = "snacks"
+    local opts
+    local timer
+    local timer_starts = {}
+    package.loaded.snacks = {
+      picker = {
+        pick = function(value)
+          opts = value
+          return { closed = false, id = "large-preview-test" }
+        end,
+      },
+    }
+
+    local output = {}
+    for i = 1, 20000 do
+      output[i] = ("output %05d %s"):format(i, string.rep("x", 160))
+    end
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, output)
+    local terminal = register({
+      id = "large-preview",
+      tool = {
+        name = "codex",
+        config = {
+          usage = function()
+            return { used = 1, max = 10 }
+          end,
+        },
+      },
+      cwd = "/tmp/project",
+      status = "working",
+      buf = buf,
+      test_timer = vim.uv.new_timer(),
+    })
+    Usage.get(terminal)
+    assert.is_true(vim.wait(100, function()
+      return Usage.get(terminal) ~= nil
+    end, 10))
+    vim.uv.new_timer = function()
+      return {
+        close = function() end,
+        is_closing = function()
+          return false
+        end,
+        start = function(_, timeout, repeat_, callback)
+          timer_starts[#timer_starts + 1] = { timeout = timeout, repeat_ = repeat_ }
+          timer = callback
+        end,
+        stop = function() end,
+      }
+    end
+
+    Picker.open({
+      {
+        id = terminal.id,
+        key = terminal.id,
+        label = "Codex: Large preview",
+        terminal = terminal,
+      },
+    })
+
+    local preview_buf = vim.api.nvim_create_buf(false, true)
+    local preview_win = vim.api.nvim_open_win(preview_buf, false, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 80,
+      height = 10,
+      style = "minimal",
+    })
+    local resets = 0
+    local set_lines_calls = 0
+    local set_title_calls = 0
+    local winbar_sets = 0
+    local source_reads = 0
+    vim.api.nvim_buf_get_lines = function(target, ...)
+      if target == buf then
+        source_reads = source_reads + 1
+      end
+      return old_nvim_buf_get_lines(target, ...)
+    end
+    vim.api.nvim_set_option_value = function(name, value, option_opts)
+      if name == "winbar" and option_opts.win == preview_win then
+        winbar_sets = winbar_sets + 1
+      end
+      return old_nvim_set_option_value(name, value, option_opts)
+    end
+    local item = opts.finder()[1]
+    opts.preview({
+      item = item,
+      buf = preview_buf,
+      win = preview_win,
+      preview = {
+        reset = function()
+          resets = resets + 1
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, {})
+        end,
+        set_lines = function(_, lines)
+          set_lines_calls = set_lines_calls + 1
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, lines)
+        end,
+        set_title = function()
+          set_title_calls = set_title_calls + 1
+        end,
+      },
+    })
+
+    local function drain()
+      local done = false
+      vim.schedule(function()
+        done = true
+      end)
+      assert.is_true(vim.wait(200, function()
+        return done
+      end, 10))
+    end
+
+    local preview = vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+    assert.are.equal(Config.cli.agent_picker.preview_lines, #preview)
+    assert.matches("output 20000", preview[#preview])
+    assert.are.equal(0, #timer_starts)
+    assert.are.equal(1, resets)
+    assert.are.equal(1, set_lines_calls)
+    assert.are.equal(1, set_title_calls)
+    assert.are.equal(1, winbar_sets)
+    assert.are.equal(1, source_reads)
+
+    item.agent.label = "Codex: Renamed large preview"
+    vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliPanel" })
+    drain()
+    assert.are.equal(1, set_lines_calls)
+    assert.are.equal(2, set_title_calls)
+    assert.are.equal(1, winbar_sets)
+
+    old_nvim_set_option_value("winbar", "", { win = preview_win })
+    vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliPanel" })
+    drain()
+    assert.are.equal(2, winbar_sets)
+    assert.matches("working", vim.api.nvim_get_option_value("winbar", { win = preview_win }))
+    assert.are.equal(1, source_reads)
+
+    vim.api.nvim_win_set_cursor(preview_win, { 9, 0 })
+    vim.api.nvim_win_call(preview_win, function()
+      vim.cmd("normal! zt")
+    end)
+    local before = vim.api.nvim_win_call(preview_win, vim.fn.winsaveview)
+    local last = 20000
+    for batch = 1, 8 do
+      local chunk = {}
+      for i = 1, 1000 do
+        last = last + 1
+        chunk[i] = ("stream %05d batch %d %s"):format(last, batch, string.rep("y", 160))
+      end
+      if batch == 1 then
+        for offset = 1, #chunk, 10 do
+          vim.api.nvim_buf_set_lines(buf, -1, -1, false, vim.list_slice(chunk, offset, offset + 9))
+        end
+      else
+        vim.api.nvim_buf_set_lines(buf, -1, -1, false, chunk)
+      end
+      assert.are.equal(batch, #timer_starts)
+      assert.are.same({ timeout = 50, repeat_ = 0 }, timer_starts[batch])
+      timer()
+      drain()
+      preview = vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+      assert.matches(("stream %05d"):format(last), preview[#preview])
+      if batch == 1 then
+        for _ = 1, 20 do
+          timer()
+        end
+        drain()
+        assert.are.equal(2, set_lines_calls)
+        assert.are.equal(2, set_title_calls)
+        assert.are.equal(2, winbar_sets)
+        assert.are.equal(2, source_reads)
+      end
+    end
+
+    local after = vim.api.nvim_win_call(preview_win, vim.fn.winsaveview)
+    assert.are.equal(before.lnum, after.lnum)
+    assert.are.equal(before.topline, after.topline)
+    assert.are.equal(9, set_lines_calls)
+    assert.are.equal(2, set_title_calls)
+    assert.are.equal(2, winbar_sets)
+    assert.are.equal(9, source_reads)
+
+    terminal.status = "done"
+    vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliStatus" })
+    drain()
+    local winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
+    assert.matches("done", winbar)
+    assert.are.equal(9, set_lines_calls)
+    assert.are.equal(3, winbar_sets)
+    assert.are.equal(9, source_reads)
+
+    opts.on_close()
+    local starts = #timer_starts
+    vim.api.nvim_buf_set_lines(buf, -1, -1, false, { "output after close" })
+    drain()
+    assert.are.equal(starts, #timer_starts)
     vim.api.nvim_win_close(preview_win, true)
     vim.api.nvim_buf_delete(preview_buf, { force = true })
     vim.api.nvim_buf_delete(buf, { force = true })

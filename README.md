@@ -283,6 +283,15 @@ local defaults = {
       -- With no tool-specific status adapter, output becoming quiet after this
       -- delay marks a working agent as done.
       quiet_ms = 2000,
+      -- Notify when a background agent enters one of these states.
+      -- Set to `false` to disable all agent status notifications.
+      notify = {
+        waiting = true,
+        error = true,
+        -- Generic adapters infer `done` from `quiet_ms`, so this stays quiet
+        -- by default to avoid noisy or premature completion notifications.
+        done = false,
+      }, ---@type false|sidekick.cli.StatusNotify
     },
     workspace = {
       enabled = true,
@@ -867,11 +876,14 @@ require("sidekick.cli").show(opts)
 ```
 
 </td></tr>
-<tr><td><code>:Sidekick cli switch</code> Fuzzy-select an agent tab in the current Sidekick container.</td><td>
+<tr><td><code>:Sidekick cli switch</code> Fuzzy-select an agent tab in the current Sidekick container.
+Use `filter = "attention"` to show only unread, waiting, or failed agents.
+From the command line, use `:Sidekick cli switch filter=attention`.</td><td>
 
 
 ```lua
-require("sidekick.cli").switch()
+---@param opts? {filter?:sidekick.cli.AgentFilter}
+require("sidekick.cli").switch(opts)
 ```
 
 </td></tr>
@@ -1200,14 +1212,27 @@ and **CLI sessions** in your statusline.
     -- CLI session status
     table.insert(opts.sections.lualine_x, 2, {
       function()
-        local status = require("sidekick.status").cli()
-        return " " .. (#status > 1 and #status or "")
+        local status = require("sidekick.status").summary()
+        local text = (" %d"):format(status.total)
+        return status.attention > 0 and (text .. (" !%d"):format(status.attention)) or text
       end,
       cond = function()
-        return #require("sidekick.status").cli() > 0
+        return require("sidekick.status").summary().total > 0
       end,
       color = function()
+        local status = require("sidekick.status").summary()
+        if status.error > 0 then
+          return "SidekickCliStatusError"
+        elseif status.attention > 0 then
+          return "SidekickCliAttention"
+        elseif status.working > 0 or status.starting > 0 then
+          return "SidekickCliStatusWorking"
+        end
         return "Special"
+      end,
+      on_click = function()
+        local status = require("sidekick.status").summary()
+        require("sidekick.cli").switch({ filter = status.attention > 0 and "attention" or "all" })
       end,
     })
   end,

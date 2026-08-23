@@ -205,6 +205,18 @@ function M.complete(line)
       return name:find(tool, 1, true) == 1
     end, vim.tbl_keys(require("sidekick.config").tools()))
   end
+  local filter = line:match("^cli%s+switch%s+filter=([^%s]*)$")
+  if filter then
+    local names = require("sidekick.cli.agent_picker").filter_names()
+    return vim.tbl_map(
+      function(name)
+        return "filter=" .. name
+      end,
+      vim.tbl_filter(function(name)
+        return name:find(filter, 1, true) == 1
+      end, names)
+    )
+  end
   local cmd = M.parse(line, { error = false })
   return type(cmd) == "table" and cmd or {}
 end

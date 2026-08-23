@@ -1324,8 +1324,9 @@ function M.picker_items()
   return items
 end
 
-function M.pick()
-  require("sidekick.cli.agent_picker").open(M.picker_items())
+---@param opts? sidekick.cli.AgentPickerOpts
+function M.pick(opts)
+  require("sidekick.cli.agent_picker").open(M.picker_items(), opts)
 end
 
 local function pick_layout()

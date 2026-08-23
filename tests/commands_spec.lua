@@ -92,6 +92,14 @@ describe("commands", function()
         expected_args = { name = "codex", focus = false },
       },
       {
+        name = "passes a filter to the agent switcher",
+        input = "cli switch filter=attention",
+        expect_command = function()
+          return Commands.commands.cli.switch
+        end,
+        expected_args = { filter = "attention" },
+      },
+      {
         name = "completes root commands",
         input = "",
         expected_completions = { "cli", "nes" },
@@ -165,6 +173,11 @@ describe("commands", function()
         name = "suggests tools for a new agent",
         input = "Sidekick cli new co",
         expected = { "codex", "copilot" },
+      },
+      {
+        name = "suggests agent switch filters",
+        input = "Sidekick cli switch filter=att",
+        expected = { "filter=attention" },
       },
       {
         name = "returns empty when no matches",

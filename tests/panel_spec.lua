@@ -748,6 +748,23 @@ describe("cli agent panel", function()
     assert.are.same({ first.id, second.id }, order)
   end)
 
+  it("forwards an initial filter to the agent picker", function()
+    local AgentPicker = require("sidekick.cli.agent_picker")
+    local original_open = AgentPicker.open
+    local opened
+    AgentPicker.open = function(items, opts)
+      opened = { items = items, opts = opts }
+    end
+    local first = fake("attention-route", "codex", "Attention route", "waiting")
+    Panel.show(first)
+
+    Panel.pick({ filter = "attention" })
+
+    AgentPicker.open = original_open
+    assert.are.equal(first.id, opened.items[1].id)
+    assert.are.same({ filter = "attention" }, opened.opts)
+  end)
+
   it("persists agent selection frequency", function()
     local first = fake("persist-one", "codex", "Persisted")
     local saved = Util.get_state("cli-agent-selection")

@@ -16,6 +16,46 @@ local function is_focused(terminal)
   return ok and focused == true
 end
 
+---@param terminal sidekick.cli.Terminal
+---@param status sidekick.cli.ActivityStatus
+---@param data? table
+local function notify_status(terminal, status, data)
+  local notifications = Config.cli.status.notify
+  if type(notifications) ~= "table" or notifications[status] ~= true or terminal.closed or is_focused(terminal) then
+    return
+  end
+
+  local tool = terminal.tool and terminal.tool.name or "agent"
+  local icon = require("sidekick.cli.icons").tool(tool)
+  local identity = icon and (icon .. " " .. tool) or tool
+  local title = type(terminal.title) == "string" and vim.trim(terminal.title:gsub("[%c\r\n]+", " "):gsub("%s+", " "))
+    or ""
+  if title ~= "" and title ~= tool then
+    identity = identity .. " · " .. title
+  end
+
+  local message
+  if status == "waiting" then
+    message = "Waiting for input"
+  elseif status == "done" then
+    message = "Finished"
+  elseif status == "error" then
+    message = data and type(data.code) == "number" and ("Exited with code %d"):format(data.code) or "Failed"
+  else
+    return
+  end
+  Util.notify(identity .. "\n" .. message, status == "error" and vim.log.levels.ERROR or vim.log.levels.INFO, {
+    when = function()
+      local current = Config.cli.status.notify
+      return type(current) == "table"
+        and current[status] == true
+        and terminal.status == status
+        and not terminal.closed
+        and not is_focused(terminal)
+    end,
+  })
+end
+
 local function set_unread(terminal, unread)
   unread = unread == true
   if terminal._sidekick_unread == unread then
@@ -60,6 +100,7 @@ function M.set(terminal, status, data)
   if status == "waiting" or status == "done" or status == "error" then
     mark_unread(terminal)
   end
+  notify_status(terminal, status, data)
   Util.emit(
     "SidekickCliStatus",
     vim.tbl_extend("force", {

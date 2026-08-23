@@ -191,8 +191,11 @@ function M.reference(opts)
 end
 
 --- Fuzzy-select an agent tab in the current Sidekick container.
-function M.switch()
-  require("sidekick.cli.panel").pick()
+--- Use `filter = "attention"` to show only unread, waiting, or failed agents.
+--- From the command line, use `:Sidekick cli switch filter=attention`.
+---@param opts? {filter?:sidekick.cli.AgentFilter}
+function M.switch(opts)
+  require("sidekick.cli.panel").pick(opts)
 end
 
 --- Save or restore persistent agent conversations and panel layout.
