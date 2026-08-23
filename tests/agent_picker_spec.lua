@@ -353,7 +353,8 @@ describe("cli agent picker", function()
     winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
     assert.matches("Context:", winbar)
     assert.matches("12k / 128k", winbar)
-    assert.matches("SidekickCliStatusDone", winbar)
+    assert.matches("done", winbar)
+    assert.is_nil(winbar:find("%#", 1, true))
     opts.on_close()
     vim.api.nvim_win_close(preview_win, true)
     vim.api.nvim_buf_delete(preview_buf, { force = true })
@@ -1045,7 +1046,13 @@ describe("cli agent picker", function()
     })
     local resets = 0
     local item = opts.finder()[1]
-    opts.preview({
+    local initial_win_calls = 0
+    local original_win_call = vim.api.nvim_win_call
+    vim.api.nvim_win_call = function(...)
+      initial_win_calls = initial_win_calls + 1
+      return original_win_call(...)
+    end
+    local ok, err = pcall(opts.preview, {
       item = item,
       buf = preview_buf,
       win = preview_win,
@@ -1060,11 +1067,16 @@ describe("cli agent picker", function()
         set_title = function() end,
       },
     })
+    vim.api.nvim_win_call = original_win_call
+    assert.is_true(ok, err)
+    assert.are.equal(0, initial_win_calls)
+    assert.is_false(vim.b[preview_buf].snacks_scroll)
 
     local line_count = vim.api.nvim_buf_line_count(preview_buf)
     local initial = vim.api.nvim_win_call(preview_win, vim.fn.winsaveview)
-    assert.are.equal(math.max(1, line_count - vim.api.nvim_win_get_height(preview_win) + 1), initial.lnum)
-    assert.are.equal(initial.lnum, initial.topline)
+    assert.are.equal(line_count, initial.lnum)
+    assert.is_true(initial.topline <= line_count)
+    assert.is_true(initial.topline + vim.api.nvim_win_get_height(preview_win) > line_count)
 
     vim.api.nvim_win_set_cursor(preview_win, { 9, 0 })
     vim.api.nvim_win_call(preview_win, function()
@@ -1215,6 +1227,9 @@ describe("cli agent picker", function()
     assert.are.equal(1, set_title_calls)
     assert.are.equal(1, winbar_sets)
     assert.are.equal(1, source_reads)
+    local initial_winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
+    assert.matches("working", initial_winbar)
+    assert.is_nil(initial_winbar:find("%#", 1, true))
 
     item.agent.label = "Codex: Renamed large preview"
     vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliPanel" })

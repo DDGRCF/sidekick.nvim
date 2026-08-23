@@ -240,7 +240,6 @@ local function preview_metadata(item, terminal, Snacks)
   return {
     status = status,
     unread = terminal and terminal._sidekick_unread == true,
-    status_hl = "SidekickCliStatus" .. (terminal and status:gsub("^%l", string.upper) or "Error"),
     status_icon = status_icon,
     directory_icon = directory_icon,
     backend_icon = backend_icon,
@@ -262,9 +261,6 @@ end
 ---@param metadata table
 ---@return string
 local function preview_winbar(metadata)
-  local function highlight(group, text)
-    return ("%%#%s#%s%%*"):format(group, escape_winbar(text))
-  end
   local function count(value)
     if value >= 1e6 then
       return ("%.1fm"):format(value / 1e6):gsub("%.0m$", "m")
@@ -273,26 +269,13 @@ local function preview_winbar(metadata)
     end
     return tostring(math.floor(value + 0.5))
   end
-  local function context_hl(context)
-    if not context.percent then
-      return "Number"
-    elseif context.percent >= 85 then
-      return "SidekickCliStatusError"
-    elseif context.percent >= 60 then
-      return "SidekickCliStatusWorking"
-    end
-    return "SidekickCliStatusDone"
-  end
   local ret = {
-    highlight(metadata.status_hl, metadata.status_icon),
-    " ",
-    highlight("Special", "Status:"),
-    " ",
-    highlight(metadata.status_hl, metadata.status),
-    "  ",
+    metadata.status_icon,
+    "Status:",
+    metadata.status,
   }
   if metadata.unread then
-    vim.list_extend(ret, { highlight("SidekickCliAttention", "NEW"), "  " })
+    ret[#ret + 1] = "NEW"
   end
   if metadata.context then
     local context = metadata.context
@@ -303,40 +286,27 @@ local function preview_winbar(metadata)
     if context.percent then
       text = text .. (" (%d%%)"):format(context.percent)
     end
-    vim.list_extend(ret, { highlight(context_hl(context), text), "  " })
+    ret[#ret + 1] = text
   end
   vim.list_extend(ret, {
-    highlight("Directory", metadata.directory_icon),
-    " ",
-    highlight("Special", "Directory:"),
-    " ",
-    highlight("Directory", metadata.directory),
-    "  ",
-    highlight("Identifier", metadata.backend_icon),
-    " ",
-    highlight("Special", "Backend:"),
-    " ",
-    highlight("Identifier", metadata.backend),
+    metadata.directory_icon,
+    "Directory:",
+    metadata.directory,
+    metadata.backend_icon,
+    "Backend:",
+    metadata.backend,
   })
   if metadata.forked_from then
-    vim.list_extend(ret, {
-      "  ",
-      highlight("Special", "Forked from:"),
-      " ",
-      highlight("Title", metadata.forked_from.title or metadata.forked_from.id),
-    })
+    vim.list_extend(ret, { "Forked from:", metadata.forked_from.title or metadata.forked_from.id })
   else
     local status = metadata.fork_status or (metadata.forkable and "ready" or "unavailable")
-    local status_hl = status == "ready" and "DiagnosticOk" or status == "pending" and "DiagnosticWarn" or "Comment"
     local status_text = status == "ready" and "ready" or status == "pending" and "pending" or "unavailable"
-    vim.list_extend(ret, {
-      "  ",
-      highlight("Special", "Fork:"),
-      " ",
-      highlight(status_hl, status_text),
-    })
+    vim.list_extend(ret, { "Fork:", status_text })
   end
-  return table.concat(ret)
+  -- Highlight switches (`%#Group#...%*`) in a rapidly redrawn floating
+  -- winbar can make Neovim spend seconds in its redraw phase. Keep this as
+  -- escaped plain text; the picker rows still carry status highlights.
+  return escape_winbar(table.concat(ret, " "))
 end
 
 ---@param ctx snacks.picker.preview.ctx
@@ -449,13 +419,11 @@ local function show_preview_tail(ctx)
   if count == 0 then
     return
   end
-  vim.api.nvim_win_call(ctx.win, function()
-    -- Keep the cursor on the first visible line. This shows the newest output
-    -- without pinning the cursor to the final line or leaving empty rows below.
-    local first = math.max(1, count - vim.api.nvim_win_get_height(ctx.win) + 1)
-    vim.api.nvim_win_set_cursor(ctx.win, { first, 0 })
-    vim.cmd("normal! zt")
-  end)
+  -- Moving to the last line makes Neovim reveal the tail without temporarily
+  -- entering the preview window. `nvim_win_call()` plus `normal! zt` can force
+  -- a synchronous window redraw while an active terminal is still flushing,
+  -- which may block the whole UI for seconds or longer on the first preview.
+  vim.api.nvim_win_set_cursor(ctx.win, { count, 0 })
 end
 
 local function selected(picker, item)
@@ -740,6 +708,11 @@ local function snacks(items, Snacks, opts)
         if (not picker or not picker.closed) and generation == preview_generation then
           if not initialized then
             ctx.preview:reset()
+            if vim.api.nvim_buf_is_valid(ctx.buf) then
+              -- Programmatic tail positioning should not start a Snacks smooth
+              -- scroll animation for this generated preview buffer.
+              vim.b[ctx.buf].snacks_scroll = false
+            end
           end
           local next_title = ctx.item.agent.label
           if title ~= next_title then
