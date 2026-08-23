@@ -22,6 +22,7 @@ describe("cli agent picker", function()
   local old_nvim_buf_get_lines
   local old_nvim_cmd
   local old_nvim_set_option_value
+  local old_nvim_win_set_config
   local old_session_cwd
   local Terminal = require("sidekick.cli.terminal")
   local Session = require("sidekick.cli.session")
@@ -32,6 +33,21 @@ describe("cli agent picker", function()
     Terminal.terminals[t.id] = t
     registered[#registered + 1] = t
     return t
+  end
+
+  local function chunk_text(chunks)
+    return type(chunks) == "table" and table.concat(vim.tbl_map(function(chunk)
+      return chunk[1]
+    end, chunks)) or tostring(chunks or "")
+  end
+
+  local function has_highlight(chunks, group)
+    for _, chunk in ipairs(type(chunks) == "table" and chunks or {}) do
+      if chunk[2] == group then
+        return true
+      end
+    end
+    return false
   end
 
   before_each(function()
@@ -49,6 +65,7 @@ describe("cli agent picker", function()
     old_nvim_buf_get_lines = vim.api.nvim_buf_get_lines
     old_nvim_cmd = vim.api.nvim_cmd
     old_nvim_set_option_value = vim.api.nvim_set_option_value
+    old_nvim_win_set_config = vim.api.nvim_win_set_config
     old_session_cwd = Session.cwd
   end)
 
@@ -67,6 +84,7 @@ describe("cli agent picker", function()
     vim.api.nvim_buf_get_lines = old_nvim_buf_get_lines
     vim.api.nvim_cmd = old_nvim_cmd
     vim.api.nvim_set_option_value = old_nvim_set_option_value
+    vim.api.nvim_win_set_config = old_nvim_win_set_config
     Session.cwd = old_session_cwd
     Usage.clear()
     for _, t in ipairs(registered) do
@@ -299,6 +317,7 @@ describe("cli agent picker", function()
       width = 30,
       height = 4,
       style = "minimal",
+      border = "rounded",
     })
     opts.preview({
       item = found,
@@ -317,16 +336,17 @@ describe("cli agent picker", function()
     })
     assert.are.equal("latest output", lines[#lines])
     assert.are.equal(1, directory_icon_calls)
-    local winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
-    assert.matches("Status:", winbar)
-    assert.matches("NEW", winbar)
-    assert.matches("done", winbar)
-    assert.matches("Directory:", winbar)
-    assert.matches("/tmp/project", winbar)
-    assert.matches("Backend:", winbar)
-    assert.matches("terminal", winbar)
-    assert.matches("%%#SidekickCliStatusDone#", winbar)
-    assert.matches("%%#SidekickCliAttention#", winbar)
+    local config = vim.api.nvim_win_get_config(preview_win)
+    local title = chunk_text(config.title)
+    local footer = chunk_text(config.footer)
+    assert.matches("Agent one", title)
+    assert.matches("NEW", title)
+    assert.matches("done", title)
+    assert.matches("/tmp/project", footer)
+    assert.matches("terminal", footer)
+    assert.is_true(has_highlight(config.title, "SidekickCliStatusDone"))
+    assert.is_true(has_highlight(config.title, "SidekickCliAttention"))
+    assert.are.equal("", vim.api.nvim_get_option_value("winbar", { win = preview_win }))
     opts.actions.agent_mark_read({
       selected = function()
         return {}
@@ -352,14 +372,15 @@ describe("cli agent picker", function()
         end,
       },
     })
-    winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
-    assert.matches("Context:", winbar)
-    assert.matches("12k / 128k", winbar)
-    assert.matches("done", winbar)
-    assert.matches("%%#SidekickCliStatusDone#", winbar)
-    assert.matches("%%#Directory#", winbar)
-    local _, highlight_runs = winbar:gsub("%%#[^#]+#", "")
-    assert.is_true(highlight_runs <= 6)
+    config = vim.api.nvim_win_get_config(preview_win)
+    title = chunk_text(config.title)
+    footer = chunk_text(config.footer)
+    assert.matches("Context", title)
+    assert.matches("12k / 128k", title)
+    assert.matches("done", title)
+    assert.is_true(has_highlight(config.title, "SidekickCliStatusDone"))
+    assert.is_true(has_highlight(config.footer, "Directory"))
+    assert.is_nil(title:find("%#", 1, true))
     opts.on_close()
     vim.api.nvim_win_close(preview_win, true)
     vim.api.nvim_buf_delete(preview_buf, { force = true })
@@ -881,6 +902,13 @@ describe("cli agent picker", function()
       },
     })
 
+    local winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
+    assert.matches("working", winbar)
+    assert.is_nil(winbar:find("%#", 1, true))
+    assert.matches(
+      "WinBar:SidekickCliStatusWorking",
+      vim.api.nvim_get_option_value("winhighlight", { win = preview_win })
+    )
     assert.are.same({ { timeout = 500, repeat_ = 500 } }, starts)
     assert.is_function(poll_callback)
     assert.is_function(output_callback)
@@ -1175,11 +1203,12 @@ describe("cli agent picker", function()
       width = 80,
       height = 10,
       style = "minimal",
+      border = "rounded",
     })
     local resets = 0
     local set_lines_calls = 0
     local set_title_calls = 0
-    local winbar_sets = 0
+    local header_sets = 0
     local source_reads = 0
     vim.api.nvim_buf_get_lines = function(target, ...)
       if target == buf then
@@ -1187,11 +1216,11 @@ describe("cli agent picker", function()
       end
       return old_nvim_buf_get_lines(target, ...)
     end
-    vim.api.nvim_set_option_value = function(name, value, option_opts)
-      if name == "winbar" and option_opts.win == preview_win then
-        winbar_sets = winbar_sets + 1
+    vim.api.nvim_win_set_config = function(win, config)
+      if win == preview_win and (config.title or config.footer) then
+        header_sets = header_sets + 1
       end
-      return old_nvim_set_option_value(name, value, option_opts)
+      return old_nvim_win_set_config(win, config)
     end
     local item = opts.finder()[1]
     opts.preview({
@@ -1230,24 +1259,25 @@ describe("cli agent picker", function()
     assert.are.equal(1, resets)
     assert.are.equal(1, set_lines_calls)
     assert.are.equal(1, set_title_calls)
-    assert.are.equal(1, winbar_sets)
+    assert.are.equal(1, header_sets)
     assert.are.equal(1, source_reads)
-    local initial_winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
-    assert.matches("working", initial_winbar)
-    assert.matches("%%#SidekickCliStatusWorking#", initial_winbar)
+    local initial_config = vim.api.nvim_win_get_config(preview_win)
+    assert.matches("working", chunk_text(initial_config.title))
+    assert.is_true(has_highlight(initial_config.title, "SidekickCliStatusWorking"))
+    assert.are.equal("", vim.api.nvim_get_option_value("winbar", { win = preview_win }))
 
     item.agent.label = "Codex: Renamed large preview"
     vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliPanel" })
     drain()
     assert.are.equal(1, set_lines_calls)
     assert.are.equal(2, set_title_calls)
-    assert.are.equal(1, winbar_sets)
+    assert.are.equal(2, header_sets)
 
-    old_nvim_set_option_value("winbar", "", { win = preview_win })
+    old_nvim_win_set_config(preview_win, { title = "external", footer = "external" })
     vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliPanel" })
     drain()
-    assert.are.equal(2, winbar_sets)
-    assert.matches("working", vim.api.nvim_get_option_value("winbar", { win = preview_win }))
+    assert.are.equal(3, header_sets)
+    assert.matches("working", chunk_text(vim.api.nvim_win_get_config(preview_win).title))
     assert.are.equal(1, source_reads)
 
     vim.api.nvim_win_set_cursor(preview_win, { 9, 0 })
@@ -1282,7 +1312,7 @@ describe("cli agent picker", function()
         drain()
         assert.are.equal(2, set_lines_calls)
         assert.are.equal(2, set_title_calls)
-        assert.are.equal(2, winbar_sets)
+        assert.are.equal(3, header_sets)
         assert.are.equal(2, source_reads)
       end
     end
@@ -1292,16 +1322,17 @@ describe("cli agent picker", function()
     assert.are.equal(before.topline, after.topline)
     assert.are.equal(9, set_lines_calls)
     assert.are.equal(2, set_title_calls)
-    assert.are.equal(2, winbar_sets)
+    assert.are.equal(3, header_sets)
     assert.are.equal(9, source_reads)
 
     terminal.status = "done"
     vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliStatus" })
     drain()
-    local winbar = vim.api.nvim_get_option_value("winbar", { win = preview_win })
-    assert.matches("done", winbar)
+    local config = vim.api.nvim_win_get_config(preview_win)
+    assert.matches("done", chunk_text(config.title))
+    assert.is_true(has_highlight(config.title, "SidekickCliStatusDone"))
     assert.are.equal(9, set_lines_calls)
-    assert.are.equal(3, winbar_sets)
+    assert.are.equal(4, header_sets)
     assert.are.equal(9, source_reads)
 
     opts.on_close()

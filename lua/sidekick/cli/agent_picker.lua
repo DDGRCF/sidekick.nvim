@@ -254,14 +254,10 @@ local function preview_metadata(item, terminal, Snacks)
   }
 end
 
----@param value any
-local function escape_winbar(value)
-  return tostring(value):gsub("%%", "%%%%")
-end
-
 ---@param metadata table
----@return string
-local function preview_winbar(metadata)
+---@param title string
+---@return {title:table[],footer:table[],text:string,key:string}
+local function preview_header(metadata, title)
   local function count(value)
     if value >= 1e6 then
       return ("%.1fm"):format(value / 1e6):gsub("%.0m$", "m")
@@ -280,71 +276,139 @@ local function preview_winbar(metadata)
     end
     return "SidekickCliStatusDone"
   end
-  local ret = {}
-  local active_hl
-  local function add(group, text)
+  local function add(ret, group, text)
     if text == nil or text == "" then
       return
     end
     if #ret > 0 then
-      ret[#ret + 1] = " "
+      -- Non-breaking spaces survive Snacks' title-template normalization.
+      ret[#ret + 1] = { " │ ", "FloatBorder" }
     end
-    if active_hl ~= group then
-      ret[#ret + 1] = ("%%#%s#"):format(group)
-      active_hl = group
-    end
-    ret[#ret + 1] = escape_winbar(text)
+    ret[#ret + 1] = { tostring(text), group }
   end
 
-  -- Coalesce each semantic section into one highlight run. This preserves
-  -- color while avoiding the old pattern of switching and resetting the
-  -- winbar highlight around every icon, label, and value.
-  add(metadata.status_hl, table.concat({ metadata.status_icon, "Status:", metadata.status }, " "))
+  local top = {}
+  local bottom = {}
+  add(top, "Title", title)
+  add(top, metadata.status_hl, table.concat({ metadata.status_icon, metadata.status }, " "))
   if metadata.unread then
-    add("SidekickCliAttention", "NEW")
+    add(top, "SidekickCliAttention", "NEW")
   end
   if metadata.context then
     local context = metadata.context
-    local text = ("Context: %s"):format(count(context.used))
+    local text = ("Context %s"):format(count(context.used))
     if context.max then
-      text = ("Context: %s / %s"):format(count(context.used), count(context.max))
+      text = ("Context %s / %s"):format(count(context.used), count(context.max))
     end
     if context.percent then
       text = text .. (" (%d%%)"):format(context.percent)
     end
-    add(context_hl(context), text)
+    add(top, context_hl(context), text)
   end
-  add("Directory", table.concat({ metadata.directory_icon, "Directory:", metadata.directory }, " "))
-  add("Identifier", table.concat({ metadata.backend_icon, "Backend:", metadata.backend }, " "))
+  add(bottom, "Directory", table.concat({ metadata.directory_icon, metadata.directory }, " "))
+  add(bottom, "Identifier", table.concat({ metadata.backend_icon, metadata.backend }, " "))
   if metadata.forked_from then
-    add("Title", "Forked from: " .. (metadata.forked_from.title or metadata.forked_from.id))
+    add(bottom, "Title", "Forked from " .. (metadata.forked_from.title or metadata.forked_from.id))
   else
     local status = metadata.fork_status or (metadata.forkable and "ready" or "unavailable")
     local status_hl = status == "ready" and "DiagnosticOk" or status == "pending" and "DiagnosticWarn" or "Comment"
     local status_text = status == "ready" and "ready" or status == "pending" and "pending" or "unavailable"
-    add(status_hl, "Fork: " .. status_text)
+    add(bottom, status_hl, "Fork " .. status_text)
   end
-  ret[#ret + 1] = "%*"
-  return table.concat(ret)
+
+  local function pad(chunks)
+    table.insert(chunks, 1, { " ", "FloatTitle" })
+    chunks[#chunks + 1] = { " ", "FloatTitle" }
+    return chunks
+  end
+  local function chunk_text(chunks)
+    return table.concat(vim.tbl_map(function(chunk)
+      return chunk[1]
+    end, chunks))
+  end
+  local function chunk_key(chunks)
+    return table.concat(
+      vim.tbl_map(function(chunk)
+        return chunk[1] .. "\0" .. chunk[2]
+      end, chunks),
+      "\0"
+    )
+  end
+
+  top = pad(top)
+  bottom = pad(bottom)
+  return {
+    title = top,
+    footer = bottom,
+    text = chunk_text(top) .. "  " .. chunk_text(bottom),
+    key = chunk_key(top) .. "\1" .. chunk_key(bottom),
+  }
 end
 
 ---@param ctx snacks.picker.preview.ctx
+---@param title string
 ---@param metadata table
 ---@param previous? string
 ---@return string?
-local function set_preview_winbar(ctx, metadata, previous)
+local function set_preview_header(ctx, title, metadata, previous)
   if not (ctx.win and vim.api.nvim_win_is_valid(ctx.win)) then
     return previous
   end
-  local value = preview_winbar(metadata)
-  if previous == value then
+  local header = preview_header(metadata, title)
+  local config = vim.api.nvim_win_get_config(ctx.win)
+  local bordered_float = config.relative ~= "" and type(config.border) == "table" and #config.border > 0
+  local key = (bordered_float and "border:" or "winbar:") .. header.key
+  if previous == key then
     return previous
   end
-  if vim.api.nvim_get_option_value("winbar", { win = ctx.win }) == value then
-    return value
+
+  if bordered_float then
+    -- Border text accepts native highlighted chunks. Unlike `%#Group#` in a
+    -- winbar, these are not reparsed as a statusline on every terminal redraw.
+    local preview_win = ctx.preview and ctx.preview.win
+    if preview_win and preview_win.opts then
+      preview_win.opts.title = header.title
+      preview_win.opts.title_pos = "left"
+      preview_win.opts.footer = header.footer
+      preview_win.opts.footer_pos = "left"
+    end
+    if
+      not vim.deep_equal(config.title, header.title)
+      or not vim.deep_equal(config.footer, header.footer)
+      or config.title_pos ~= "left"
+      or config.footer_pos ~= "left"
+    then
+      vim.api.nvim_win_set_config(ctx.win, {
+        title = header.title,
+        title_pos = "left",
+        footer = header.footer,
+        footer_pos = "left",
+      })
+    end
+    if vim.api.nvim_get_option_value("winbar", { win = ctx.win }) ~= "" then
+      vim.api.nvim_set_option_value("winbar", "", { win = ctx.win })
+    end
+    return key
   end
-  vim.api.nvim_set_option_value("winbar", value, { win = ctx.win })
-  return value
+
+  -- Borderless picker layouts keep a compact fallback. It deliberately has
+  -- no embedded highlight directives, so redraw stays on the cheap path.
+  local value = header.text:gsub("%%", "%%%%")
+  if vim.api.nvim_get_option_value("winbar", { win = ctx.win }) ~= value then
+    vim.api.nvim_set_option_value("winbar", value, { win = ctx.win })
+  end
+  local current_hl = vim.api.nvim_get_option_value("winhighlight", { win = ctx.win })
+  local highlights = vim.tbl_filter(function(value_hl)
+    return not value_hl:match("^WinBar:") and not value_hl:match("^WinBarNC:")
+  end, vim.split(current_hl, ",", { plain = true, trimempty = true }))
+  local group = metadata.unread and "SidekickCliAttention" or metadata.status_hl
+  highlights[#highlights + 1] = "WinBar:" .. group
+  highlights[#highlights + 1] = "WinBarNC:" .. group
+  local next_hl = table.concat(highlights, ",")
+  if current_hl ~= next_hl then
+    vim.api.nvim_set_option_value("winhighlight", next_hl, { win = ctx.win })
+  end
+  return key
 end
 
 local function preview_lines(item, on_update, Snacks)
@@ -708,7 +772,7 @@ local function snacks(items, Snacks, opts)
       local generation = preview_generation
       local initialized = false
       local title
-      local last_winbar
+      local last_header
       local last_lines
       local last_source_buf
       local last_source_tick
@@ -716,7 +780,7 @@ local function snacks(items, Snacks, opts)
       stop_preview_updates()
       preview_invalidate = function()
         if generation == preview_generation then
-          last_winbar = nil
+          last_header = nil
         end
       end
       local function source_buffer()
@@ -755,7 +819,7 @@ local function snacks(items, Snacks, opts)
             ctx.preview:set_lines(lines)
             last_lines = lines
           end
-          last_winbar = set_preview_winbar(ctx, metadata, last_winbar)
+          last_header = set_preview_header(ctx, next_title, metadata, last_header)
           if changed then
             if view then
               restore_preview_view(ctx, view)
