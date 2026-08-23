@@ -407,7 +407,7 @@ describe("cli agent panel", function()
 
     local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
 
-    assert.is_nil(line:find("SidekickCliToolCodex", 1, true))
+    assert.matches("SidekickCliTabToolCodex", line)
     assert.matches("SidekickCliTabSelectedToolClaude", line)
   end)
 

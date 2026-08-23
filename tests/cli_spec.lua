@@ -492,8 +492,8 @@ describe("cli routing", function()
     local parts = Select.format({ tool = { name = "codex" }, installed = true, new = true })
     Config.cli.win.tabs.icons = old_icons
 
-    assert.are.same({ "C", "SidekickCliInstalled" }, parts[1])
-    assert.are.same({ "codex" }, parts[3])
+    assert.are.same({ "C", "SidekickCliToolCodex" }, parts[1])
+    assert.are.same({ "codex", "SidekickCliToolCodex" }, parts[3])
     assert.matches(
       "C codex",
       table.concat(vim.tbl_map(function(part)

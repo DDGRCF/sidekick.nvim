@@ -124,9 +124,9 @@ function M.format(state, picker)
     ret[#ret + 1] = { " " }
   end
   local icon = Icons.tool(state.tool.name)
-  ret[#ret + 1] = { icon or Config.ui.icons[status], status_hl }
+  ret[#ret + 1] = { icon or Config.ui.icons[status], icon and Icons.highlight(state.tool.name) or status_hl }
   ret[#ret + 1] = { " " }
-  ret[#ret + 1] = { state.tool.name }
+  ret[#ret + 1] = { state.tool.name, Icons.highlight(state.tool.name) }
   local len = sw(state.tool.name) + 2
   if state.new or not state.session then
     ret[#ret + 1] = { " · new", "Special" }

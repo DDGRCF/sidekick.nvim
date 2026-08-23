@@ -747,7 +747,7 @@ local function snacks(items, Snacks, opts)
       end
       if icon then
         ret[#ret + 1] = { icon .. " ", tool_hl }
-        ret[#ret + 1] = { agent.tool, "Identifier" }
+        ret[#ret + 1] = { agent.tool, tool_hl }
       else
         ret[#ret + 1] = { agent.tool, tool_hl }
       end
