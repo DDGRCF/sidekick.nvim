@@ -238,6 +238,8 @@ local function preview_metadata(item, terminal, Snacks)
   local fork_status = item.fork_status
   local forked_from = item.forked_from
   return {
+    tool = item.tool,
+    tool_hl = Icons.highlight(item.tool),
     status = status,
     unread = terminal and terminal._sidekick_unread == true,
     status_hl = "SidekickCliStatus" .. (terminal and status:gsub("^%l", string.upper) or "Error"),
@@ -289,7 +291,15 @@ local function preview_header(metadata, title)
 
   local top = {}
   local bottom = {}
-  add(top, "Title", title)
+  local tool = tostring(metadata.tool or "")
+  local title_tool = title:sub(1, #tool)
+  local title_rest = title:sub(#tool + 1)
+  if tool ~= "" and title_tool:lower() == tool:lower() and title_rest:match("^:%s*") then
+    top[#top + 1] = { title_tool, metadata.tool_hl }
+    top[#top + 1] = { title_rest, "Title" }
+  else
+    add(top, "Title", title)
+  end
   add(top, metadata.status_hl, table.concat({ metadata.status_icon, metadata.status }, " "))
   if metadata.unread then
     add(top, "SidekickCliAttention", "NEW")
