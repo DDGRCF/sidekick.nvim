@@ -240,6 +240,7 @@ local function preview_metadata(item, terminal, Snacks)
   return {
     status = status,
     unread = terminal and terminal._sidekick_unread == true,
+    status_hl = "SidekickCliStatus" .. (terminal and status:gsub("^%l", string.upper) or "Error"),
     status_icon = status_icon,
     directory_icon = directory_icon,
     backend_icon = backend_icon,
@@ -269,13 +270,38 @@ local function preview_winbar(metadata)
     end
     return tostring(math.floor(value + 0.5))
   end
-  local ret = {
-    metadata.status_icon,
-    "Status:",
-    metadata.status,
-  }
+  local function context_hl(context)
+    if not context.percent then
+      return "Number"
+    elseif context.percent >= 85 then
+      return "SidekickCliStatusError"
+    elseif context.percent >= 60 then
+      return "SidekickCliStatusWorking"
+    end
+    return "SidekickCliStatusDone"
+  end
+  local ret = {}
+  local active_hl
+  local function add(group, text)
+    if text == nil or text == "" then
+      return
+    end
+    if #ret > 0 then
+      ret[#ret + 1] = " "
+    end
+    if active_hl ~= group then
+      ret[#ret + 1] = ("%%#%s#"):format(group)
+      active_hl = group
+    end
+    ret[#ret + 1] = escape_winbar(text)
+  end
+
+  -- Coalesce each semantic section into one highlight run. This preserves
+  -- color while avoiding the old pattern of switching and resetting the
+  -- winbar highlight around every icon, label, and value.
+  add(metadata.status_hl, table.concat({ metadata.status_icon, "Status:", metadata.status }, " "))
   if metadata.unread then
-    ret[#ret + 1] = "NEW"
+    add("SidekickCliAttention", "NEW")
   end
   if metadata.context then
     local context = metadata.context
@@ -286,27 +312,20 @@ local function preview_winbar(metadata)
     if context.percent then
       text = text .. (" (%d%%)"):format(context.percent)
     end
-    ret[#ret + 1] = text
+    add(context_hl(context), text)
   end
-  vim.list_extend(ret, {
-    metadata.directory_icon,
-    "Directory:",
-    metadata.directory,
-    metadata.backend_icon,
-    "Backend:",
-    metadata.backend,
-  })
+  add("Directory", table.concat({ metadata.directory_icon, "Directory:", metadata.directory }, " "))
+  add("Identifier", table.concat({ metadata.backend_icon, "Backend:", metadata.backend }, " "))
   if metadata.forked_from then
-    vim.list_extend(ret, { "Forked from:", metadata.forked_from.title or metadata.forked_from.id })
+    add("Title", "Forked from: " .. (metadata.forked_from.title or metadata.forked_from.id))
   else
     local status = metadata.fork_status or (metadata.forkable and "ready" or "unavailable")
+    local status_hl = status == "ready" and "DiagnosticOk" or status == "pending" and "DiagnosticWarn" or "Comment"
     local status_text = status == "ready" and "ready" or status == "pending" and "pending" or "unavailable"
-    vim.list_extend(ret, { "Fork:", status_text })
+    add(status_hl, "Fork: " .. status_text)
   end
-  -- Highlight switches (`%#Group#...%*`) in a rapidly redrawn floating
-  -- winbar can make Neovim spend seconds in its redraw phase. Keep this as
-  -- escaped plain text; the picker rows still carry status highlights.
-  return escape_winbar(table.concat(ret, " "))
+  ret[#ret + 1] = "%*"
+  return table.concat(ret)
 end
 
 ---@param ctx snacks.picker.preview.ctx
