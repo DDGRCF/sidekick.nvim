@@ -820,7 +820,7 @@ local function render_tab(p, t, left_separator, right_separator, title_value, co
   local base = selected and "SidekickCliTabSelected" or "SidekickCliTab"
   local state = (t.status or "idle"):gsub("^%l", string.upper)
   local marker = compact and "" or agent_marker_text(t)
-  local tool_hl = tab_highlight(tool_highlight(t), selected)
+  local tool_hl = selected and tab_highlight(tool_highlight(t), true) or base
   local marker_hl = selected and tab_highlight("SidekickCliInstalled", true) or base
   local status_hl = tab_highlight("SidekickCliStatus" .. state, selected)
   local attention_hl = tab_highlight("SidekickCliAttention", selected)
