@@ -242,7 +242,10 @@ local function read_incremental(path, parser, cb)
         end
 
         local value = parser(data)
-        local partial = data:match("([^\n]*)$")
+        -- Anchor the scan so long JSONL records are traversed once. The
+        -- unanchored `([^\n]*)$` retries its greedy match at every byte and
+        -- becomes quadratic (tens of seconds for transcript-sized chunks).
+        local partial = data:match("^.*\n([^\n]*)$") or data
         file_cache[key] = {
           at = vim.uv.now(),
           size = stat.size,

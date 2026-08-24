@@ -143,6 +143,31 @@ describe("cli agent usage", function()
     assert.are.equal(#latest + 1, reads[2].size)
   end)
 
+  it("extracts partial records from large native transcripts without blocking", function()
+    local path = vim.fn.tempname()
+    local event = vim.json.encode({
+      type = "assistant",
+      message = { usage = { input_tokens = 9000, output_tokens = 500 } },
+    })
+    local file = assert(io.open(path, "wb"))
+    file:write(string.rep("x", 32 * 1024), "\n", event)
+    file:close()
+
+    local value
+    local started = vim.uv.hrtime()
+    Usage.claude(nil, { conversation = { data = { path = path } } }, function(usage)
+      value = usage
+    end)
+    assert.is_true(vim.wait(1000, function()
+      return value ~= nil
+    end, 10))
+    local elapsed = (vim.uv.hrtime() - started) / 1e6
+    vim.fn.delete(path)
+
+    assert.are.same({ used = 9500 }, value)
+    assert.is_true(elapsed < 500, ("large transcript parsing took %.1fms"):format(elapsed))
+  end)
+
   it("emits a usage event when asynchronous usage changes", function()
     local seen
     local group = vim.api.nvim_create_augroup("sidekick_test_usage_event", { clear = true })
