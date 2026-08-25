@@ -276,7 +276,7 @@ describe("cli agent picker", function()
       {
         id = "one",
         key = "one",
-        label = "Codex: Agent one",
+        label = "C codex ✓: Agent one",
         terminal = terminal,
       },
     })
@@ -345,6 +345,9 @@ describe("cli agent picker", function()
     assert.matches("/tmp/project", footer)
     assert.matches("terminal", footer)
     assert.is_true(has_highlight(config.title, "SidekickCliToolCodex"))
+    assert.is_true(vim.iter(config.title):any(function(chunk)
+      return chunk[1] == "C codex: Agent one" and chunk[2] == "SidekickCliToolCodex"
+    end))
     assert.is_true(has_highlight(config.title, "SidekickCliStatusDone"))
     assert.is_true(has_highlight(config.title, "SidekickCliAttention"))
     assert.are.equal("", vim.api.nvim_get_option_value("winbar", { win = preview_win }))
@@ -376,10 +379,13 @@ describe("cli agent picker", function()
     config = vim.api.nvim_win_get_config(preview_win)
     title = chunk_text(config.title)
     footer = chunk_text(config.footer)
-    assert.matches("Context", title)
-    assert.matches("12k / 128k", title)
+    assert.is_nil(title:find("Context", 1, true))
+    assert.matches("Context", footer)
+    assert.matches("12k / 128k", footer)
+    assert.is_true(footer:find("Context", 1, true) < footer:find("/tmp/project", 1, true))
     assert.matches("done", title)
     assert.is_true(has_highlight(config.title, "SidekickCliStatusDone"))
+    assert.is_true(has_highlight(config.footer, "SidekickCliStatusDone"))
     assert.is_true(has_highlight(config.footer, "Directory"))
     assert.is_nil(title:find("%#", 1, true))
     opts.on_close()
@@ -1269,6 +1275,7 @@ describe("cli agent picker", function()
     assert.are.equal("", vim.api.nvim_get_option_value("winbar", { win = preview_win }))
 
     item.agent.label = "Codex: Renamed large preview"
+    item.agent.title = "Renamed large preview"
     vim.api.nvim_exec_autocmds("User", { pattern = "SidekickCliPanel" })
     drain()
     assert.are.equal(1, set_lines_calls)

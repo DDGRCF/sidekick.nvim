@@ -239,7 +239,9 @@ local function preview_metadata(item, terminal, Snacks)
   local forked_from = item.forked_from
   return {
     tool = item.tool,
+    tool_icon = Icons.tool(item.tool),
     tool_hl = Icons.highlight(item.tool),
+    title = item.title,
     status = status,
     unread = terminal and terminal._sidekick_unread == true,
     status_hl = "SidekickCliStatus" .. (terminal and status:gsub("^%l", string.upper) or "Error"),
@@ -257,9 +259,8 @@ local function preview_metadata(item, terminal, Snacks)
 end
 
 ---@param metadata table
----@param title string
 ---@return {title:table[],footer:table[],text:string,key:string}
-local function preview_header(metadata, title)
+local function preview_header(metadata)
   local function count(value)
     if value >= 1e6 then
       return ("%.1fm"):format(value / 1e6):gsub("%.0m$", "m")
@@ -292,14 +293,12 @@ local function preview_header(metadata, title)
   local top = {}
   local bottom = {}
   local tool = tostring(metadata.tool or "")
-  local title_tool = title:sub(1, #tool)
-  local title_rest = title:sub(#tool + 1)
-  if tool ~= "" and title_tool:lower() == tool:lower() and title_rest:match("^:%s*") then
-    top[#top + 1] = { title_tool, metadata.tool_hl }
-    top[#top + 1] = { title_rest, "Title" }
-  else
-    add(top, "Title", title)
+  local title = tostring(metadata.title or "")
+  local agent = metadata.tool_icon and (metadata.tool_icon .. " " .. tool) or tool
+  if title ~= "" and title:lower() ~= tool:lower() then
+    agent = agent .. ": " .. title
   end
+  add(top, metadata.tool_hl, agent)
   add(top, metadata.status_hl, table.concat({ metadata.status_icon, metadata.status }, " "))
   if metadata.unread then
     add(top, "SidekickCliAttention", "NEW")
@@ -313,7 +312,7 @@ local function preview_header(metadata, title)
     if context.percent then
       text = text .. (" (%d%%)"):format(context.percent)
     end
-    add(top, context_hl(context), text)
+    add(bottom, context_hl(context), text)
   end
   add(bottom, "Directory", table.concat({ metadata.directory_icon, metadata.directory }, " "))
   add(bottom, "Identifier", table.concat({ metadata.backend_icon, metadata.backend }, " "))
@@ -356,15 +355,14 @@ local function preview_header(metadata, title)
 end
 
 ---@param ctx snacks.picker.preview.ctx
----@param title string
 ---@param metadata table
 ---@param previous? string
 ---@return string?
-local function set_preview_header(ctx, title, metadata, previous)
+local function set_preview_header(ctx, metadata, previous)
   if not (ctx.win and vim.api.nvim_win_is_valid(ctx.win)) then
     return previous
   end
-  local header = preview_header(metadata, title)
+  local header = preview_header(metadata)
   local config = vim.api.nvim_win_get_config(ctx.win)
   local bordered_float = config.relative ~= "" and type(config.border) == "table" and #config.border > 0
   local key = (bordered_float and "border:" or "winbar:") .. header.key
@@ -829,7 +827,7 @@ local function snacks(items, Snacks, opts)
             ctx.preview:set_lines(lines)
             last_lines = lines
           end
-          last_header = set_preview_header(ctx, next_title, metadata, last_header)
+          last_header = set_preview_header(ctx, metadata, last_header)
           if changed then
             if view then
               restore_preview_view(ctx, view)
