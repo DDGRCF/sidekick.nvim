@@ -60,8 +60,8 @@ describe("cli workspace", function()
     terminal = nil
   end)
 
-  it("leaves workspace restore user-driven by default", function()
-    assert.is_false(Config.cli.workspace.autorestore)
+  it("prompts before restoring a workspace by default", function()
+    assert.are.equal("prompt", Config.cli.workspace.autorestore)
   end)
 
   it("snapshots resumable conversations and panel placement", function()
@@ -213,7 +213,10 @@ describe("cli workspace", function()
   end)
 
   it("restores after VimEnter and delays pickers until restore completes", function()
+    local AgentPicker = require("sidekick.cli.agent_picker")
     local original_restore = Workspace.restore
+    local original_picker_open = AgentPicker.open
+    local original_picker_items = Panel.picker_items
     local original_create_autocmd = vim.api.nvim_create_autocmd
     local original_schedule = vim.schedule
     local original_vim = vim
@@ -274,9 +277,35 @@ describe("cli workspace", function()
     assert.are.equal(1, restore_calls)
     assert.are.same({ silent = true }, restore_opts)
 
+    restore_calls = 0
+    picker_calls = 0
+    scheduled = {}
+    Config.cli.workspace.autorestore = "prompt"
+    Util.set_state("cli-workspace", {
+      version = 1,
+      saved_at = os.time(),
+      agents = { { id = "saved-agent" } },
+      panels = {},
+    })
+    Panel.picker_items = function()
+      return {}
+    end
+    AgentPicker.open = function(items)
+      picker_calls = picker_calls + 1
+      assert.are.same({}, items)
+    end
+    setup(1)
+    assert.are.equal(0, restore_calls)
+    assert.are.equal(1, #scheduled)
+    scheduled[1]()
+    assert.are.equal(0, restore_calls)
+    assert.are.equal(1, picker_calls)
+
     vim.api.nvim_create_autocmd = original_create_autocmd
     vim.schedule = original_schedule
     Workspace.restore = original_restore
+    AgentPicker.open = original_picker_open
+    Panel.picker_items = original_picker_items
   end)
 
   it("claims a different native tab for panels with the same cwd", function()

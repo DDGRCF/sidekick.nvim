@@ -1140,6 +1140,28 @@ describe("cli agent picker", function()
     assert.are.equal(1, resets)
     assert.are.equal(before.lnum, after.lnum)
     assert.are.equal(before.topline, after.topline)
+
+    -- Snacks may invoke the preview callback again when its finder refreshes.
+    -- Treating that as a new preview would reset the cursor to the tail.
+    opts.preview({
+      item = item,
+      buf = preview_buf,
+      win = preview_win,
+      preview = {
+        reset = function()
+          resets = resets + 1
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, {})
+        end,
+        set_lines = function(_, lines)
+          vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, lines)
+        end,
+        set_title = function() end,
+      },
+    })
+    after = vim.api.nvim_win_call(preview_win, vim.fn.winsaveview)
+    assert.are.equal(2, resets)
+    assert.are.equal(before.lnum, after.lnum)
+    assert.are.equal(before.topline, after.topline)
     opts.on_close()
     vim.api.nvim_win_close(preview_win, true)
     vim.api.nvim_buf_delete(preview_buf, { force = true })

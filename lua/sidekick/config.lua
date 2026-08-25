@@ -67,8 +67,9 @@ local defaults = {
     workspace = {
       enabled = true,
       autosave = true,
-      -- Keep restore user-driven so an empty agent picker can offer New/Resume.
-      autorestore = false,
+      -- Prompt to start fresh or resume when a saved workspace is available.
+      -- Use `true` to restore immediately or `false` to do nothing on startup.
+      autorestore = "prompt", ---@type boolean|"prompt"
       restore_tabpages = true,
       resume_timeout_ms = 15000,
     },

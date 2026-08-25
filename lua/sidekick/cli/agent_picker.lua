@@ -596,6 +596,8 @@ local function snacks(items, Snacks, opts)
   local preview_invalidate
   local preview_refresh_pending = false
   local preview_generation = 0
+  local preview_active_key
+  local preview_views = {} ---@type table<string,vim.fn.winsaveview.ret>
   local refresh_pending = false
   local filter_index = find_filter(opts and opts.filter) or 1
   local renaming ---@type {agent:table,find:function,prompt:string|nil,title:string,pattern:string,search:string}|nil
@@ -821,6 +823,16 @@ local function snacks(items, Snacks, opts)
       return ret
     end,
     preview = function(ctx)
+      local agent = ctx.item.agent
+      local preview_key = table.concat({ agent.tool or "", agent.id or "", agent.instance_id or "" }, "\0")
+      if preview_active_key then
+        local view = save_preview_view(ctx)
+        if view then
+          preview_views[preview_active_key] = view
+        end
+      end
+      local initial_view = preview_views[preview_key]
+      preview_active_key = preview_key
       preview_generation = preview_generation + 1
       local generation = preview_generation
       local initialized = false
@@ -876,9 +888,12 @@ local function snacks(items, Snacks, opts)
           if changed then
             if view then
               restore_preview_view(ctx, view)
+            elseif initial_view then
+              restore_preview_view(ctx, initial_view)
             else
               show_preview_tail(ctx)
             end
+            initial_view = nil
           end
           initialized = true
         end

@@ -570,6 +570,35 @@ local function schedule_autorestore()
   end)
 end
 
+local function has_saved_agents()
+  local state = Util.get_state(state_key)
+  return type(state) == "table" and state.version == version and type(state.agents) == "table" and #state.agents > 0
+end
+
+local function schedule_restore_prompt()
+  if not has_saved_agents() then
+    return
+  end
+  vim.schedule(function()
+    if M.restoring then
+      return
+    end
+    local Panel = require("sidekick.cli.panel")
+    local items = Panel.picker_items()
+    if #items == 0 and has_saved_agents() then
+      require("sidekick.cli.agent_picker").open(items)
+    end
+  end)
+end
+
+local function startup_restore()
+  if Config.cli.workspace.autorestore == true then
+    schedule_autorestore()
+  elseif Config.cli.workspace.autorestore == "prompt" then
+    schedule_restore_prompt()
+  end
+end
+
 ---@param cb fun()
 ---@return boolean deferred
 function M.after_restore(cb)
@@ -619,12 +648,12 @@ function M.setup()
   })
   if Config.cli.workspace.autorestore then
     if vim.v.vim_did_enter == 1 then
-      schedule_autorestore()
+      startup_restore()
     else
       vim.api.nvim_create_autocmd("VimEnter", {
         group = Config.augroup,
         once = true,
-        callback = schedule_autorestore,
+        callback = startup_restore,
       })
     end
   end
