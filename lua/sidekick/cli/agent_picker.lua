@@ -166,24 +166,71 @@ local function has_filter_match(items, filter)
   return false
 end
 
+local function reverse(lines)
+  for i = 1, math.floor(#lines / 2) do
+    local other = #lines - i + 1
+    lines[i], lines[other] = lines[other], lines[i]
+  end
+  return lines
+end
+
+local function suffix(line, bytes)
+  if #line <= bytes then
+    return line
+  end
+  local start = #line - bytes + 1
+  -- Do not start in the middle of a UTF-8 sequence.
+  while start <= #line do
+    local byte = line:byte(start)
+    if not byte or byte < 0x80 or byte >= 0xC0 then
+      break
+    end
+    start = start + 1
+  end
+  return line:sub(start)
+end
+
 local function trim(lines)
   local bytes = math.max(1024, Config.cli.agent_picker.preview_bytes)
   local ret, used = {}, 0
-  for _, line in ipairs(lines) do
-    if used >= bytes then
+  for i = #lines, 1, -1 do
+    local separator = #ret > 0 and 1 or 0
+    local remaining = bytes - used - separator
+    if remaining <= 0 then
       break
     end
-    line = #line > bytes - used and line:sub(1, bytes - used) or line
+    local line = suffix(lines[i], remaining)
     ret[#ret + 1] = line
-    used = used + #line + 1
+    used = used + separator + #line
   end
-  return ret
+  return reverse(ret)
+end
+
+local function output_tail(output, max)
+  local bytes = math.max(1024, Config.cli.agent_picker.preview_bytes)
+  local start = math.max(1, #output - bytes + 1)
+  if start > 1 then
+    local newline = output:find("\n", start, true)
+    if newline then
+      start = newline + 1
+    else
+      while start <= #output do
+        local byte = output:byte(start)
+        if not byte or byte < 0x80 or byte >= 0xC0 then
+          break
+        end
+        start = start + 1
+      end
+    end
+  end
+  local lines = vim.split(output:sub(start), "\n", { plain = true })
+  lines = vim.list_slice(lines, math.max(1, #lines - max + 1))
+  return trim(lines)
 end
 
 local function append_output(lines, output, max)
   if output then
-    local output_lines = vim.split(output, "\n", { plain = true })
-    vim.list_extend(lines, vim.list_slice(output_lines, math.max(1, #output_lines - max + 1)))
+    vim.list_extend(lines, output_tail(output, max))
   end
 end
 
@@ -192,9 +239,7 @@ local function cache_output(output)
     return
   end
   local max = math.max(1, Config.cli.agent_picker.preview_lines)
-  local lines = vim.split(output, "\n", { plain = true })
-  lines = vim.list_slice(lines, math.max(1, #lines - max + 1))
-  return table.concat(trim(lines), "\n")
+  return table.concat(output_tail(output, max), "\n")
 end
 
 local function prune_cache(limit)

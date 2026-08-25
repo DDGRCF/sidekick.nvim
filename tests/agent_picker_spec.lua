@@ -821,9 +821,15 @@ describe("cli agent picker", function()
     assert.are.equal(0, sync_calls)
     assert.is_function(callback)
 
-    callback("old output\nlatest mux output")
+    local output = {}
+    for i = 1, 1000 do
+      output[i] = ("mux output %04d"):format(i)
+    end
+    callback(table.concat(output, "\n"))
     local loaded = Picker.preview_lines(item)
-    assert.are.equal("latest mux output", loaded[#loaded])
+    assert.are.equal(Config.cli.agent_picker.preview_lines, #loaded)
+    assert.are.equal("mux output 0501", loaded[1])
+    assert.are.equal("mux output 1000", loaded[#loaded])
     assert.are.equal(1, updates)
     assert.are.equal(0, stale_updates)
     assert.are.equal(0, sync_calls)
@@ -1156,7 +1162,7 @@ describe("cli agent picker", function()
 
     local output = {}
     for i = 1, 20000 do
-      output[i] = ("output %05d %s"):format(i, string.rep("x", 160))
+      output[i] = ("output %05d %s"):format(i, string.rep("x", 80))
     end
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, output)

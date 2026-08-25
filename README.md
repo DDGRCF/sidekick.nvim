@@ -305,7 +305,7 @@ local defaults = {
       -- `auto` uses Snacks when available and falls back to `vim.ui.select`.
       provider = "auto", ---@type "auto"|"snacks"|"native"
       -- Maximum terminal-output tail shown in the agent preview.
-      preview_lines = 80,
+      preview_lines = 500,
       -- Maximum bytes retained by terminal and multiplexer previews.
       preview_bytes = 64 * 1024,
       -- Keep pinned agents when running the completed-agent cleanup action.
