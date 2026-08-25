@@ -8,6 +8,7 @@ local Prompt = require("sidekick.cli.ui.prompt")
 local Select = require("sidekick.cli.ui.select")
 local Session = require("sidekick.cli.session")
 local State = require("sidekick.cli.state")
+local Util = require("sidekick.util")
 local Workspace = require("sidekick.cli.workspace")
 
 describe("cli routing", function()
@@ -136,6 +137,44 @@ describe("cli routing", function()
 
     Panel.pick = original_pick
     assert.are.same({ filter = "attention" }, received)
+  end)
+
+  it("offers New or Resume instead of opening two pickers when no agent is running", function()
+    local AgentPicker = require("sidekick.cli.agent_picker")
+    local Panel = require("sidekick.cli.panel")
+    local saved_workspace = Util.get_state("cli-workspace")
+    local original_open = AgentPicker.open
+    local original_items = Panel.picker_items
+    local original_select = Select.select
+    local opened
+    Util.set_state("cli-workspace", {
+      version = 1,
+      saved_at = os.time(),
+      agents = { { id = "saved-agent" } },
+      panels = {},
+    })
+    Panel.picker_items = function()
+      return {}
+    end
+    AgentPicker.open = function(items, opts)
+      opened = { items = items, opts = opts }
+    end
+    Select.select = function()
+      error("unexpected CLI tool picker")
+    end
+
+    Cli.select({ cwd = "/tmp/resumable-project" })
+
+    AgentPicker.open = original_open
+    Panel.picker_items = original_items
+    Select.select = original_select
+    if saved_workspace == nil then
+      Util.del_state("cli-workspace")
+    else
+      Util.set_state("cli-workspace", saved_workspace)
+    end
+    assert.are.same({}, opened.items)
+    assert.are.equal("/tmp/resumable-project", opened.opts.cwd)
   end)
 
   it("captures the cwd before opening the new-agent picker", function()

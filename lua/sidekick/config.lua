@@ -67,9 +67,8 @@ local defaults = {
     workspace = {
       enabled = true,
       autosave = true,
-      -- Prompt to start fresh or resume when a saved workspace is available.
-      -- Use `true` to restore immediately or `false` to do nothing on startup.
-      autorestore = "prompt", ---@type boolean|"prompt"
+      -- Restore saved agents automatically on startup.
+      autorestore = false,
       restore_tabpages = true,
       resume_timeout_ms = 15000,
     },

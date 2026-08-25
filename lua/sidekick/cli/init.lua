@@ -125,6 +125,13 @@ function M.select(opts)
   opts = opts or {}
   opts = type(opts) == "function" and { cb = opts } or opts --[[@as sidekick.cli.Select]]
   local cwd = Session.cwd({ cwd = opts.cwd })
+  if
+    not opts.cb
+    and require("sidekick.cli.workspace").has_saved_agents()
+    and #require("sidekick.cli.panel").picker_items() == 0
+  then
+    return require("sidekick.cli.agent_picker").open({}, { cwd = cwd })
+  end
   opts.cb = opts.cb
     or function(state)
       if state then

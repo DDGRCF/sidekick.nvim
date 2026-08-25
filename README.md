@@ -296,9 +296,8 @@ local defaults = {
     workspace = {
       enabled = true,
       autosave = true,
-      -- Prompt to start fresh or resume when a saved workspace is available.
-      -- Use `true` to restore immediately or `false` to do nothing on startup.
-      autorestore = "prompt", ---@type boolean|"prompt"
+      -- Restore saved agents automatically on startup.
+      autorestore = false,
       restore_tabpages = true,
       resume_timeout_ms = 15000,
     },
@@ -709,9 +708,9 @@ notifications are disabled by default because generic status adapters infer comp
 from a quiet-output timeout. Configure individual states with `cli.status.notify`, or
 set it to `false` to disable all agent-status notifications.
 
-Agent workspaces are saved automatically. By default, startup prompts to start a new agent or
-resume when a saved workspace exists and no agent is running; the empty agent switcher offers
-the same actions. During restore,
+Agent workspaces are saved automatically. When no agent is running and a saved workspace exists,
+the normal CLI selector and the empty agent switcher offer actions to start a new agent or resume.
+During restore,
 Sidekick first reattaches a live tmux/zellij session; if the process is gone, it starts
 the tool's native resume command in a new terminal. Set `cli.workspace.autorestore = true`
 to restore automatically on startup. A failed or unsupported resume is reported and never

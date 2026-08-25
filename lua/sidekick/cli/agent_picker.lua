@@ -20,6 +20,7 @@ end
 ---@class sidekick.cli.AgentPickerOpts
 ---@field fork? boolean
 ---@field filter? sidekick.cli.AgentFilter
+---@field cwd? string
 
 local FILTERS = {
   { name = "all", label = "All" },
@@ -1369,7 +1370,7 @@ function M.open(items, opts)
     if opts.fork then
       return Util.warn("No live agent is available to fork")
     end
-    local cwd = require("sidekick.cli.session").cwd()
+    local cwd = require("sidekick.cli.session").cwd({ cwd = opts.cwd })
     local actions = empty_actions(cwd)
     local provider = Config.cli.agent_picker.provider
     local ok, Snacks = pcall(require, "snacks")
