@@ -60,6 +60,10 @@ describe("cli workspace", function()
     terminal = nil
   end)
 
+  it("leaves workspace restore user-driven by default", function()
+    assert.is_false(Config.cli.workspace.autorestore)
+  end)
+
   it("snapshots resumable conversations and panel placement", function()
     terminal = {
       id = "workspace-agent",

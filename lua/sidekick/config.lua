@@ -67,7 +67,8 @@ local defaults = {
     workspace = {
       enabled = true,
       autosave = true,
-      autorestore = true,
+      -- Keep restore user-driven so an empty agent picker can offer New/Resume.
+      autorestore = false,
       restore_tabpages = true,
       resume_timeout_ms = 15000,
     },
