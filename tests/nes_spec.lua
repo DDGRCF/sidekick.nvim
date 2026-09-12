@@ -64,6 +64,106 @@ describe("nes enabled option", function()
   end)
 end)
 
+describe("nes LSP synchronization", function()
+  local buf
+  local original_enabled
+  local original_nes_enabled
+  local original_get_client
+  local original_get_client_by_id
+
+  before_each(function()
+    original_enabled = Nes.enabled
+    original_nes_enabled = Config.nes.enabled
+    original_get_client = Config.get_client
+    original_get_client_by_id = vim.lsp.get_client_by_id
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, vim.fn.tempname() .. ".lua")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "local foo = 1" })
+    vim.api.nvim_set_current_buf(buf)
+    vim.lsp.util.buf_versions[buf] = 7
+    Nes.enabled = true
+    Config.nes.enabled = true
+    Nes._edits = {}
+    Nes._requests = {}
+  end)
+
+  after_each(function()
+    Config.get_client = original_get_client
+    vim.lsp.get_client_by_id = original_get_client_by_id
+    Nes.enabled = original_enabled
+    Config.nes.enabled = original_nes_enabled
+    Nes._edits = {}
+    Nes._requests = {}
+    Nes._skip_update = {}
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end)
+
+  it("ignores stale LspNotify versions and requests the current version", function()
+    local requests = {}
+    local client = {
+      id = 91,
+      offset_encoding = "utf-16",
+      request = function(_, method, params)
+        requests[#requests + 1] = { method = method, params = params }
+        return false
+      end,
+    }
+    Config.get_client = function(target)
+      assert.are.equal(buf, target)
+      return client
+    end
+
+    Nes.update({
+      buf = buf,
+      data = { params = { textDocument = { version = 6 } } },
+    })
+    assert.are.equal(0, #requests)
+
+    Nes.update({
+      buf = buf,
+      data = { params = { textDocument = { version = 7 } } },
+    })
+    assert.are.equal(1, #requests)
+    assert.are.equal("textDocument/copilotInlineEdit", requests[1].method)
+    assert.are.equal(7, requests[1].params.textDocument.version)
+  end)
+
+  it("notifies Copilot when a valid inline edit is shown", function()
+    local notified
+    local client = {
+      id = 92,
+      offset_encoding = "utf-16",
+      notify = function(_, method, params)
+        notified = { method = method, params = params }
+      end,
+    }
+    vim.lsp.get_client_by_id = function(id)
+      return id == client.id and client or nil
+    end
+    Nes._requests[client.id] = 17
+
+    Nes._handler(nil, {
+      edits = {
+        {
+          command = { title = "show", command = "copilot.show", arguments = { "edit-1" } },
+          range = {
+            start = { line = 0, character = 0 },
+            ["end"] = { line = 0, character = 0 },
+          },
+          text = "local foo = 2",
+          textDocument = { uri = vim.uri_from_bufnr(buf), version = 7 },
+        },
+      },
+    }, { client_id = client.id, request_id = 17 })
+
+    assert.are.equal("textDocument/didShowInlineEdit", notified.method)
+    assert.are.same({ "edit-1" }, notified.params.item.command.arguments)
+    assert.are.equal(1, #Nes._edits)
+  end)
+end)
+
 describe("nes review navigation", function()
   local buf
   local original_enabled

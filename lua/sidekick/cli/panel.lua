@@ -1106,6 +1106,7 @@ function M.show(t, focus)
   end
   if focus then
     vim.api.nvim_set_current_win(p.win)
+    vim.fn.winrestview({ leftcol = 0 })
     vim.cmd.startinsert()
     t.normal_mode = false
   end

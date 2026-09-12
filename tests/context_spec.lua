@@ -939,3 +939,18 @@ describe("context module", function()
     end)
   end)
 end)
+
+describe("provider context formatting", function()
+  it("separates Claude character columns from line anchors", function()
+    local claude = assert(loadfile("sk/cli/claude.lua"))()
+    local text = {
+      {
+        { "@", "SidekickLocDelim" },
+        { "lua/sidekick/init.lua", "SidekickLocFile" },
+        { " :L12:C3", "SidekickLocDelim" },
+      },
+    }
+
+    assert.are.equal("@lua/sidekick/init.lua#L12 :C3", claude.format(text))
+  end)
+end)

@@ -245,7 +245,7 @@ local defaults = {
     enabled = function(buf)
       return vim.g.sidekick_nes ~= false and vim.b.sidekick_nes ~= false
     end,
-    debounce = 100,
+    debounce = 300,
     trigger = {
       -- events that trigger sidekick next edit suggestions
       events = { "ModeChanged i:n", "TextChanged", "User SidekickNesDone" },
@@ -677,7 +677,8 @@ require("sidekick.nes").toggle()
 
 
 ```lua
-require("sidekick.nes").update()
+---@param ev? vim.api.keyset.create_autocmd.callback_args
+require("sidekick.nes").update(ev)
 ```
 
 </td></tr>

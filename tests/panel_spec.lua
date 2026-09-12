@@ -216,6 +216,23 @@ describe("cli agent panel", function()
     vim.cmd.stopinsert()
   end)
 
+  it("resets horizontal scrolling when focusing an agent", function()
+    local first = fake("codex-scroll", "codex", "Scrolled agent")
+    local original_winrestview = vim.fn.winrestview
+    local restored
+    vim.fn.winrestview = function(view)
+      restored = view
+      return original_winrestview(view)
+    end
+
+    local ok, err = pcall(Panel.show, first, true)
+    vim.fn.winrestview = original_winrestview
+    vim.cmd.stopinsert()
+
+    assert(ok, err)
+    assert.are.same({ leftcol = 0 }, restored)
+  end)
+
   it("renders tool names and activity state without brand icons", function()
     local codex = fake("codex-1", "codex", "Implement panel")
     Panel.show(codex)
