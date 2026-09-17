@@ -20,8 +20,9 @@ function M.notify(msg, level, opts)
 end
 
 ---@param msg string|string[]
-function M.info(msg)
-  M.notify(msg, vim.log.levels.INFO)
+---@param opts? sidekick.NotifyOpts
+function M.info(msg, opts)
+  M.notify(msg, vim.log.levels.INFO, opts)
 end
 
 ---@param msg string|string[]
