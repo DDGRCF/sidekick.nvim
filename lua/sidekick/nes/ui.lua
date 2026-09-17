@@ -5,6 +5,8 @@ local Util = require("sidekick.util")
 local M = {}
 local SUMMARY_NS = vim.api.nvim_create_namespace("sidekick.nes.summary")
 local summary_marks = {} ---@type table<integer,{id:integer,row:integer,text:string}>
+local rendered_bufs = {} ---@type table<integer, true>
+local cursor_diff_state = {} ---@type table<integer, string>
 local cursor_buf ---@type integer?
 local SIGN_HL = {
   add = "SidekickNesSignAdd",
@@ -35,25 +37,36 @@ end
 
 ---@param buf integer
 ---@param summary? {edits:integer,hunks:integer,current:integer?}
----@return string
-local function summary_text(buf, summary)
+---@return sidekick.Text
+local function summary_virt_text(buf, summary)
   local parts = summary_parts(buf, summary)
-  return (" %s %s · %s · %s"):format(parts.icon, parts.current, parts.edits, parts.hunks)
+  local cfg = type(Config.nes.review.summary) == "table" and Config.nes.review.summary or {}
+  local ret = {}
+  if cfg.icon ~= false then
+    ret[#ret + 1] = { " " .. parts.icon .. " ", "SidekickNesSummaryIcon" }
+  end
+  if cfg.current ~= false then
+    ret[#ret + 1] = { parts.current, "SidekickNesSummaryCount" }
+  end
+  if cfg.details ~= false then
+    ret[#ret + 1] = { " · ", "SidekickNesSummaryMeta" }
+    ret[#ret + 1] = { parts.edits, "SidekickNesSummaryMeta" }
+    ret[#ret + 1] = { " · ", "SidekickNesSummaryMeta" }
+    ret[#ret + 1] = { parts.hunks, "SidekickNesSummaryMeta" }
+  end
+  return ret
 end
 
 ---@param buf integer
 ---@param summary? {edits:integer,hunks:integer,current:integer?}
----@return sidekick.Text
-local function summary_virt_text(buf, summary)
-  local parts = summary_parts(buf, summary)
-  return {
-    { " " .. parts.icon .. " ", "SidekickNesSummaryIcon" },
-    { parts.current, "SidekickNesSummaryCount" },
-    { " · ", "SidekickNesSummaryMeta" },
-    { parts.edits, "SidekickNesSummaryMeta" },
-    { " · ", "SidekickNesSummaryMeta" },
-    { parts.hunks, "SidekickNesSummaryMeta" },
-  }
+---@return string
+local function summary_text(buf, summary)
+  local vt = summary_virt_text(buf, summary)
+  local chunks = {}
+  for _, chunk in ipairs(vt) do
+    chunks[#chunks + 1] = chunk[1]
+  end
+  return table.concat(chunks)
 end
 
 ---@param edit sidekick.NesEdit
@@ -98,6 +111,7 @@ end
 ---@param summaries? table<integer, boolean>
 function M.render(edit, summaries)
   vim.b[edit.buf].sidekick_nes_ui = true
+  rendered_bufs[edit.buf] = true
   local diff = edit:diff()
 
   if #diff.hunks == 0 then
@@ -150,19 +164,25 @@ function M.render(edit, summaries)
   -- Only add the context bg for lines not yet touched by the rest including inline
   -- This is to fix an issue with extmarks otherwise not displayig correctly
   -- Additionally line_hl_group seems broken in some cases, so don't use that.
-  for r = from[1], math.min(vim.api.nvim_buf_line_count(edit.buf) - 1, to[1]) do
-    if not rows[r] then
-      Util.set_extmark(edit.buf, Config.ns, r, 0, {
-        end_row = r + 1,
-        hl_group = "SidekickDiffContext",
-        hl_eol = true,
-      })
+  local line_count = vim.api.nvim_buf_line_count(edit.buf)
+  if line_count > 0 then
+    local max_r = math.min(line_count - 1, to[1])
+    for r = from[1], max_r do
+      if not rows[r] then
+        Util.set_extmark(edit.buf, Config.ns, r, 0, {
+          end_row = math.min(line_count, r + 1),
+          hl_group = "SidekickDiffContext",
+          hl_eol = true,
+        })
+      end
     end
   end
 end
 
 ---@param buf number
 function M._hide(buf)
+  rendered_bufs[buf] = nil
+  cursor_diff_state[buf] = nil
   if not vim.api.nvim_buf_is_valid(buf) then
     summary_marks[buf] = nil
     return
@@ -215,6 +235,29 @@ function M.update()
     Util.emit("SidekickNes" .. (#edits == 0 and "Hide" or "Show"))
   end)
   cursor_buf = vim.api.nvim_get_current_buf()
+  cursor_diff_state = {}
+end
+
+---Calculate a cache key reflecting which edits in target buffer show diff for cursor_row
+---@param target integer
+---@param cursor_row integer
+---@return string
+local function get_diff_state(target, cursor_row)
+  if not vim.api.nvim_buf_is_valid(target) then
+    return ""
+  end
+  local mode = Config.nes.diff.show
+  local tick = vim.api.nvim_buf_get_changedtick(target)
+  if mode == "always" or mode == false then
+    return tostring(mode) .. ":" .. tick
+  end
+  local active = {}
+  for i, edit in ipairs(Nes.get(target)) do
+    if cursor_row >= edit.from[1] and cursor_row <= edit.to[1] then
+      active[#active + 1] = i
+    end
+  end
+  return "cursor:" .. tick .. ":" .. table.concat(active, ",")
 end
 
 -- Cursor-only updates are common when diff visibility is set to `cursor`.
@@ -241,15 +284,37 @@ function M.update_cursor()
   if previous and previous ~= buf then
     -- The previous buffer is no longer under the cursor, but it still needs
     -- its persistent NES sign after its cursor-only diff marks are cleared.
+    cursor_diff_state[previous] = nil
     redraw(previous)
   end
   cursor_buf = buf
-  redraw(buf)
+
+  local cur_row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local new_state = get_diff_state(buf, cur_row)
+  if cursor_diff_state[buf] ~= new_state then
+    cursor_diff_state[buf] = new_state
+    redraw(buf)
+  else
+    M.update_summary()
+  end
 end
 
 function M.hide()
-  vim.tbl_map(M._hide, vim.api.nvim_list_bufs())
+  local targets = {}
+  for b in pairs(rendered_bufs) do
+    targets[b] = true
+  end
+  for b in pairs(summary_marks) do
+    targets[b] = true
+  end
+  if cursor_buf and vim.api.nvim_buf_is_valid(cursor_buf) then
+    targets[cursor_buf] = true
+  end
+  for b in pairs(targets) do
+    M._hide(b)
+  end
   cursor_buf = nil
+  cursor_diff_state = {}
 end
 
 return M

@@ -312,6 +312,7 @@ function M:start()
       -- schedule to make sure we're still in mormal mode and in the terminal window
       vim.schedule(function()
         self.normal_mode = vim.fn.mode() ~= "t" and self:is_focused()
+        Panel.refresh(self.id)
       end)
     end,
   })

@@ -1129,6 +1129,109 @@ describe("cli agent panel", function()
     assert.are.equal(width, vim.api.nvim_win_get_width(win))
   end)
 
+  it("toggles zoom in split layouts, restoring previous dimensions", function()
+    local first = fake("one", "codex", "One")
+    Panel.show(first)
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    Panel.resize({ width = 30 })
+    assert.are.equal(30, vim.api.nvim_win_get_width(p.win))
+    assert.is_false(p.zoomed == true)
+
+    Panel.toggle_zoom()
+    assert.is_true(p.zoomed)
+    local zoomed_width = vim.api.nvim_win_get_width(p.win)
+    assert.is_true(zoomed_width > 30)
+
+    Panel.toggle_zoom()
+    assert.is_false(p.zoomed)
+    assert.are.equal(30, vim.api.nvim_win_get_width(p.win))
+  end)
+
+  it("handles middle-click to close a tab and right-click to open tab context menu", function()
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "claude", "Two")
+    Panel.show(first)
+    Panel.show(second)
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    Panel.render(p)
+
+    local first_token
+    for id, item in pairs(Panel.clicks) do
+      if item.action == "select" and item.id == first.id then
+        first_token = id
+        break
+      end
+    end
+    assert.is_not_nil(first_token)
+
+    local menu_called = false
+    local orig_tab_menu = Panel.tab_menu
+    Panel.tab_menu = function(id)
+      if id == first.id then
+        menu_called = true
+      end
+    end
+    _G.SidekickCliTabClick(first_token, 1, "r")
+    Panel.tab_menu = orig_tab_menu
+    assert.is_true(menu_called)
+
+    _G.SidekickCliTabClick(first_token, 1, "m")
+    assert.is_true(first.closed)
+  end)
+
+  it("renders normal mode indicator when active terminal is in normal mode", function()
+    local first = fake("one", "codex", "One")
+    Panel.show(first)
+    first.normal_mode = true
+    local line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    assert.matches("%[NORMAL%]", line)
+
+    first.normal_mode = false
+    line = Panel.render(Panel.panels[vim.api.nvim_get_current_tabpage()])
+    assert.is_nil(line:find("[NORMAL]", 1, true))
+  end)
+
+  it("closes others relative to a specified tab id instead of active tab", function()
+    local first = fake("one", "codex", "One")
+    local second = fake("two", "claude", "Two")
+    local third = fake("three", "codex", "Three")
+    Panel.show(first)
+    Panel.show(second)
+    Panel.show(third)
+    assert.are.equal(third, Panel.active())
+
+    Panel.close_many("others", second.id)
+
+    assert.is_true(first.closed)
+    assert.is_true(third.closed)
+    assert.is_nil(second.closed)
+  end)
+
+  it("preserves unzoomed size in snapshot when panel is zoomed", function()
+    local first = fake("one", "codex", "One")
+    Panel.show(first)
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    Panel.resize({ width = 35 })
+    Panel.toggle_zoom()
+    assert.is_true(p.zoomed)
+
+    local snapshot = Panel.snapshot()
+    assert.are.equal(35, snapshot[1].sizes[p.layout].width)
+  end)
+
+  it("does not clear zoom state when resize arguments are invalid", function()
+    local first = fake("one", "codex", "One")
+    Panel.show(first)
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    Panel.resize({ width = 35 })
+    Panel.toggle_zoom()
+    assert.is_true(p.zoomed)
+
+    pcall(Panel.resize, { width = -1 })
+    assert.is_true(p.zoomed)
+    assert.is_not_nil(p.unzoomed_size)
+  end)
+
   it("preserves explicit float window options", function()
     local first = fake("one", "codex", "One")
     first.opts = vim.deepcopy(Config.cli.win)

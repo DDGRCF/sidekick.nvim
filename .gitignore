@@ -11,3 +11,5 @@ tt.*
 .cursor/
 .omc/
 *.nvimlog
+.pi/
+.agents/

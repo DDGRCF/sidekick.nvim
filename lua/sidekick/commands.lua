@@ -86,6 +86,9 @@ M.commands = {
     toggle = function(opts)
       require("sidekick.cli").toggle(opts)
     end,
+    zoom = function()
+      require("sidekick.cli").zoom()
+    end,
     hide = function(opts)
       require("sidekick.cli").hide(opts)
     end,

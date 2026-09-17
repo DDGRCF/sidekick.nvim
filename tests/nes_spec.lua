@@ -376,6 +376,118 @@ describe("nes review navigation", function()
     assert.are.equal(1, #marks)
     assert.are.equal(1, #signs)
   end)
+
+  it("skips redrawing diff extmarks when cursor moves between non-edit lines", function()
+    local UI = require("sidekick.nes.ui")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "line0", "line1", "line2", "line3", "line4" })
+    Config.nes.diff.show = "cursor"
+    Config.nes.signs = true
+    Config.nes.review.summary = false
+
+    local test_edit = {
+      buf = buf,
+      from = { 0, 0 },
+      to = { 0, 5 },
+      text = "EDIT0",
+      textDocument = { version = vim.lsp.util.buf_versions[buf] },
+      is_empty = function()
+        return false
+      end,
+      diff = function()
+        return {
+          hunks = {
+            { pos = { 0, 0 }, cover = 1, extmarks = { { row = 0, col = 0, hl_group = "SidekickDiffAdd" } }, kind = "change" },
+          },
+        }
+      end,
+    }
+    Nes._edits = { test_edit }
+    vim.api.nvim_set_current_buf(buf)
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    UI.update_cursor()
+
+    local extmarks_before = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, { details = true })
+    assert.are.equal(1, #extmarks_before)
+
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    UI.update_cursor()
+
+    local extmarks_after = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, { details = true })
+    assert.are.same(extmarks_before, extmarks_after)
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    UI.update_cursor()
+    local extmarks_in_edit = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, { details = true })
+    assert.is_true(#extmarks_in_edit > #extmarks_before)
+  end)
+
+  it("supports table options for summary customization", function()
+    local UI = require("sidekick.nes.ui")
+    Config.nes.review.summary = { details = false, icon = true, current = true }
+    local test_edit = {
+      buf = buf,
+      from = { 0, 0 },
+      to = { 0, 0 },
+      text = "updated",
+      textDocument = { version = vim.lsp.util.buf_versions[buf] },
+      is_empty = function()
+        return false
+      end,
+      diff = function()
+        return {
+          hunks = {
+            { pos = { 0, 0 }, cover = 1, extmarks = {} },
+          },
+        }
+      end,
+    }
+    Nes._edits = { test_edit }
+    UI.render(test_edit)
+
+    local marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("sidekick.nes.summary"), 0, -1, { details = true })
+    assert.are.equal(1, #marks)
+    local vt = marks[1][4].virt_text
+    assert.are.equal(2, #vt)
+  end)
+
+  it("only clears rendered and summary buffers on hide", function()
+    local UI = require("sidekick.nes.ui")
+    local untracked_buf = vim.api.nvim_create_buf(false, true)
+    extra_bufs[#extra_bufs + 1] = untracked_buf
+    vim.api.nvim_buf_set_lines(untracked_buf, 0, -1, false, { "untracked" })
+    local extmark_id = vim.api.nvim_buf_set_extmark(untracked_buf, Config.ns, 0, 0, {
+      virt_text = { { "custom", "Comment" } },
+    })
+
+    local test_edit = {
+      buf = buf,
+      from = { 0, 0 },
+      to = { 0, 0 },
+      text = "updated",
+      textDocument = { version = vim.lsp.util.buf_versions[buf] },
+      is_empty = function()
+        return false
+      end,
+      diff = function()
+        return {
+          hunks = {
+            { pos = { 0, 0 }, cover = 1, extmarks = {} },
+          },
+        }
+      end,
+    }
+    Nes._edits = { test_edit }
+    UI.render(test_edit)
+
+    UI.hide()
+
+    local remaining = vim.api.nvim_buf_get_extmarks(untracked_buf, Config.ns, 0, -1, {})
+    assert.are.equal(1, #remaining)
+    assert.are.equal(extmark_id, remaining[1][1])
+
+    local tracked_remaining = vim.api.nvim_buf_get_extmarks(buf, Config.ns, 0, -1, {})
+    assert.are.equal(0, #tracked_remaining)
+  end)
 end)
 
 describe("nes hunk actions", function()
@@ -619,5 +731,199 @@ describe("nes preview refresh", function()
 
     assert.is_true(vim.api.nvim_win_is_valid(before["[NES suggested]"]))
     assert.are.equal(1, #Nes.get(buf))
+  end)
+
+  it("configures interactive review keymaps on preview buffers", function()
+    assert.is_true(Preview.open())
+    local windows = preview_windows()
+    local suggested_buf = vim.api.nvim_win_get_buf(windows["[NES suggested]"])
+    local keymaps = {}
+    for _, km in ipairs(vim.api.nvim_buf_get_keymap(suggested_buf, "n")) do
+      keymaps[km.lhs] = km
+    end
+
+    assert.is_not_nil(keymaps["a"])
+    assert.is_not_nil(keymaps["A"])
+    assert.is_not_nil(keymaps["r"])
+    assert.is_not_nil(keymaps["<Tab>"])
+    assert.is_not_nil(keymaps["]c"])
+    assert.is_not_nil(keymaps["[c"])
+  end)
+
+  it("applies all edits and closes preview when A keymap is invoked", function()
+    assert.is_true(Preview.open())
+    local windows = preview_windows()
+    local suggested_buf = vim.api.nvim_win_get_buf(windows["[NES suggested]"])
+    local keymap_A
+    for _, km in ipairs(vim.api.nvim_buf_get_keymap(suggested_buf, "n")) do
+      if km.lhs == "A" then
+        keymap_A = km
+        break
+      end
+    end
+    assert.is_not_nil(keymap_A)
+    keymap_A.callback()
+    vim.wait(100)
+
+    assert.are.same({ "XYZdef", "second" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    local after = preview_windows()
+    assert.is_nil(after["[NES current]"])
+    assert.is_nil(after["[NES suggested]"])
+  end)
+
+  it("accepts a hunk when invoked from the suggested pane even after line-shifting edits", function()
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "line1", "line2", "line3", "line4" })
+    Nes._edits = {
+      setmetatable({
+        buf = buf,
+        from = { 0, 0 },
+        to = { 3, 5 },
+        range = {
+          start = { line = 0, character = 0 },
+          ["end"] = { line = 3, character = 5 },
+        },
+        text = "line1\ninserted_a\ninserted_b\nline2\nline3\nmodified4",
+        textDocument = { uri = "", version = 0 },
+      }, Edit),
+    }
+
+    assert.is_true(Preview.open())
+    local windows = preview_windows()
+    local suggested_win = windows["[NES suggested]"]
+    local suggested_buf = vim.api.nvim_win_get_buf(suggested_win)
+    vim.api.nvim_set_current_win(suggested_win)
+
+    local lines = vim.api.nvim_buf_get_lines(suggested_buf, 0, -1, false)
+    local target_line
+    for i, line in ipairs(lines) do
+      if line == "modified4" then
+        target_line = i
+        break
+      end
+    end
+    assert.is_not_nil(target_line)
+    vim.api.nvim_win_set_cursor(suggested_win, { target_line, 0 })
+
+    local keymap_a
+    for _, km in ipairs(vim.api.nvim_buf_get_keymap(suggested_buf, "n")) do
+      if km.lhs == "a" then
+        keymap_a = km
+        break
+      end
+    end
+    assert.is_not_nil(keymap_a)
+    keymap_a.callback()
+    vim.wait(100)
+
+    local source_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert.are.equal("modified4", source_lines[#source_lines])
+  end)
+
+  it("navigates between multiple inline hunks on the same line", function()
+    local text_orig = "prefix text with aaa and then bbb in the middle of long line"
+    local text_mod = "prefix text with AAA and then BBB in the middle of long line"
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text_orig })
+    Nes._edits = {
+      setmetatable({
+        buf = buf,
+        from = { 0, 0 },
+        to = { 0, #text_orig },
+        range = {
+          start = { line = 0, character = 0 },
+          ["end"] = { line = 0, character = #text_orig },
+        },
+        text = text_mod,
+        textDocument = { uri = "", version = 0 },
+      }, Edit),
+    }
+
+    assert.is_true(Preview.open())
+    local windows = preview_windows()
+    local suggested_win = windows["[NES suggested]"]
+    local suggested_buf = vim.api.nvim_win_get_buf(suggested_win)
+    vim.api.nvim_set_current_win(suggested_win)
+
+    local keymaps = {}
+    for _, km in ipairs(vim.api.nvim_buf_get_keymap(suggested_buf, "n")) do
+      keymaps[km.lhs] = km
+    end
+
+    vim.api.nvim_win_set_cursor(suggested_win, { 1, 0 })
+    assert.is_not_nil(keymaps["]c"])
+    keymaps["]c"].callback()
+
+    local cur = vim.api.nvim_win_get_cursor(suggested_win)
+    assert.are.equal(17, cur[2])
+
+    -- Next jump moves to the second inline hunk
+    keymaps["]c"].callback()
+    cur = vim.api.nvim_win_get_cursor(suggested_win)
+    assert.are.equal(30, cur[2])
+
+    -- Prev jump moves back to the first inline hunk
+    assert.is_not_nil(keymaps["[c"])
+    keymaps["[c"].callback()
+    cur = vim.api.nvim_win_get_cursor(suggested_win)
+    assert.are.equal(17, cur[2])
+  end)
+
+  it("calculates proposed deltas correctly even when edits are returned in reverse order", function()
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "line1", "line2", "line3", "line4" })
+    local edit_earlier = setmetatable({
+      buf = buf,
+      from = { 0, 0 },
+      to = { 1, 0 },
+      range = {
+        start = { line = 0, character = 0 },
+        ["end"] = { line = 1, character = 0 },
+      },
+      text = "line1\ninserted_extra_1\ninserted_extra_2\n",
+      textDocument = { uri = "", version = 0 },
+    }, Edit)
+
+    local edit_later = setmetatable({
+      buf = buf,
+      from = { 3, 0 },
+      to = { 3, 5 },
+      range = {
+        start = { line = 3, character = 0 },
+        ["end"] = { line = 3, character = 5 },
+      },
+      text = "new4",
+      textDocument = { uri = "", version = 0 },
+    }, Edit)
+
+    Nes._edits = { edit_later, edit_earlier }
+
+    assert.is_true(Preview.open())
+    local windows = preview_windows()
+    local suggested_win = windows["[NES suggested]"]
+    local suggested_buf = vim.api.nvim_win_get_buf(suggested_win)
+    vim.api.nvim_set_current_win(suggested_win)
+
+    local lines = vim.api.nvim_buf_get_lines(suggested_buf, 0, -1, false)
+    local target_line
+    for i, line in ipairs(lines) do
+      if line == "new4" then
+        target_line = i
+        break
+      end
+    end
+    assert.is_not_nil(target_line)
+    vim.api.nvim_win_set_cursor(suggested_win, { target_line, 0 })
+
+    local keymap_a
+    for _, km in ipairs(vim.api.nvim_buf_get_keymap(suggested_buf, "n")) do
+      if km.lhs == "a" then
+        keymap_a = km
+        break
+      end
+    end
+    assert.is_not_nil(keymap_a)
+    keymap_a.callback()
+    vim.wait(100)
+
+    local source_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert.are.equal("new4", source_lines[#source_lines])
   end)
 end)

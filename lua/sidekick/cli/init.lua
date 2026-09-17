@@ -247,6 +247,11 @@ function M.resize(opts)
   require("sidekick.cli.panel").resize(opts)
 end
 
+--- Toggle maximized/normal size for the agent container.
+function M.zoom()
+  require("sidekick.cli.panel").toggle_zoom()
+end
+
 --- Re-read bufferline.nvim-style global keymaps for agent tabs.
 function M.sync()
   local active = require("sidekick.cli.panel").active()

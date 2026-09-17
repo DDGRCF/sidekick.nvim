@@ -35,6 +35,7 @@ local defaults = {
     },
     review = {
       -- show a compact progress summary for active suggestions
+      ---@type boolean|{icon?:boolean, current?:boolean, details?:boolean}
       summary = true,
       -- floating side-by-side preview used by `:Sidekick nes review`
       preview = {
@@ -177,6 +178,8 @@ local defaults = {
         panel_widen   = { "<m-right>"   , "panel_widen"     , mode = "n", desc = "make agent container wider" },
         panel_shorter = { "<m-down>"    , "panel_shorter"   , mode = "n", desc = "make agent container shorter" },
         panel_taller  = { "<m-up>"      , "panel_taller"    , mode = "n", desc = "make agent container taller" },
+        panel_zoom    = { "<leader>bz"  , "panel_zoom"      , mode = "n", desc = "toggle agent container zoom" },
+        panel_zoom_t  = { "<m-z>"       , "panel_zoom"      , mode = "t", desc = "toggle agent container zoom" },
         -- Navigate windows in terminal mode. Only active when:
         -- * layout is not "float"
         -- * there is another window in the direction

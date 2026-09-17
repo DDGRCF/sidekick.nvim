@@ -27,7 +27,7 @@ local function dimension(value, total, minimum)
   return math.max(minimum, math.min(value, total))
 end
 
-local function window_configs()
+local function window_configs(source_buf)
   local preview = Config.nes.review and Config.nes.review.preview or {}
   local available_width = math.max(0, vim.o.columns - 4)
   local minimum_width = 18 * 2 + 1
@@ -53,14 +53,29 @@ local function window_configs()
     border = border,
     zindex = 50,
   }
+  local Nes = package.loaded["sidekick.nes"]
+  local summary = source_buf and Nes and Nes.summary and Nes.summary(source_buf)
+  local suggested_title = " Suggested "
+  if summary and summary.hunks and summary.hunks > 0 then
+    suggested_title = (" Suggested [%d hunk%s] "):format(summary.hunks, summary.hunks == 1 and "" or "s")
+  end
+  local footer = pane_width >= 55
+    and " [a]ccept · [r]eject · [A]ll · []c]jump · [Tab]pane · [q]uit "
+    or pane_width >= 35
+    and " [a]ccept · [r]eject · [A]ll · [q]uit "
+    or " [a]ccept · [q]uit "
   return vim.tbl_extend("force", base, {
     col = col,
     title = " Current ",
     title_pos = "center",
+    footer = footer,
+    footer_pos = "center",
   }), vim.tbl_extend("force", base, {
     col = col + pane_width + 1,
-    title = " Suggested ",
+    title = suggested_title,
     title_pos = "center",
+    footer = footer,
+    footer_pos = "center",
   })
 end
 
@@ -89,7 +104,7 @@ local function content_key(buf, edits, client)
 end
 
 local function apply_layout(current)
-  local left_opts, right_opts = window_configs()
+  local left_opts, right_opts = window_configs(current.source_buf)
   if not left_opts then
     return false, right_opts
   end
@@ -110,6 +125,273 @@ local function prepare_buffer(buf, lines, name)
   vim.bo[buf].filetype = vim.bo[vim.api.nvim_get_current_buf()].filetype
   vim.bo[buf].modifiable = false
   pcall(vim.api.nvim_buf_set_name, buf, name)
+end
+
+---@param a sidekick.Pos
+---@param b sidekick.Pos
+---@return integer
+local function compare_pos(a, b)
+  if a[1] ~= b[1] then
+    return a[1] < b[1] and -1 or 1
+  end
+  if a[2] == b[2] then
+    return 0
+  end
+  return a[2] < b[2] and -1 or 1
+end
+
+---@class sidekick.preview.HunkCoord
+---@field item sidekick.NesReviewItem
+---@field source_pos sidekick.Pos
+---@field proposed_pos sidekick.Pos
+---@field source_end sidekick.Pos
+---@field proposed_end sidekick.Pos
+
+---@return sidekick.preview.HunkCoord[]
+local function preview_hunk_coords()
+  if not state or not valid_buf(state.source_buf) then
+    return {}
+  end
+  local Nes = require("sidekick.nes")
+  local items = Nes.review_items(state.source_buf)
+  if #items == 0 then
+    return {}
+  end
+
+  local edits = Nes.get(state.source_buf)
+  local sorted_edits = vim.list_slice(edits)
+  table.sort(sorted_edits, function(a, b)
+    if a.from[1] ~= b.from[1] then
+      return a.from[1] < b.from[1]
+    end
+    return a.from[2] < b.from[2]
+  end)
+
+  local edit_deltas = {}
+  local delta = 0
+  for _, edit in ipairs(sorted_edits) do
+    edit_deltas[edit] = delta
+    local diff = edit:diff()
+    delta = delta + (#diff.to.lines - #diff.from.lines)
+  end
+
+  local coords = {}
+  for _, item in ipairs(items) do
+    local edit = item.edit
+    local hunk = item.hunk
+    local edit_delta = edit_deltas[edit] or 0
+
+    local s_row = hunk.pos[1]
+    local s_col = hunk.from_col or hunk.pos[2] or 0
+    local s_cover = math.max(1, hunk.from_count or hunk.cover or 1)
+    local s_end_row = s_row + s_cover - 1
+    local s_end_col = hunk.from_end_col or s_col
+
+    local p_row = edit.from[1] + edit_delta + (hunk.to_index or hunk.from_index or 1) - 1
+    local p_col = hunk.to_col or (hunk.inline and hunk.to_col) or 0
+    local p_cover = math.max(1, hunk.to_count or (hunk.inline and 1) or 1)
+    local p_end_row = p_row + p_cover - 1
+    local p_end_col = hunk.to_end_col or p_col
+
+    coords[#coords + 1] = {
+      item = item,
+      source_pos = { s_row, s_col },
+      source_end = { s_end_row, s_end_col },
+      proposed_pos = { p_row, p_col },
+      proposed_end = { p_end_row, p_end_col },
+    }
+  end
+  return coords
+end
+
+local function is_suggested_pane()
+  return state and valid_win(state.right_win) and vim.api.nvim_get_current_win() == state.right_win
+end
+
+---Set cursor position in both preview panes according to their respective coordinates
+---@param coord sidekick.preview.HunkCoord
+local function set_pane_cursors(coord)
+  if not state then
+    return
+  end
+  if valid_win(state.left_win) and valid_buf(state.left_buf) then
+    pcall(
+      vim.api.nvim_win_set_cursor,
+      state.left_win,
+      clamp_cursor(state.left_buf, { coord.source_pos[1] + 1, coord.source_pos[2] })
+    )
+  end
+  if valid_win(state.right_win) and valid_buf(state.right_buf) then
+    pcall(
+      vim.api.nvim_win_set_cursor,
+      state.right_win,
+      clamp_cursor(state.right_buf, { coord.proposed_pos[1] + 1, coord.proposed_pos[2] })
+    )
+  end
+end
+
+---@param direction 1|-1
+local function jump_hunk(direction)
+  local coords = preview_hunk_coords()
+  if #coords == 0 or not state then
+    return
+  end
+  local cur_win = vim.api.nvim_get_current_win()
+  local cursor = vim.api.nvim_win_get_cursor(cur_win)
+  local current_pos = { cursor[1] - 1, cursor[2] }
+  local on_suggested = is_suggested_pane()
+
+  local target
+  if direction > 0 then
+    for _, coord in ipairs(coords) do
+      local pos = on_suggested and coord.proposed_pos or coord.source_pos
+      if compare_pos(pos, current_pos) > 0 then
+        target = coord
+        break
+      end
+    end
+    target = target or coords[1]
+  else
+    for i = #coords, 1, -1 do
+      local pos = on_suggested and coords[i].proposed_pos or coords[i].source_pos
+      if compare_pos(pos, current_pos) < 0 then
+        target = coords[i]
+        break
+      end
+    end
+    target = target or coords[#coords]
+  end
+  if target then
+    set_pane_cursors(target)
+  end
+end
+
+---@return sidekick.preview.HunkCoord?
+local function find_nearest_hunk()
+  local coords = preview_hunk_coords()
+  if #coords == 0 or not state then
+    return nil
+  end
+  local cur_win = vim.api.nvim_get_current_win()
+  local cursor = vim.api.nvim_win_get_cursor(cur_win)
+  local current_pos = { cursor[1] - 1, cursor[2] }
+  local on_suggested = is_suggested_pane()
+
+  local target
+  for _, coord in ipairs(coords) do
+    local pos = on_suggested and coord.proposed_pos or coord.source_pos
+    if compare_pos(pos, current_pos) >= 0 then
+      target = coord
+      break
+    end
+  end
+  target = target or coords[1]
+  if target then
+    set_pane_cursors(target)
+  end
+  return target
+end
+
+---@return sidekick.preview.HunkCoord?
+local function ensure_on_hunk()
+  local coords = preview_hunk_coords()
+  if #coords == 0 or not state then
+    return nil
+  end
+  local cur_win = vim.api.nvim_get_current_win()
+  local cursor = vim.api.nvim_win_get_cursor(cur_win)
+  local cur_row, cur_col = cursor[1] - 1, cursor[2]
+  local on_suggested = is_suggested_pane()
+
+  for _, coord in ipairs(coords) do
+    local start_pos = on_suggested and coord.proposed_pos or coord.source_pos
+    local end_pos = on_suggested and coord.proposed_end or coord.source_end
+    if cur_row >= start_pos[1] and cur_row <= end_pos[1] then
+      if not coord.item.hunk.inline then
+        return coord
+      end
+      local from_col = start_pos[2]
+      local to_col = end_pos[2]
+      if cur_col == from_col or (to_col > from_col and cur_col >= from_col and cur_col < to_col) then
+        return coord
+      end
+    end
+  end
+  return find_nearest_hunk()
+end
+
+local function accept_hunk()
+  if not state or not valid_buf(state.source_buf) then
+    return
+  end
+  local cur_win = vim.api.nvim_get_current_win()
+  local coord = ensure_on_hunk()
+  if not coord then
+    return
+  end
+  -- Sync source window cursor to the exact source hunk position
+  if valid_win(state.source_win) then
+    pcall(
+      vim.api.nvim_win_set_cursor,
+      state.source_win,
+      clamp_cursor(state.source_buf, { coord.source_pos[1] + 1, coord.source_pos[2] })
+    )
+    vim.api.nvim_set_current_win(state.source_win)
+  end
+  local Nes = require("sidekick.nes")
+  local ok = Nes.accept()
+  if ok and state and valid_win(cur_win) then
+    vim.api.nvim_set_current_win(cur_win)
+    find_nearest_hunk()
+  end
+end
+
+local function reject_hunk()
+  if not state or not valid_buf(state.source_buf) then
+    return
+  end
+  local cur_win = vim.api.nvim_get_current_win()
+  local coord = ensure_on_hunk()
+  if not coord then
+    return
+  end
+  -- Sync source window cursor to the exact source hunk position
+  if valid_win(state.source_win) then
+    pcall(
+      vim.api.nvim_win_set_cursor,
+      state.source_win,
+      clamp_cursor(state.source_buf, { coord.source_pos[1] + 1, coord.source_pos[2] })
+    )
+    vim.api.nvim_set_current_win(state.source_win)
+  end
+  local Nes = require("sidekick.nes")
+  local ok = Nes.reject()
+  if ok and state and valid_win(cur_win) then
+    vim.api.nvim_set_current_win(cur_win)
+    find_nearest_hunk()
+  end
+end
+
+local function accept_all()
+  if not state or not valid_buf(state.source_buf) then
+    return
+  end
+  local Nes = require("sidekick.nes")
+  M.focus_source()
+  M.close()
+  Nes.apply()
+end
+
+local function switch_pane()
+  if not state then
+    return
+  end
+  local cur = vim.api.nvim_get_current_win()
+  if cur == state.left_win and valid_win(state.right_win) then
+    vim.api.nvim_set_current_win(state.right_win)
+  elseif cur == state.right_win and valid_win(state.left_win) then
+    vim.api.nvim_set_current_win(state.left_win)
+  end
 end
 
 ---@param buf integer
@@ -136,6 +418,16 @@ local function configure_window(buf, win)
   end
   vim.keymap.set("n", "q", close, { buffer = buf, silent = true, nowait = true, desc = "Close NES preview" })
   vim.keymap.set("n", "<Esc>", close, { buffer = buf, silent = true, nowait = true, desc = "Close NES preview" })
+  vim.keymap.set("n", "a", accept_hunk, { buffer = buf, silent = true, nowait = true, desc = "Accept current hunk" })
+  vim.keymap.set("n", "<CR>", accept_hunk, { buffer = buf, silent = true, nowait = true, desc = "Accept current hunk" })
+  vim.keymap.set("n", "A", accept_all, { buffer = buf, silent = true, nowait = true, desc = "Accept all suggestions" })
+  vim.keymap.set("n", "r", reject_hunk, { buffer = buf, silent = true, nowait = true, desc = "Reject current hunk" })
+  vim.keymap.set("n", "x", reject_hunk, { buffer = buf, silent = true, nowait = true, desc = "Reject current hunk" })
+  vim.keymap.set("n", "]c", function() jump_hunk(1) end, { buffer = buf, silent = true, nowait = true, desc = "Next diff hunk" })
+  vim.keymap.set("n", "[c", function() jump_hunk(-1) end, { buffer = buf, silent = true, nowait = true, desc = "Previous diff hunk" })
+  vim.keymap.set("n", "]h", function() jump_hunk(1) end, { buffer = buf, silent = true, nowait = true, desc = "Next diff hunk" })
+  vim.keymap.set("n", "[h", function() jump_hunk(-1) end, { buffer = buf, silent = true, nowait = true, desc = "Previous diff hunk" })
+  vim.keymap.set("n", "<Tab>", switch_pane, { buffer = buf, silent = true, nowait = true, desc = "Switch preview pane" })
 end
 
 function M.close()
@@ -197,7 +489,7 @@ function M.open()
   end
 
   local preview = Config.nes.review and Config.nes.review.preview or {}
-  local left_opts, right_opts = window_configs()
+  local left_opts, right_opts = window_configs(source_buf)
   if not left_opts then
     Util.warn(right_opts)
     return false
@@ -426,7 +718,35 @@ function M.focus_source()
     return false
   end
   local current = vim.api.nvim_get_current_win()
-  if current == state.left_win or current == state.right_win then
+  if current == state.right_win then
+    local cursor = vim.api.nvim_win_get_cursor(current)
+    local cur_row, cur_col = cursor[1] - 1, cursor[2]
+    local coords = preview_hunk_coords()
+    local matched
+    for _, coord in ipairs(coords) do
+      if cur_row >= coord.proposed_pos[1] and cur_row <= coord.proposed_end[1] then
+        if not coord.item.hunk.inline then
+          matched = coord
+          break
+        end
+        local from_col = coord.proposed_pos[2]
+        local to_col = coord.proposed_end[2]
+        if cur_col == from_col or (to_col > from_col and cur_col >= from_col and cur_col < to_col) then
+          matched = coord
+          break
+        end
+        matched = matched or coord
+      end
+    end
+    if matched then
+      vim.api.nvim_win_set_cursor(
+        state.source_win,
+        clamp_cursor(state.source_buf, { matched.source_pos[1] + 1, matched.source_pos[2] })
+      )
+    else
+      vim.api.nvim_win_set_cursor(state.source_win, clamp_cursor(state.source_buf, cursor))
+    end
+  elseif current == state.left_win then
     local cursor = vim.api.nvim_win_get_cursor(current)
     vim.api.nvim_win_set_cursor(state.source_win, clamp_cursor(state.source_buf, cursor))
   end

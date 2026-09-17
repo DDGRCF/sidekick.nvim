@@ -37,6 +37,8 @@ end
 ---@field sizes table<string, {width?:integer,height?:integer,row?:integer,col?:integer}>
 ---@field has_remembered_layout boolean
 ---@field clicks? integer[]
+---@field zoomed? boolean
+---@field unzoomed_size? table
 
 M.panels = {} ---@type table<integer, sidekick.cli.Panel>
 M.clicks = {} ---@type table<integer, {action:string,id?:string,tab?:integer}>
@@ -126,25 +128,35 @@ local function stop_activity_blink()
   end
 end
 
-local function has_visible_working_tab()
+local function visible_working_panels()
   if Config.cli.win.tabs.enabled == false or Config.cli.win.tabs.show_status == false then
-    return false
+    return {}
   end
+  local cur_tab = vim.api.nvim_get_current_tabpage()
+  local ret = {}
   for _, p in pairs(M.panels) do
-    if valid(p.win) then
+    if valid(p.win) and p.tab == cur_tab then
       for _, id in ipairs(p.order) do
         local t = terminal(id)
         if t and t.status == "working" then
-          return true
+          ret[#ret + 1] = p
+          break
         end
       end
     end
   end
-  return false
+  return ret
 end
 
+local function has_visible_working_tab()
+  return #visible_working_panels() > 0
+end
+
+local refresh_panel
+
 local function update_activity_blink()
-  if not has_visible_working_tab() then
+  local working = visible_working_panels()
+  if #working == 0 then
     stop_activity_blink()
     return
   end
@@ -162,13 +174,18 @@ local function update_activity_blink()
       if activity_blink_timer ~= timer then
         return
       end
-      if not has_visible_working_tab() then
+      local active_working = visible_working_panels()
+      if #active_working == 0 then
         stop_activity_blink()
         M.refresh()
         return
       end
       activity_blink_on = not activity_blink_on
-      M.refresh()
+      for _, p in ipairs(active_working) do
+        if valid(p.win) then
+          refresh_panel(p)
+        end
+      end
     end)
   end)
 end
@@ -911,8 +928,16 @@ function M.render(p)
   local available
   local title_values = {}
   local compact_layout = false
+  local active_term = usable(p.active)
   if #items > 0 then
-    available = math.max(1, vim.api.nvim_win_get_width(p.win) - vim.api.nvim_strwidth("+ "))
+    local right_w = vim.api.nvim_strwidth("+ ")
+    if p.zoomed then
+      right_w = right_w + vim.api.nvim_strwidth("[⤢] ")
+    end
+    if active_term and active_term.normal_mode then
+      right_w = right_w + vim.api.nvim_strwidth("[NORMAL] ")
+    end
+    available = math.max(1, vim.api.nvim_win_get_width(p.win) - right_w)
     local all_visible = {}
     for index = 1, #items do
       all_visible[index] = true
@@ -953,6 +978,13 @@ function M.render(p)
   end
   parts[#parts + 1] = render_truncation(hidden, p)
   parts[#parts + 1] = "%="
+  if active_term and active_term.normal_mode then
+    parts[#parts + 1] = "%#SidekickCliStatusWaiting#[NORMAL]%* "
+  end
+  if p.zoomed then
+    parts[#parts + 1] = click("zoom", p)
+    parts[#parts + 1] = "%#SidekickCliTitle#[⤢]%* %T"
+  end
   parts[#parts + 1] = click("new", p)
   parts[#parts + 1] = "%#SidekickCliTab#+ %T"
   return table.concat(parts)
@@ -981,7 +1013,7 @@ local function close_duplicate_window()
 end
 
 ---@param p sidekick.cli.Panel
-local function refresh_panel(p)
+refresh_panel = function(p)
   clean(p)
   close_duplicate_windows(p)
   if valid(p.win) and Config.cli.win.tabs.enabled then
@@ -1253,12 +1285,14 @@ function M.remove(id)
 end
 
 ---@param which "others"|"left"|"right"|"unpinned"|"invisible"
-function M.close_many(which)
+---@param target_id? string Reference tab id (defaults to active tab)
+function M.close_many(which, target_id)
   local p = panel()
   if not p then
     return
   end
-  local active = vim.fn.index(p.order, p.active) + 1
+  local ref_id = target_id or p.active
+  local active = ref_id and (vim.fn.index(p.order, ref_id) + 1) or (vim.fn.index(p.order, p.active) + 1)
   local ids = {} ---@type string[]
   if which == "invisible" then
     for id in pairs(require("sidekick.cli.terminal").terminals) do
@@ -1268,7 +1302,7 @@ function M.close_many(which)
     end
   else
     for i, id in ipairs(vim.deepcopy(p.order)) do
-      local close = which == "others" and id ~= p.active
+      local close = which == "others" and id ~= ref_id
         or which == "left" and i < active
         or which == "right" and i > active
         or which == "unpinned" and not p.pinned[id]
@@ -1279,6 +1313,9 @@ function M.close_many(which)
   end
   for _, id in ipairs(ids) do
     M.close(id)
+  end
+  if target_id and p.active ~= target_id and contains(p.order, target_id) then
+    M.select(target_id, false)
   end
 end
 
@@ -1348,6 +1385,96 @@ local function pick_layout()
   end)
 end
 
+---Open a context menu for an agent tab
+---@param id string
+---@param p? sidekick.cli.Panel
+function M.tab_menu(id, p)
+  p = p or panel()
+  local t = terminal(id)
+  if not t then
+    return
+  end
+  local is_pinned = p and p.pinned and p.pinned[id] == true
+  local is_zoomed = p and p.zoomed == true
+  local items = {
+    {
+      label = is_pinned and "Unpin agent" or "Pin agent",
+      icon = is_pinned and "󰤱" or "",
+      action = function()
+        M.pin(id)
+      end,
+    },
+    {
+      label = "Rename agent",
+      icon = "󰑕",
+      action = function()
+        M.rename(nil, id)
+      end,
+    },
+    {
+      label = "Close agent",
+      icon = "✕",
+      action = function()
+        M.close(id)
+      end,
+    },
+    {
+      label = "Close other agents",
+      icon = "󰅖",
+      action = function()
+        M.close_many("others", id)
+      end,
+    },
+    {
+      label = "Close unpinned agents",
+      icon = "󰅗",
+      action = function()
+        M.close_many("unpinned", id)
+      end,
+    },
+    {
+      label = "Fork agent conversation",
+      icon = "",
+      action = function()
+        require("sidekick.cli").fork({ source = t, focus = true })
+      end,
+    },
+    {
+      label = "Change panel layout...",
+      icon = "󰙵",
+      action = function()
+        pick_layout()
+      end,
+    },
+    {
+      label = is_zoomed and "Restore panel size" or "Maximize panel (Zoom)",
+      icon = is_zoomed and "󰁌" or "󰊓",
+      action = function()
+        M.toggle_zoom()
+      end,
+    },
+  }
+
+  local select = vim.ui.select
+  local ok, Snacks = pcall(require, "snacks")
+  local provider = Config.cli.agent_picker.provider
+  if provider ~= "native" and ok and Snacks.picker and Snacks.picker.select then
+    select = Snacks.picker.select
+  end
+
+  select(items, {
+    prompt = ("Agent [%s]:"):format(agent_label_text(t)),
+    kind = "sidekick_tab_menu",
+    format_item = function(item)
+      return ("%s %s"):format(item.icon, item.label)
+    end,
+  }, function(item)
+    if item and item.action then
+      item.action()
+    end
+  end)
+end
+
 ---@param value? string|{layout?:string}
 function M.move(value)
   local layout = type(value) == "table" and value.layout or value --[[@as string?]]
@@ -1363,6 +1490,8 @@ function M.move(value)
   end
   p.layout = layout
   p.has_remembered_layout = true
+  p.zoomed = false
+  p.unzoomed_size = nil
   Util.set_state(layout_state_key, layout)
   Util.emit("SidekickCliPanel", { tab = p.tab, layout = layout })
   clean(p)
@@ -1374,7 +1503,52 @@ function M.move(value)
   end
 end
 
----@param opts? {width?:integer,height?:integer,row?:integer,col?:integer}
+---Toggle maximized/normal size for the current panel window
+function M.toggle_zoom()
+  local p = panel()
+  if not p or not valid(p.win) then
+    return
+  end
+  if p.zoomed then
+    p.zoomed = false
+    local restored = p.unzoomed_size
+    p.unzoomed_size = nil
+    if restored then
+      M.resize(vim.tbl_extend("force", restored, { _zoom = true }))
+      p.sizes[p.layout] = vim.deepcopy(restored)
+    else
+      M.refresh(p.tab)
+    end
+    Util.emit("SidekickCliPanel", { tab = p.tab, layout = p.layout, zoomed = false })
+  else
+    p.zoomed = true
+    if p.layout == "float" then
+      local cfg = vim.api.nvim_win_get_config(p.win)
+      p.unzoomed_size = {
+        width = cfg.width,
+        height = cfg.height,
+        row = tonumber(cfg.row) or 0,
+        col = tonumber(cfg.col) or 0,
+      }
+      local max_w = math.max(20, vim.o.columns - 4)
+      local max_h = math.max(5, vim.o.lines - 4)
+      local max_row = math.floor((vim.o.lines - max_h) / 2)
+      local max_col = math.floor((vim.o.columns - max_w) / 2)
+      M.resize({ width = max_w, height = max_h, row = max_row, col = max_col, _zoom = true })
+    elseif p.layout == "left" or p.layout == "right" then
+      p.unzoomed_size = { width = vim.api.nvim_win_get_width(p.win) }
+      local max_w = math.max(20, vim.o.columns - 2)
+      M.resize({ width = max_w, _zoom = true })
+    else
+      p.unzoomed_size = { height = vim.api.nvim_win_get_height(p.win) }
+      local max_h = math.max(5, vim.o.lines - 3)
+      M.resize({ height = max_h, _zoom = true })
+    end
+    Util.emit("SidekickCliPanel", { tab = p.tab, layout = p.layout, zoomed = true })
+  end
+end
+
+---@param opts? {width?:integer,height?:integer,row?:integer,col?:integer,_zoom?:boolean}
 function M.resize(opts)
   opts = opts or {}
   local p = panel()
@@ -1386,6 +1560,10 @@ function M.resize(opts)
     if value ~= nil and (type(value) ~= "number" or value < 1 or value % 1 ~= 0) then
       return Util.error(("Sidekick panel %s must be a positive integer"):format(key))
     end
+  end
+  if not opts._zoom then
+    p.zoomed = false
+    p.unzoomed_size = nil
   end
   local size = vim.deepcopy(p.sizes[p.layout] or {})
   local ok, err
@@ -1406,7 +1584,9 @@ function M.resize(opts)
   if not ok then
     return Util.error("Failed to resize Sidekick panel: " .. tostring(err))
   end
-  p.sizes[p.layout] = size
+  if not opts._zoom then
+    p.sizes[p.layout] = size
+  end
   M.refresh(p.tab)
   Util.emit("SidekickCliPanel", { tab = p.tab, layout = p.layout, size = size })
 end
@@ -1478,6 +1658,10 @@ local bufferline_desc = {
 
 local function remember_live_size(p)
   if not valid(p.win) then
+    return
+  end
+  if p.zoomed and p.unzoomed_size then
+    p.sizes[p.layout] = vim.deepcopy(p.unzoomed_size)
     return
   end
   local size = vim.deepcopy(p.sizes[p.layout] or {})
@@ -1618,9 +1802,21 @@ function M.setup()
     return
   end
   M.did_setup = true
-  _G.SidekickCliTabClick = function(minwid)
+  _G.SidekickCliTabClick = function(minwid, clicks, button, mods)
     local item = M.clicks[minwid]
     if not item then
+      return
+    end
+    if button == "m" then
+      if item.id then
+        M.close(item.id)
+      end
+      return
+    end
+    if button == "r" then
+      if item.id then
+        M.tab_menu(item.id, panel())
+      end
       return
     end
     if item.action == "select" then
@@ -1634,6 +1830,8 @@ function M.setup()
       M.pick()
     elseif item.action == "new" then
       require("sidekick.cli").new()
+    elseif item.action == "zoom" then
+      M.toggle_zoom()
     end
   end
   local function refresh_activation()
@@ -1666,6 +1864,30 @@ function M.setup()
       M.refresh(ev.data and ev.data.id or nil)
     end,
   })
+  local MOUSE_SCROLL_UP = vim.keycode("<ScrollWheelUp>")
+  local MOUSE_SCROLL_DOWN = vim.keycode("<ScrollWheelDown>")
+  vim.on_key(function(key, typed)
+    key = typed or key
+    if key ~= MOUSE_SCROLL_UP and key ~= MOUSE_SCROLL_DOWN then
+      return
+    end
+    local ok_info, info = pcall(vim.fn.getmousepos)
+    if not ok_info or not info or not info.winid or not vim.api.nvim_win_is_valid(info.winid) then
+      return
+    end
+    if not vim.w[info.winid].sidekick_panel then
+      return
+    end
+    if info.line == 0 then
+      vim.schedule(function()
+        if key == MOUSE_SCROLL_UP then
+          M.cycle(-1)
+        else
+          M.cycle(1)
+        end
+      end)
+    end
+  end)
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = Config.augroup,
     callback = function(ev)

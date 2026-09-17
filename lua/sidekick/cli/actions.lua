@@ -101,20 +101,20 @@ function M.close_current()
   panel().close()
 end
 
-function M.close_unpinned()
-  panel().close_many("unpinned")
+function M.close_unpinned(t)
+  panel().close_many("unpinned", t and t.id or nil)
 end
 
-function M.close_others()
-  panel().close_many("others")
+function M.close_others(t)
+  panel().close_many("others", t and t.id or nil)
 end
 
-function M.close_left()
-  panel().close_many("left")
+function M.close_left(t)
+  panel().close_many("left", t and t.id or nil)
 end
 
-function M.close_right()
-  panel().close_many("right")
+function M.close_right(t)
+  panel().close_many("right", t and t.id or nil)
 end
 
 function M.close_invisible()
@@ -139,6 +139,10 @@ end
 
 function M.panel_taller()
   panel().adjust(0, 1)
+end
+
+function M.panel_zoom()
+  panel().toggle_zoom()
 end
 
 ---@param dir "h"|"j"|"k"|"l"
