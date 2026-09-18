@@ -211,4 +211,21 @@ describe("managed CLI conversations", function()
     assert.is_true(captured.resumable)
     assert.are.equal(active, captured.id)
   end)
+
+  it("verifies Copilot session state directory when events.jsonl is absent", function()
+    local root = vim.fn.tempname()
+    local id = Managed.uuid("copilot-dir-test")
+    local session_dir = vim.fs.joinpath(root, "session-state", id)
+    vim.fn.mkdir(session_dir, "p")
+    local yaml = assert(io.open(vim.fs.joinpath(session_dir, "workspace.yaml"), "w"))
+    yaml:write("version: 1\n")
+    yaml:close()
+
+    local adapter = Managed.adapter("copilot")
+    local tool = { cmd = { "copilot", "--config-dir", root }, config = { env = {} } }
+    local ok = adapter.preflight(tool, { id = id, provider = "copilot", resumable = true }, { cwd = "/tmp" })
+
+    vim.fn.delete(root, "rf")
+    assert.is_true(ok)
+  end)
 end)

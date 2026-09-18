@@ -197,7 +197,12 @@ local function copilot_exists(id, _, tool)
     or env_value(tool, "COPILOT_HOME")
     or env_value(tool, "COPILOT_CONFIG_DIR")
     or vim.fn.expand("~/.copilot")
-  return vim.uv.fs_stat(vim.fs.joinpath(root, "session-state", id, "events.jsonl")) ~= nil
+  local session_dir = vim.fs.joinpath(root, "session-state", id)
+  local stat = vim.uv.fs_stat(session_dir)
+  if stat and (stat.type == "directory" or stat.type == "file") then
+    return true
+  end
+  return vim.uv.fs_stat(vim.fs.joinpath(session_dir, "events.jsonl")) ~= nil
 end
 
 local function pi_exists(id, cwd, tool)

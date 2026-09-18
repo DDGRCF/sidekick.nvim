@@ -352,6 +352,11 @@ local function session_id(provider, path, session_root)
     return grok_session_id(path, session_root)
   elseif provider == "cursor" then
     return vim.fs.basename(vim.fs.dirname(path))
+  elseif provider == "codex" then
+    local lock_id = path:match("thread%-writer%-locks/([%w%-]+)%.lock$")
+    if lock_id and lock_id ~= ".coordination" then
+      return lock_id
+    end
   end
   local line = read_first_line(path)
   if not line then
@@ -366,6 +371,27 @@ local function session_id(provider, path, session_root)
     return payload.id or payload.session_id
   end
   return value.sessionId
+end
+
+local function codex_session_path(id, session_root)
+  if type(id) ~= "string" or not id:match("^[%w%-]+$") or type(session_root) ~= "string" then
+    return
+  end
+  local matches = {}
+  for _, path in ipairs(vim.fn.globpath(session_root, "/**/rollout-*" .. id .. "*.jsonl", false, true)) do
+    if session_id("codex", path, session_root) == id then
+      matches[vim.fs.normalize(path)] = true
+    end
+  end
+  if vim.tbl_isempty(matches) then
+    for _, path in ipairs(vim.fn.globpath(session_root, "/**/*" .. id .. "*.jsonl", false, true)) do
+      if session_id("codex", path, session_root) == id then
+        matches[vim.fs.normalize(path)] = true
+      end
+    end
+  end
+  local paths = vim.tbl_keys(matches)
+  return #paths == 1 and paths[1] or nil
 end
 
 local function claude_session_path(id, session_root)
@@ -387,6 +413,12 @@ end
 local function allowed(provider, path, session_root, tool, cwd)
   path = vim.fs.normalize(path)
   session_root = session_root or M.roots[provider]
+  if provider == "codex" then
+    local home = session_root and vim.fs.dirname(session_root)
+    if home and path:sub(1, #home + 1) == home .. "/" and path:match("thread%-writer%-locks/[%w%-]+%.lock$") then
+      return true
+    end
+  end
   if provider == "crush" then
     for _, candidate in ipairs(crush_roots(tool, cwd, session_root)) do
       if path == vim.fs.joinpath(candidate, "crush.db") then
@@ -913,6 +945,13 @@ function M.verify(provider, conversation, tool, cwd)
   local session_root = root(provider, tool, cwd)
   if provider == "claude" and not path then
     path = claude_session_path(conversation.id, session_root)
+    if path then
+      conversation.data = vim.deepcopy(conversation.data or {})
+      conversation.data.path = path
+    end
+  end
+  if provider == "codex" and not path then
+    path = codex_session_path(conversation.id, session_root)
     if path then
       conversation.data = vim.deepcopy(conversation.data or {})
       conversation.data.path = path

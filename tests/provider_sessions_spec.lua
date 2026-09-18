@@ -103,6 +103,27 @@ describe("cli provider sessions", function()
     vim.fn.delete(root, "rf")
   end)
 
+  it("locates and verifies a Codex session file when path metadata was omitted", function()
+    local root = vim.fn.tempname()
+    local sub = root .. "/2026/09"
+    vim.fn.mkdir(sub, "p")
+    local id = "019fd4cb-881f-74a2-bb84-571584e30dd9"
+    local path = sub .. "/rollout-2026-09-18T00-00-00-" .. id .. ".jsonl"
+    local file = assert(io.open(path, "wb"))
+    file:write(vim.json.encode({ type = "session_meta", payload = { id = id } }) .. "\n")
+    file:close()
+    local old_root = Provider.roots.codex
+    Provider.roots.codex = vim.fs.normalize(root)
+
+    local conversation = { id = id, provider = "codex", resumable = true }
+    local verified = Provider.verify("codex", conversation)
+
+    Provider.roots.codex = old_root
+    vim.fn.delete(root, "rf")
+    assert.is_true(verified)
+    assert.are.equal(vim.fs.normalize(path), conversation.data.path)
+  end)
+
   it("captures and verifies an open Claude session file", function()
     local root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")
