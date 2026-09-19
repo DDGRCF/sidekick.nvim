@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" width="100%" height="100%">
+  <defs>
+    <linearGradient id="flowBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="glowLine" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="50%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+  </defs>
+
+  <rect width="900" height="360" rx="12" fill="url(#flowBg)" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Title Header -->
+  <text x="30" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="800" fill="#f8fafc">
+    End-to-End Autonomous AI Workflow in Neovim
+  </text>
+  <text x="30" y="66" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" fill="#94a3b8">
+    From continuous keystroke diff suggestions to multi-agent collaboration and persistence
+  </text>
+
+  <!-- Node 1: Keystroke & NES -->
+  <g transform="translate(30, 95)">
+    <rect width="180" height="180" rx="10" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+    <circle cx="90" cy="40" r="22" fill="#0369a1" opacity="0.3"/>
+    <text x="90" y="46" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#38bdf8">⚡</text>
+    <text x="90" y="85" font-family="-apple-system, sans-serif" font-size="14" font-weight="700" text-anchor="middle" fill="#f8fafc">1. Copilot NES</text>
+    <text x="90" y="112" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">Real-time pause</text>
+    <text x="90" y="130" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">Inline diffs (chars)</text>
+    <text x="90" y="148" font-family="monospace" font-size="11" text-anchor="middle" fill="#38bdf8">&lt;Tab&gt; to accept</text>
+    <rect x="25" y="160" width="130" height="12" rx="6" fill="#1e293b"/>
+    <rect x="25" y="160" width="60" height="12" rx="6" fill="#0284c7"/>
+  </g>
+
+  <!-- Arrow 1 -> 2 -->
+  <path d="M 215 185 L 245 185" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="4,4"/>
+
+  <!-- Node 2: Context Aware CLI -->
+  <g transform="translate(250, 95)">
+    <rect width="180" height="180" rx="10" fill="#0f172a" stroke="#818cf8" stroke-width="1.5"/>
+    <circle cx="90" cy="40" r="22" fill="#4338ca" opacity="0.3"/>
+    <text x="90" y="46" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#818cf8">🧠</text>
+    <text x="90" y="85" font-family="-apple-system, sans-serif" font-size="14" font-weight="700" text-anchor="middle" fill="#f8fafc">2. Smart Context</text>
+    <text x="90" y="112" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">AST Treesitter scope</text>
+    <text x="90" y="130" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">Diagnostics &amp; diffs</text>
+    <text x="90" y="148" font-family="monospace" font-size="11" text-anchor="middle" fill="#a78bfa">&lt;C-p&gt; Prompt library</text>
+    <rect x="25" y="160" width="130" height="12" rx="6" fill="#1e293b"/>
+    <rect x="25" y="160" width="90" height="12" rx="6" fill="#6366f1"/>
+  </g>
+
+  <!-- Arrow 2 -> 3 -->
+  <path d="M 435 185 L 465 185" stroke="#64748b" stroke-width="2" stroke-dasharray="4,4"/>
+
+  <!-- Node 3: Multi-Agent Parallel -->
+  <g transform="translate(470, 95)">
+    <rect width="180" height="180" rx="10" fill="#0f172a" stroke="#c084fc" stroke-width="1.5"/>
+    <circle cx="90" cy="40" r="22" fill="#7e22ce" opacity="0.3"/>
+    <text x="90" y="46" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#c084fc">🤖</text>
+    <text x="90" y="85" font-family="-apple-system, sans-serif" font-size="14" font-weight="700" text-anchor="middle" fill="#f8fafc">3. Multi-Agent Run</text>
+    <text x="90" y="112" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">Claude, Codex, Pi</text>
+    <text x="90" y="130" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">Tabbed winbar panel</text>
+    <text x="90" y="148" font-family="monospace" font-size="11" text-anchor="middle" fill="#e879f9">&lt;A-f&gt; Fork &amp; Ref</text>
+    <rect x="25" y="160" width="130" height="12" rx="6" fill="#1e293b"/>
+    <rect x="25" y="160" width="115" height="12" rx="6" fill="#a855f7"/>
+  </g>
+
+  <!-- Arrow 3 -> 4 -->
+  <path d="M 655 185 L 685 185" stroke="#64748b" stroke-width="2" stroke-dasharray="4,4"/>
+
+  <!-- Node 4: Auto-Sync & Session Mux -->
+  <g transform="translate(690, 95)">
+    <rect width="180" height="180" rx="10" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <circle cx="90" cy="40" r="22" fill="#065f46" opacity="0.3"/>
+    <text x="90" y="46" font-family="sans-serif" font-size="18" text-anchor="middle" fill="#34d399">🔄</text>
+    <text x="90" y="85" font-family="-apple-system, sans-serif" font-size="14" font-weight="700" text-anchor="middle" fill="#f8fafc">4. Live Sync &amp; Mux</text>
+    <text x="90" y="112" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">Auto buffer reload</text>
+    <text x="90" y="130" font-family="monospace" font-size="11" text-anchor="middle" fill="#94a3b8">Tmux/Zellij persist</text>
+    <text x="90" y="148" font-family="monospace" font-size="11" text-anchor="middle" fill="#4ade80">Workspace restore</text>
+    <rect x="25" y="160" width="130" height="12" rx="6" fill="#1e293b"/>
+    <rect x="25" y="160" width="130" height="12" rx="6" fill="#10b981"/>
+  </g>
+
+  <!-- Bottom workflow ticker -->
+  <g transform="translate(30, 295)">
+    <rect width="840" height="42" rx="8" fill="#111827" stroke="#1f2937"/>
+    <text x="20" y="26" font-family="monospace" font-size="12" fill="#94a3b8">
+      <tspan fill="#38bdf8">Pipeline:</tspan> Edit → Copilot Suggests → Apply / Delegate to Claude/Codex → Auto Watch File → Persist Session
+    </text>
+  </g>
+</svg>

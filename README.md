@@ -1,68 +1,91 @@
-# 🤖 `sidekick.nvim`
+# ⚡ `omnipilot.nvim`
 
-**sidekick.nvim** is your Neovim AI sidekick that integrates Copilot LSP's
-"Next Edit Suggestions" with a built-in terminal for any AI CLI.
-Review and apply diffs, chat with AI assistants, and streamline your coding,
-without leaving your editor.
+> **Next-Gen Autonomous AI Workbench for Neovim**
+> Copilot LSP Next Edit Suggestions (NES) + Multi-Agent CLI Command Center.
 
-<img width="2311" height="1396" alt="image" src="https://github.com/user-attachments/assets/63a33610-9a8e-45e2-bbd0-b7e3a4fde621" />
+![OmniPilot Banner](assets/banner.svg)
+
+[![Neovim 0.11+](https://img.shields.io/badge/Neovim-0.11%2B-57A143?logo=neovim&logoColor=white)](https://neovim.io)
+[![Copilot NES](https://img.shields.io/badge/Copilot-NES%20LSP-blue?logo=github&logoColor=white)](https://github.com/github/copilot-language-server-release)
+[![Multiplexers](https://img.shields.io/badge/Mux-tmux%20%7C%20zellij-orange)](https://github.com/tmux/tmux)
+[![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen)](#)
+
+---
+
+## 🚀 Why OmniPilot?
+
+Most AI plugins in Neovim either offer single inline ghost-text completions **or** open an isolated chat split.
+
+**OmniPilot bridges both worlds into a unified AI execution layer**:
+1. **Keystroke-level Intelligence**: Real-time **Copilot Next Edit Suggestions (NES)** with rich word- & char-level diffs, AST-aware hunks, and floating side-by-side interactive reviews.
+2. **Multi-Agent CLI Workbench**: Run **Claude Code, OpenAI Codex, Antigravity, Pi, Grok, Copilot CLI, OpenCode, and Cursor** simultaneously in tabbed Neovim terminal panes with mouse support, zoom toggle (`<M-z>`), unread badges, and auto file reloading.
+3. **Cross-Agent Fork & Reference**: Fork a running conversation across different AI models (`<A-f>`) or pipe output from one agent directly into another (`<A-a>`).
+4. **Resilient Session Multiplexing**: Native `tmux` and `zellij` session persistence so your heavy background agents never drop connection when Neovim exits.
+
+---
+
+## 🎬 Visual Tour & Architecture
+
+### 1. Copilot Next Edit Suggestions (NES) Interactive Review
+Automatic multi-line diff suggestions triggered as you type. Accept line-by-line, hunk-by-hunk, or review in a floating side-by-side split.
+
+![Copilot NES Diff Preview](assets/nes-diff-demo.svg)
+
+### 2. Multi-Agent CLI Workbench (Tabbed Container & Context Injection)
+Full-featured terminal harness running your favorite agent CLIs side-by-side with your buffer, featuring one-key context capture (`{selection}`, `{diagnostics}`, `{treesitter_scope}`).
+
+![Multi-Agent CLI Workbench](assets/cli-agent-workbench.svg)
+
+### 3. Unified Developer Workflow Loop
+From keystroke suggestion to autonomous task execution and session restore.
+
+![AI Workflow Pipeline](assets/agent-flow.svg)
+
+---
 
 ## ✨ Features
 
-- **🤖 Next Edit Suggestions (NES) powered by Copilot LSP**
-  - 🪄 **Automatic Suggestions**: Fetches suggestions automatically when you pause typing or move the cursor.
-  - 🎨 **Rich Diffs**: Visualizes changes with inline and block-level diffs, featuring Treesitter-based syntax highlighting with granular diffing down to the word or character level.
-  - 🧭 **Hunk-by-Hunk Navigation**: Jump through edits to review them one by one before applying.
-  - 📊 **Statusline Integration**: Shows Copilot LSP's status, request progress, and preview text in your statusline.
+- **⚡ Copilot Next Edit Suggestions (NES)**
+  - 🔍 **Real-Time Diff Suggestions**: Fetches suggestions automatically when you pause typing (debounced).
+  - 🎨 **Granular Syntax Diffs**: Treesitter-based diffing down to the character and word level.
+  - 🔀 **Interactive Side-by-Side Review**: Floating dual-pane review window (`:Sidekick nes review`) with hunk jumping (`]c`/`[c`), accept hunk (`a`), reject hunk (`r`), and accept all (`A`).
+  - 📍 **Statusline & Extmark Integration**: Native statusline component and inline virtual text indicators.
 
-- **💬 Integrated AI CLI Terminal**
-  - 🚀 **Direct Access to AI CLIs**: Interact with your favorite AI command-line tools without leaving Neovim.
-  - 📦 **Pre-configured for Popular Tools**: Out-of-the-box support for Antigravity, Claude, Grok Build, Codex, Copilot CLI, and more.
-  - ✨ **Context-Aware Prompts**: Automatically include file content, cursor position, and diagnostics in your prompts.
-  - 📝 **Prompt Library**: A library of pre-defined prompts for common tasks like explaining code, fixing issues, or writing tests.
-  - 🔄 **Session Persistence**: Keep your CLI sessions alive with `tmux` and `zellij` integration.
-  - 📂 **Automatic File Watching**: Automatically reloads files in Neovim when they are modified by AI tools.
+- **🤖 Multi-Agent CLI Command Center**
+  - 🗂️ **Tabbed Agent Workspace**: Multi-tab terminal container with custom winbar icons, status indicators (`idle ○`, `working ●`, `waiting ◐`, `done ✓`, `error !`), and unread markers.
+  - 🔍 **Rich Agent Picker**: Fast fuzzy picker (`<leader>aa` / `<leader>bj`) with filter tabs (`All`, `Open`, `Working`, `Done`, `Errors`, `Pinned`) and terminal preview tails.
+  - 🔀 **Cross-Agent Fork & Reference**: Fork conversations between different AI tools (`<A-f>`) or reference another agent's session output (`<A-a>`).
+  - ⤢ **Terminal Zoom & Resize**: One-key full-height zoom toggle (`<leader>bz` or `<M-z>`) and interactive size adjustment.
+  - 🧠 **Context-Aware Prompt Injection**: Pass `{selection}`, `{file}`, `{diagnostics}`, `{treesitter_scope}`, and git diffs with `<C-p>`.
+  - 🔄 **Live Buffer Auto-Reloading**: Automatically detects when background AI tools modify your files and refreshes the buffers safely.
+  - 💾 **Workspace State Persistence**: Remembers active agent tabs and restores sessions automatically or on-demand.
+  - 🔌 **Tmux & Zellij Multiplexing**: Keeps background tasks executing even across editor restarts.
 
-- **🔌 Extensible and Customizable**
-  - ⚙️ **Flexible Configuration**: Fine-tune every aspect of the plugin to your liking.
-  - 🧩 **Plugin-Friendly API**: A rich API for integrating with other plugins and building custom workflows.
-  - 🎨 **Customizable UI**: Change the appearance of diffs, signs, and more.
+---
 
-## 📋 Requirements
+## 📦 Requirements
 
-- **Neovim** `>= 0.11.2` or newer
-- The official [copilot-language-server](https://github.com/github/copilot-language-server-release) LSP server,
-  enabled with `vim.lsp.enable`. Can be installed in multiple ways:
-  1. install using `npm` or your OS's package manager
-  2. install with [mason-lspconfig.nvim](https://github.com/mason-org/mason-lspconfig.nvim)
-  3. [copilot.lua](https://github.com/zbirenbaum/copilot.lua) and [copilot.vim](https://github.com/github/copilot.vim)
-     both bundle the LSP Server in their plugin.
-- A working `lsp/copilot.lua` configuration.
-  - **TIP:** Included in [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
-- [snacks.nvim](https://github.com/folke/snacks.nvim) for better prompt/tool selection **_(optional)_**
-- [nvim-treesitter-textobjects](https://github.com/nvim-treesitter/nvim-treesitter-textobjects) **_(`main` branch)_** for `{function}` and `{class}` context variables **_(optional)_**
-- AI cli tools, such as Antigravity, Codex, Claude, Copilot, … **_(optional)_**
-  see the [🤖 AI CLI Integration](#-ai-cli-integration) section for details.
-- [lsof](https://man7.org/linux/man-pages/man8/lsof.8.html) and [ps](https://man7.org/linux/man-pages/man1/ps.1.html) are used
-  on Unix-like systems to detect running AI CLI tool sessions. **_(optional, but recommended)_**
+- **Neovim** `>= 0.11.2`
+- The official [copilot-language-server](https://github.com/github/copilot-language-server-release) enabled with `vim.lsp.enable`
+  - Bundled by [copilot.lua](https://github.com/zbirenbaum/copilot.lua), [copilot.vim](https://github.com/github/copilot.vim), or standalone via `npm` / `mason.nvim`.
+- **Optional Enhancements**:
+  - [snacks.nvim](https://github.com/folke/snacks.nvim) (Recommended for agent picker and prompt search)
+  - [nvim-treesitter-textobjects](https://github.com/nvim-treesitter/nvim-treesitter-textobjects) (for `{function}` and `{class}` context capture)
+  - Any supported AI CLI tools: `claude`, `codex`, `antigravity`, `pi`, `copilot`, `grok`, etc.
+  - `tmux` or `zellij` for persistent session management
 
-## 🚀 Quick Start
+---
 
-1. **Install** the plugin with your package manager (see below)
-2. **Configure Copilot LSP** - must be enabled with `vim.lsp.enable`
-3. **Check health**: `:checkhealth sidekick`
-4. **Sign in to Copilot**: `:LspCopilotSignIn`
-5. **Try it out**:
-   - Type some code and pause - watch for Next Edit Suggestions appearing
-   - Press `<Tab>` to navigate through or apply suggestions
-   - Use `<leader>aa` to open AI CLI tools
+## ⚡ Quick Start
 
-> [!NOTE]
-> **New to Next Edit Suggestions?** Unlike inline completions, NES suggests entire refactorings or multi-line changes anywhere in your file - think of it as Copilot's "big picture" suggestions.
+1. Install via your package manager.
+2. Enable Copilot LSP (`vim.lsp.enable("copilot")`).
+3. Run `:checkhealth sidekick` to verify dependencies.
+4. Press `<leader>aa` to open your agent workbench, or type code and press `<Tab>` to apply Copilot edit suggestions.
 
-## 📦 Installation
+## 📥 Installation
 
-Install with your favorite manager. With [lazy.nvim](https://github.com/folke/lazy.nvim):
+Install with your favorite package manager. With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 <!-- setup_base:start -->
 

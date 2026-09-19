@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f19" />
+      <stop offset="50%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#080c14" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="50%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+    <linearGradient id="cardGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.9" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="480" rx="16" fill="url(#bg)"/>
+  <rect width="1200" height="480" rx="16" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Subtle glow circles -->
+  <circle cx="200" cy="100" r="180" fill="#38bdf8" opacity="0.04" filter="blur(40px)"/>
+  <circle cx="1000" cy="350" r="220" fill="#a855f7" opacity="0.05" filter="blur(50px)"/>
+
+  <!-- Top Window Bar -->
+  <rect x="24" y="20" width="1152" height="40" rx="8" fill="#0f172a" stroke="#1e293b" stroke-width="1"/>
+  <circle cx="48" cy="40" r="6" fill="#ef4444"/>
+  <circle cx="68" cy="40" r="6" fill="#f59e0b"/>
+  <circle cx="88" cy="40" r="6" fill="#10b981"/>
+  <text x="120" y="45" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="600" fill="#94a3b8">neovim — copilot nes + multi-agent workbench</text>
+  <rect x="1040" y="30" width="120" height="20" rx="10" fill="#1e293b"/>
+  <text x="1056" y="44" font-family="monospace" font-size="11" fill="#38bdf8">v0.11+ ready</text>
+
+  <!-- Left: Hero Brand Panel -->
+  <g transform="translate(48, 90)">
+    <!-- Badge -->
+    <rect x="0" y="0" width="190" height="26" rx="13" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="12" y="17" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11" font-weight="700" fill="#38bdf8">⚡ NEXT-GEN AI CO-PILOT</text>
+
+    <!-- Main Title -->
+    <text x="0" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="900" fill="#ffffff" letter-spacing="-1">
+      OmniPilot<tspan fill="url(#accent)">.nvim</tspan>
+    </text>
+
+    <!-- Subtitle -->
+    <text x="0" y="105" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" fill="#94a3b8">
+      The Autonomous Multi-Agent Command Center &amp; Copilot NES Engine
+    </text>
+
+    <!-- Feature pills -->
+    <g transform="translate(0, 135)">
+      <rect x="0" y="0" width="160" height="32" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="12" y="20" font-family="monospace" font-size="12" fill="#34d399">✓ Copilot NES Diffs</text>
+
+      <rect x="172" y="0" width="175" height="32" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="184" y="20" font-family="monospace" font-size="12" fill="#60a5fa">✓ 10+ AI CLI Agents</text>
+
+      <rect x="360" y="0" width="170" height="32" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="372" y="20" font-family="monospace" font-size="12" fill="#c084fc">✓ Cross-Agent Fork</text>
+    </g>
+
+    <!-- Stat boxes -->
+    <g transform="translate(0, 195)">
+      <rect x="0" y="0" width="120" height="60" rx="8" fill="#111827" stroke="#1f2937" stroke-width="1"/>
+      <text x="16" y="28" font-family="sans-serif" font-size="20" font-weight="800" fill="#38bdf8">&lt; 15ms</text>
+      <text x="16" y="46" font-family="sans-serif" font-size="11" fill="#64748b">Diff Latency</text>
+
+      <rect x="135" y="0" width="120" height="60" rx="8" fill="#111827" stroke="#1f2937" stroke-width="1"/>
+      <text x="151" y="28" font-family="sans-serif" font-size="20" font-weight="800" fill="#a855f7">10+</text>
+      <text x="151" y="46" font-family="sans-serif" font-size="11" fill="#64748b">CLI Adapters</text>
+
+      <rect x="270" y="0" width="140" height="60" rx="8" fill="#111827" stroke="#1f2937" stroke-width="1"/>
+      <text x="286" y="28" font-family="sans-serif" font-size="20" font-weight="800" fill="#34d399">Side-by-Side</text>
+      <text x="286" y="46" font-family="sans-serif" font-size="11" fill="#64748b">Interactive Preview</text>
+    </g>
+
+    <text x="0" y="295" font-family="monospace" font-size="12" fill="#64748b">
+      Formerly <tspan text-decoration="line-through">sidekick.nvim</tspan> — Re-engineered for agentic workflows
+    </text>
+  </g>
+
+  <!-- Right: Floating Mockup Cards (Diff & Terminal) -->
+  <g transform="translate(630, 85)" filter="url(#shadow)">
+    <!-- Back card: Terminal Agent Session -->
+    <g transform="translate(40, 20)">
+      <rect width="480" height="240" rx="10" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+      <!-- Agent tab bar -->
+      <rect width="480" height="30" rx="10" fill="#1e293b"/>
+      <rect x="10" y="5" width="100" height="20" rx="4" fill="#0f172a"/>
+      <text x="20" y="19" font-family="monospace" font-size="11" fill="#38bdf8">🤖 claude ●</text>
+      <text x="125" y="19" font-family="monospace" font-size="11" fill="#64748b">codex ○</text>
+      <text x="200" y="19" font-family="monospace" font-size="11" fill="#64748b">pi ◌</text>
+      <text x="445" y="20" font-family="monospace" font-size="12" fill="#94a3b8">⤢</text>
+
+      <!-- Agent terminal text -->
+      <text x="16" y="55" font-family="monospace" font-size="11" fill="#94a3b8">$ claude --task "Refactor auth middleware"</text>
+      <text x="16" y="75" font-family="monospace" font-size="11" fill="#34d399">✔ Analyzed src/auth.ts (AST parsed)</text>
+      <text x="16" y="95" font-family="monospace" font-size="11" fill="#38bdf8">ℹ Generating token rotation schema...</text>
+      <text x="16" y="115" font-family="monospace" font-size="11" fill="#e2e8f0">&gt; File updated: 3 hunks prepared for review</text>
+    </g>
+
+    <!-- Front card: NES Side-by-side Floating Diff -->
+    <g transform="translate(0, 100)">
+      <rect width="510" height="245" rx="10" fill="#090d16" stroke="#4f46e5" stroke-width="1.8"/>
+      
+      <!-- Preview Header -->
+      <rect width="510" height="30" rx="10" fill="#1e1b4b"/>
+      <text x="16" y="20" font-family="monospace" font-size="11" font-weight="700" fill="#a5b4fc">NES Interactive Diff Preview [2 hunks]</text>
+      <text x="410" y="20" font-family="monospace" font-size="10" fill="#818cf8">[Tab] switch pane</text>
+
+      <!-- Split preview columns -->
+      <rect x="8" y="38" width="242" height="165" rx="4" fill="#030712" stroke="#1e293b"/>
+      <rect x="260" y="38" width="242" height="165" rx="4" fill="#030712" stroke="#1e293b"/>
+
+      <!-- Left: Original -->
+      <text x="16" y="56" font-family="monospace" font-size="10" fill="#ef4444">--- Original: line 42</text>
+      <rect x="12" y="66" width="234" height="20" fill="#450a0a" opacity="0.6"/>
+      <text x="16" y="80" font-family="monospace" font-size="10" fill="#fca5a5">- function auth(req, res) {</text>
+      <text x="16" y="100" font-family="monospace" font-size="10" fill="#64748b">    const tok = req.headers.tok;</text>
+      <rect x="12" y="106" width="234" height="20" fill="#450a0a" opacity="0.6"/>
+      <text x="16" y="120" font-family="monospace" font-size="10" fill="#fca5a5">-   return verify(tok);</text>
+      <text x="16" y="140" font-family="monospace" font-size="10" fill="#64748b">  }</text>
+
+      <!-- Right: Suggested (NES) -->
+      <text x="268" y="56" font-family="monospace" font-size="10" fill="#22c55e">+++ Suggested: Copilot NES</text>
+      <rect x="264" y="66" width="234" height="20" fill="#052e16" opacity="0.7"/>
+      <text x="268" y="80" font-family="monospace" font-size="10" fill="#86efac">+ async function auth(req: Request) {</text>
+      <text x="268" y="100" font-family="monospace" font-size="10" fill="#94a3b8">    const token = req.bearerToken();</text>
+      <rect x="264" y="106" width="234" height="20" fill="#052e16" opacity="0.7"/>
+      <text x="268" y="120" font-family="monospace" font-size="10" fill="#86efac">+   return await verifyJWT(token);</text>
+      <text x="268" y="140" font-family="monospace" font-size="10" fill="#94a3b8">  }</text>
+
+      <!-- Preview Footer Action keys -->
+      <rect x="0" y="210" width="510" height="35" rx="0" fill="#111827"/>
+      <text x="16" y="232" font-family="monospace" font-size="11" fill="#38bdf8">
+        <tspan fill="#fbbf24">[a]</tspan> accept  <tspan fill="#f87171">[r]</tspan> reject  <tspan fill="#34d399">[A]</tspan> all  <tspan fill="#818cf8">[]c]</tspan> jump  <tspan fill="#94a3b8">[q]</tspan> quit
+      </text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 440" width="100%" height="100%">
+  <defs>
+    <linearGradient id="termBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1120" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer window border -->
+  <rect width="900" height="440" rx="12" fill="url(#termBg)" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Agent Tabs Header (Sidekick Winbar) -->
+  <rect x="0" y="0" width="900" height="42" rx="12" fill="#0f172a"/>
+  
+  <!-- Tab 1: Active Claude -->
+  <rect x="10" y="6" width="145" height="30" rx="6" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2"/>
+  <text x="22" y="26" font-family="monospace" font-size="12" font-weight="700" fill="#38bdf8">🤖 claude ●</text>
+  <text x="135" y="26" font-family="monospace" font-size="11" fill="#64748b">×</text>
+
+  <!-- Tab 2: Codex (waiting) -->
+  <rect x="162" y="6" width="135" height="30" rx="6" fill="#0f172a" stroke="#334155"/>
+  <text x="174" y="26" font-family="monospace" font-size="12" fill="#94a3b8">⚙️ codex ◐</text>
+  <text x="280" y="26" font-family="monospace" font-size="11" fill="#64748b">×</text>
+
+  <!-- Tab 3: Pi (idle) -->
+  <rect x="304" y="6" width="125" height="30" rx="6" fill="#0f172a" stroke="#334155"/>
+  <text x="316" y="26" font-family="monospace" font-size="12" fill="#94a3b8">🥧 pi ○</text>
+  <text x="412" y="26" font-family="monospace" font-size="11" fill="#64748b">×</text>
+
+  <!-- Tab 4: Antigravity (done) -->
+  <rect x="436" y="6" width="155" height="30" rx="6" fill="#0f172a" stroke="#334155"/>
+  <text x="448" y="26" font-family="monospace" font-size="12" fill="#34d399">✨ antigravity ✓</text>
+  <text x="574" y="26" font-family="monospace" font-size="11" fill="#64748b">×</text>
+
+  <!-- Right winbar badges: [NORMAL], [⤢ ZOOM] -->
+  <rect x="740" y="9" width="75" height="24" rx="4" fill="#334155"/>
+  <text x="750" y="25" font-family="monospace" font-size="11" font-weight="700" fill="#f8fafc">[NORMAL]</text>
+  <rect x="822" y="9" width="65" height="24" rx="4" fill="#1e3a8a"/>
+  <text x="834" y="25" font-family="monospace" font-size="11" font-weight="700" fill="#60a5fa">[⤢ ZOOM]</text>
+
+  <!-- Split View: Left is Neovim Editor, Right is AI Terminal Agent -->
+  <!-- Left Side: Neovim Code Editor -->
+  <g transform="translate(16, 52)">
+    <rect width="420" height="325" rx="8" fill="#030712" stroke="#1e293b"/>
+    <rect width="420" height="26" rx="8" fill="#111827"/>
+    <text x="14" y="18" font-family="monospace" font-size="11" fill="#94a3b8">editor: lua/sidekick/auth.lua</text>
+
+    <!-- Code in editor -->
+    <text x="14" y="50" font-family="monospace" font-size="12" fill="#64748b">1  local M = {}</text>
+    <text x="14" y="70" font-family="monospace" font-size="12" fill="#64748b">2  </text>
+    <text x="14" y="90" font-family="monospace" font-size="12" fill="#f8fafc">3  function M.authenticate(req)</text>
+    <!-- Visual selection highlight -->
+    <rect x="6" y="98" width="408" height="42" fill="#1e3a8a" opacity="0.4" rx="2"/>
+    <text x="14" y="112" font-family="monospace" font-size="12" fill="#93c5fd">4    -- selected context for CLI prompt</text>
+    <text x="14" y="132" font-family="monospace" font-size="12" fill="#93c5fd">5    return req.user ~= nil</text>
+    <text x="14" y="152" font-family="monospace" font-size="12" fill="#f8fafc">6  end</text>
+    
+    <!-- Context injection HUD -->
+    <g transform="translate(10, 185)">
+      <rect width="400" height="125" rx="6" fill="#0f172a" stroke="#334155"/>
+      <text x="14" y="22" font-family="monospace" font-size="11" font-weight="700" fill="#38bdf8">⚡ Smart Context Extraction</text>
+      <text x="14" y="44" font-family="monospace" font-size="11" fill="#cbd5e1">• <tspan fill="#a855f7">{selection}</tspan> lines 4-5 attached</text>
+      <text x="14" y="64" font-family="monospace" font-size="11" fill="#cbd5e1">• <tspan fill="#a855f7">{diagnostics}</tspan> 0 errors, 1 hint</text>
+      <text x="14" y="84" font-family="monospace" font-size="11" fill="#cbd5e1">• <tspan fill="#a855f7">{treesitter_scope}</tspan> function M.authenticate</text>
+      <text x="14" y="106" font-family="monospace" font-size="11" fill="#10b981">✓ Injected into active agent via &lt;C-p&gt;</text>
+    </g>
+  </g>
+
+  <!-- Right Side: Live AI Agent Terminal Session -->
+  <g transform="translate(450, 52)">
+    <rect width="434" height="325" rx="8" fill="#020617" stroke="#38bdf8" stroke-width="1.2"/>
+    <rect width="434" height="26" rx="8" fill="#0f172a"/>
+    <text x="14" y="18" font-family="monospace" font-size="11" fill="#38bdf8">terminal: Claude Code (Session: #sess_492a)</text>
+    <text x="360" y="18" font-family="monospace" font-size="10" fill="#34d399">● WORKING</text>
+
+    <!-- Terminal Transcript -->
+    <text x="14" y="52" font-family="monospace" font-size="11" fill="#64748b">&gt; claude (attached to sidekick panel)</text>
+    <text x="14" y="72" font-family="monospace" font-size="11" fill="#f8fafc">User: <tspan fill="#93c5fd">Add JWT claims check with expiration</tspan></text>
+    
+    <text x="14" y="100" font-family="monospace" font-size="11" fill="#38bdf8">Claude:</text>
+    <text x="14" y="120" font-family="monospace" font-size="11" fill="#cbd5e1">I will rewrite M.authenticate with verify_jwt().</text>
+    <text x="14" y="140" font-family="monospace" font-size="11" fill="#e2e8f0">Reading file: <tspan fill="#fbbf24">lua/sidekick/auth.lua</tspan></text>
+    
+    <rect x="12" y="152" width="410" height="50" rx="4" fill="#111827"/>
+    <text x="20" y="172" font-family="monospace" font-size="11" fill="#34d399">✓ Edited lua/sidekick/auth.lua (+14 lines)</text>
+    <text x="20" y="190" font-family="monospace" font-size="10" fill="#94a3b8">File watcher triggered: buffer reloaded automatically</text>
+
+    <!-- Fork & Reference Bar -->
+    <g transform="translate(10, 225)">
+      <rect width="414" height="85" rx="6" fill="#1e1b4b" stroke="#6366f1"/>
+      <text x="14" y="24" font-family="monospace" font-size="11" font-weight="700" fill="#c7d2fe">🔀 Multi-Agent Coordination</text>
+      <text x="14" y="46" font-family="monospace" font-size="11" fill="#e0e7ff">• <tspan fill="#fbbf24">&lt;A-f&gt;</tspan> Fork conversation to Codex or Pi</text>
+      <text x="14" y="68" font-family="monospace" font-size="11" fill="#e0e7ff">• <tspan fill="#fbbf24">&lt;A-a&gt;</tspan> Reference output from running Claude into Codex</text>
+    </g>
+  </g>
+
+  <!-- Bottom Global Keymap Bar -->
+  <rect x="16" y="388" width="868" height="40" rx="6" fill="#0f172a" stroke="#1e293b"/>
+  <text x="28" y="413" font-family="monospace" font-size="11" fill="#e2e8f0">
+    <tspan fill="#38bdf8">&lt;leader&gt;aa</tspan> Pick Agent  │  
+    <tspan fill="#fbbf24">&lt;C-p&gt;</tspan> Insert Context  │  
+    <tspan fill="#c084fc">&lt;A-f&gt;</tspan> Fork Agent  │  
+    <tspan fill="#34d399">&lt;M-z&gt;</tspan> Zoom Panel  │  
+    <tspan fill="#60a5fa">[b / ]b</tspan> Prev/Next Tab  │  
+    <tspan fill="#f87171">&lt;leader&gt;bd</tspan> Close
+  </text>
+</svg>
