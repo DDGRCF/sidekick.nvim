@@ -90,6 +90,7 @@ local wo = {
 local bo = {
   swapfile = false,
   filetype = "sidekick_terminal",
+  scrollback = 100000,
 }
 
 ---@param session sidekick.cli.Terminal
@@ -235,6 +236,76 @@ end
 
 function M:attach() end
 
+--- Dump terminal scrollback lines.
+--- For mux-backed terminals, delegates to parent:dump().
+--- For direct terminals, returns the bounded tail of terminal lines.
+---@param max_lines? integer
+---@return string?
+function M:dump(max_lines)
+  if self.parent and type(self.parent.dump) == "function" then
+    return self.parent:dump()
+  end
+  if not self:buf_valid() then
+    return
+  end
+  local max = max_lines
+    or (type(Config.cli.scrollback) == "table" and Config.cli.scrollback.dump)
+    or (Config.cli.mux and Config.cli.mux.dump)
+    or 2000
+  local count = vim.api.nvim_buf_line_count(self.buf)
+  if count == 0 then
+    return ""
+  end
+  local last_non_blank = 0
+  local check_end = count
+  while check_end > 0 do
+    local chunk_size = math.min(check_end, 100)
+    local tail = vim.api.nvim_buf_get_lines(self.buf, check_end - chunk_size, check_end, false)
+    local found = false
+    for i = #tail, 1, -1 do
+      if tail[i]:find("%S") then
+        last_non_blank = (check_end - chunk_size) + i
+        found = true
+        break
+      end
+    end
+    if found then
+      break
+    end
+    check_end = check_end - chunk_size
+  end
+  if last_non_blank == 0 then
+    return ""
+  end
+  local start_line = math.max(0, last_non_blank - max)
+  local lines = vim.api.nvim_buf_get_lines(self.buf, start_line, last_non_blank, false)
+  for i, line in ipairs(lines) do
+    if line:sub(-1) == "\r" then
+      lines[i] = line:sub(1, -2)
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
+---@param max_lines? integer|(fun(output?:string))
+---@param cb? fun(output?:string)
+function M:dump_async(max_lines, cb)
+  ---@type (fun(output?:string))?
+  local callback = type(max_lines) == "function" and max_lines or cb
+  local lines = type(max_lines) == "number" and max_lines or nil
+  if self.parent and type(self.parent.dump_async) == "function" then
+    if callback then
+      return self.parent:dump_async(callback)
+    end
+    return
+  end
+  vim.schedule(function()
+    if callback then
+      callback(self:dump(lines))
+    end
+  end)
+end
+
 function M:is_running()
   return self.job and vim.fn.jobwait({ self.job }, 0)[1] == -1
 end
@@ -262,7 +333,12 @@ end
 
 ---@param buf? integer
 function M:bo(buf)
-  for k, v in pairs(merge(vim.deepcopy(bo), self.opts.bo)) do
+  local default_bo = vim.deepcopy(bo)
+  local limit = type(Config.cli.scrollback) == "table" and Config.cli.scrollback.limit
+  if limit then
+    default_bo.scrollback = limit
+  end
+  for k, v in pairs(merge(default_bo, self.opts.bo)) do
     ---@diagnostic disable-next-line: no-unknown
     vim.bo[buf or self.buf][k] = v
   end
@@ -610,6 +686,12 @@ function M:close()
   if self.buf and vim.api.nvim_buf_is_valid(self.buf) then
     vim.api.nvim_buf_delete(self.buf, { force = true })
     self.buf = nil
+  end
+  if self.scrollback then
+    if self.scrollback.buf and vim.api.nvim_buf_is_valid(self.scrollback.buf) then
+      pcall(vim.api.nvim_buf_delete, self.scrollback.buf, { force = true })
+    end
+    self.scrollback.buf = nil
   end
   pcall(vim.api.nvim_clear_autocmds, { group = self.group })
   pcall(vim.api.nvim_del_augroup_by_id, self.group)

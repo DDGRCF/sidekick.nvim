@@ -212,6 +212,16 @@ local defaults = {
       -- more lines means slower loading of the scrollback
       dump = 2000,
     },
+    --- Static scrollback snapshot settings for direct terminal sessions.
+    ---@class sidekick.cli.ScrollbackOpts
+    ---@field enabled? boolean Enable static scrollback snapshots for direct terminal sessions
+    ---@field dump? integer Max lines to capture when snapshotting terminal scrollback (default 2000)
+    ---@field limit? integer Scrollback lines to retain in the live terminal buffer (1-100000, default 100000)
+    scrollback = {
+      enabled = true,
+      dump = 2000,
+      limit = 100000,
+    },
     --- Limits for content returned only when an agent follows a running-agent reference.
     --- The reference sent to the target contains no conversation content.
     ---@class sidekick.cli.AgentReference
@@ -367,6 +377,17 @@ function M.setup(opts)
     M.validate("cli.workspace.resume_timeout_ms", "number")
     M.validate("cli.mux.backend", { "tmux", "zellij" })
     M.validate("cli.mux.create", { "terminal", "window", "split" })
+    if M.cli.scrollback and type(M.cli.scrollback) == "table" then
+      if M.cli.scrollback.enabled ~= nil then
+        M.validate("cli.scrollback.enabled", "boolean")
+      end
+      if M.cli.scrollback.dump ~= nil then
+        M.validate("cli.scrollback.dump", "number")
+      end
+      if M.cli.scrollback.limit ~= nil then
+        M.validate("cli.scrollback.limit", "number")
+      end
+    end
     M.validate("nes.diff.show", { "always", "cursor" })
   end)
 end

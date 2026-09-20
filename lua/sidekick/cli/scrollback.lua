@@ -49,7 +49,19 @@ end)
 
 ---@param terminal sidekick.cli.Terminal
 function M.is_enabled(terminal)
-  return terminal.parent and terminal.parent.dump ~= nil and not terminal.tool.native_scroll
+  if terminal.tool and terminal.tool.native_scroll then
+    return false
+  end
+  if terminal.parent and terminal.parent.dump ~= nil then
+    return true
+  end
+  if Config.cli.scrollback == false then
+    return false
+  end
+  if type(Config.cli.scrollback) == "table" and Config.cli.scrollback.enabled == false then
+    return false
+  end
+  return true
 end
 
 ---@param terminal sidekick.cli.Terminal
@@ -125,7 +137,9 @@ function M:open(win_pos)
 
   self.cursor = vim.api.nvim_win_get_cursor(win)
 
-  local text = terminal.parent and terminal.parent:dump() or nil
+  local text = (terminal.dump and terminal:dump())
+    or (terminal.parent and terminal.parent.dump and terminal.parent:dump())
+    or nil
   if not text then
     return self:scroll(win_pos)
   end
@@ -161,6 +175,9 @@ function M:close()
   if terminal:buf_valid() then
     Panel.set_buf(win, terminal.buf)
     terminal:wo()
+  end
+  if terminal then
+    terminal.normal_mode = false
   end
 end
 
