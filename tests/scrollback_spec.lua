@@ -265,13 +265,16 @@ describe("cli scrollback", function()
       },
     })
     local original_mode = vim.fn.mode
+    local original_stopinsert = vim.cmd.stopinsert
+    local original_update
+    local sb
     local mode = "n"
 
     local ok, err = xpcall(function()
       t:start()
       local win = assert(t:window())
       vim.api.nvim_set_current_win(win)
-      local sb = assert(t.scrollback)
+      sb = assert(t.scrollback)
       vim.fn.mode = function(full)
         return mode == "t" and "t" or full and "nt" or "n"
       end
@@ -282,11 +285,29 @@ describe("cli scrollback", function()
       end))
       assert.is_true(t.normal_mode)
 
+      local reasons = {}
+      local stopinsert_calls = 0
+      original_update = sb.update
+      sb.update = function(self, opts)
+        reasons[#reasons + 1] = opts and opts.reason
+        return original_update(self, opts)
+      end
+      vim.cmd.stopinsert = function(...)
+        stopinsert_calls = stopinsert_calls + 1
+        return original_stopinsert(...)
+      end
+
       vim.api.nvim_set_current_win(source)
       vim.api.nvim_set_current_win(win)
-      vim.wait(100)
+      assert.is_true(vim.wait(1000, function()
+        return vim.tbl_contains(reasons, "WinEnter")
+      end))
+      assert.is_true(stopinsert_calls > 0)
       assert.is_true(sb:is_open())
       assert.is_true(t.normal_mode)
+      sb.update = original_update
+      original_update = nil
+      vim.cmd.stopinsert = original_stopinsert
 
       mode = "t"
       vim.api.nvim_exec_autocmds("TermEnter", { buffer = sb.buf })
@@ -297,6 +318,10 @@ describe("cli scrollback", function()
     end, debug.traceback)
 
     vim.fn.mode = original_mode
+    vim.cmd.stopinsert = original_stopinsert
+    if original_update and sb then
+      sb.update = original_update
+    end
     if vim.api.nvim_win_is_valid(source) then
       vim.api.nvim_set_current_win(source)
     end
