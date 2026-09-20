@@ -464,8 +464,11 @@ local defaults = {
       dump = 2000,
     },
     --- Static scrollback snapshot settings for direct terminal sessions.
+    --- Direct snapshots prioritize stable text and cursor position over terminal colors,
+    --- since Neovim does not expose rendered terminal cell attributes. Set `enabled`
+    --- to false to keep the live colored terminal buffer in Normal mode.
     ---@class sidekick.cli.ScrollbackOpts
-    ---@field enabled? boolean Enable static scrollback snapshots for direct terminal sessions
+    ---@field enabled? boolean Enable stable plain-text snapshots for direct terminal sessions
     ---@field dump? integer Max lines to capture when snapshotting terminal scrollback (default 2000)
     ---@field limit? integer Scrollback lines to retain in the live terminal buffer (1-100000, default 100000)
     scrollback = {

@@ -165,75 +165,138 @@ describe("cli scrollback", function()
     vim.api.nvim_buf_delete(buf3, { force = true })
   end)
 
-  it("maintains stable snapshot cursor and view while live terminal streams background output", function()
+  it("reproduces cursor eviction in a live terminal with bounded scrollback", function()
+    local script = vim.fn.tempname() .. ".lua"
+    vim.fn.writefile({
+      "local buf = vim.api.nvim_create_buf(false, true)",
+      "vim.api.nvim_win_set_buf(0, buf)",
+      "vim.bo[buf].scrollback = 10",
+      "local command = [[i=1; while [ $i -le 30 ]; do echo init$i; i=$((i + 1)); done; echo SEED_DONE; sleep 0.5; i=1; while [ $i -le 200 ]; do echo stream$i; i=$((i + 1)); done; echo STREAM_DONE]]",
+      'local job = vim.fn.jobstart({ "sh", "-c", command }, { term = true })',
+      'assert(vim.wait(2000, function() return vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "SEED_DONE") end) == true)',
+      "local count = vim.api.nvim_buf_line_count(buf)",
+      "vim.api.nvim_win_set_cursor(0, { math.max(1, count - 5), 0 })",
+      "assert(vim.api.nvim_win_get_cursor(0)[1] > 1)",
+      'assert(vim.wait(3000, function() return vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "STREAM_DONE") end) == true)',
+      "assert(vim.api.nvim_win_get_cursor(0)[1] == 1)",
+      'assert(not vim.tbl_contains(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "init1"))',
+      "if vim.fn.jobwait({ job }, 0)[1] == -1 then vim.fn.jobstop(job) end",
+      "vim.cmd.qa({ bang = true })",
+    }, script)
+
+    local result = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, { text = true }):wait()
+    vim.fn.delete(script)
+    assert(result.code == 0, (result.stderr or "") .. (result.stdout or ""))
+  end)
+
+  it("keeps a static snapshot stable while the live buffer changes", function()
+    local win = vim.api.nvim_get_current_win()
+    local source = vim.api.nvim_get_current_buf()
+    local live = vim.api.nvim_create_buf(false, true)
+    local lines = {}
+    for i = 1, 30 do
+      lines[i] = "line " .. i
+    end
+    vim.api.nvim_buf_set_lines(live, 0, -1, false, lines)
+    vim.api.nvim_win_set_buf(win, live)
+
+    local terminal = {
+      buf = live,
+      normal_mode = false,
+      window = function()
+        return win
+      end,
+      is_open = function()
+        return true
+      end,
+      is_focused = function()
+        return true
+      end,
+      bo = function() end,
+      keys = function() end,
+      dump = function()
+        return table.concat(vim.api.nvim_buf_get_lines(live, 0, -1, false), "\n")
+      end,
+    }
+    local scrollback = setmetatable({
+      terminal = function()
+        return terminal
+      end,
+    }, Scrollback)
+
+    local ok, err = xpcall(function()
+      scrollback:open()
+      assert.is_true(scrollback:is_open())
+      vim.api.nvim_win_set_cursor(win, { 5, 0 })
+      local cursor = vim.api.nvim_win_get_cursor(win)
+      local view = vim.api.nvim_win_call(win, vim.fn.winsaveview)
+      local snapshot = vim.api.nvim_buf_get_lines(scrollback.buf, 0, -1, false)
+
+      vim.api.nvim_buf_set_lines(live, -1, -1, false, { "background output" })
+      assert.are.same(cursor, vim.api.nvim_win_get_cursor(win))
+      assert.are.equal(view.topline, vim.api.nvim_win_call(win, vim.fn.winsaveview).topline)
+      assert.are.same(snapshot, vim.api.nvim_buf_get_lines(scrollback.buf, 0, -1, false))
+    end, debug.traceback)
+
+    if vim.api.nvim_buf_is_valid(source) then
+      vim.api.nvim_win_set_buf(win, source)
+    end
+    if scrollback.buf and vim.api.nvim_buf_is_valid(scrollback.buf) then
+      vim.api.nvim_buf_delete(scrollback.buf, { force = true })
+    end
+    if vim.api.nvim_buf_is_valid(live) then
+      vim.api.nvim_buf_delete(live, { force = true })
+    end
+    assert.is_true(ok, err)
+  end)
+
+  it("handles TermLeave, WinEnter, and TermEnter through registered autocmds", function()
     local source = vim.api.nvim_get_current_win()
-    local id = "stable-scrollback-" .. vim.uv.hrtime()
+    local id = "scrollback-lifecycle-" .. vim.uv.hrtime()
     local t = Session.new({
       id = id,
       cwd = vim.fn.getcwd(),
       backend = "terminal",
       tool = {
-        name = "sidekick-stable-scrollback-test",
-        cmd = { vim.o.shell },
+        name = "sidekick-scrollback-lifecycle-test",
+        cmd = { "sh", "-c", "sleep 10" },
         config = {},
         native_scroll = false,
       },
     })
+    local original_mode = vim.fn.mode
+    local mode = "n"
 
     local ok, err = xpcall(function()
       t:start()
       local win = assert(t:window())
       vim.api.nvim_set_current_win(win)
-
-      -- Seed initial lines
-      vim.fn.chansend(t.job, "i=1; while [ $i -le 30 ]; do echo init$i; i=$((i + 1)); done\n")
-      vim.wait(1000, function()
-        return vim.api.nvim_buf_line_count(t.buf) >= 30
-      end)
-
       local sb = assert(t.scrollback)
-
-      -- If sb was opened on WinEnter in normal mode, close it first to test open/close lifecycle
-      if sb:is_open() then
-        sb:close()
+      vim.fn.mode = function(full)
+        return mode == "t" and "t" or full and "nt" or "n"
       end
-      assert.is_false(sb:is_open())
-      assert.are.equal(t.buf, vim.api.nvim_win_get_buf(win))
 
-      -- Enter scrollback snapshot
-      sb:open()
+      vim.api.nvim_exec_autocmds("TermLeave", { buffer = t.buf })
+      assert.is_true(vim.wait(1000, function()
+        return sb:is_open()
+      end))
+      assert.is_true(t.normal_mode)
+
+      vim.api.nvim_set_current_win(source)
+      vim.api.nvim_set_current_win(win)
+      vim.wait(100)
       assert.is_true(sb:is_open())
-      assert.are.equal(sb.buf, vim.api.nvim_win_get_buf(win))
+      assert.is_true(t.normal_mode)
 
-      -- Move cursor to line 5 in snapshot buffer
-      vim.api.nvim_win_set_cursor(win, { 5, 0 })
-      local cursor_before = vim.api.nvim_win_get_cursor(win)
-      local view_before = vim.api.nvim_win_call(win, vim.fn.winsaveview)
-      local snap_lines_before = vim.api.nvim_buf_get_lines(sb.buf, 0, -1, false)
-
-      -- Stream significant output into the live terminal buffer
-      vim.fn.chansend(t.job, "i=1; while [ $i -le 200 ]; do echo stream$i; i=$((i + 1)); done\n")
-      vim.wait(1000, function()
-        return vim.api.nvim_buf_line_count(t.buf) > 100
-      end)
-
-      -- Snapshot cursor and view in the window must remain identical
-      local cursor_after = vim.api.nvim_win_get_cursor(win)
-      local view_after = vim.api.nvim_win_call(win, vim.fn.winsaveview)
-      local snap_lines_after = vim.api.nvim_buf_get_lines(sb.buf, 0, -1, false)
-
-      assert.are.same(cursor_before, cursor_after)
-      assert.are.equal(view_before.topline, view_after.topline)
-      assert.are.equal(view_before.lnum, view_after.lnum)
-      assert.are.same(snap_lines_before, snap_lines_after)
-      assert.are.equal(sb.buf, vim.api.nvim_win_get_buf(win))
-
-      -- Closing scrollback restores live terminal buffer
-      sb:close()
-      assert.is_false(sb:is_open())
-      assert.are.equal(t.buf, vim.api.nvim_win_get_buf(win))
+      mode = "t"
+      vim.api.nvim_exec_autocmds("TermEnter", { buffer = sb.buf })
+      assert.is_true(vim.wait(1000, function()
+        return not sb:is_open() and vim.api.nvim_win_get_buf(win) == t.buf
+      end))
+      assert.is_false(t.normal_mode)
     end, debug.traceback)
 
+    vim.fn.mode = original_mode
     if vim.api.nvim_win_is_valid(source) then
       vim.api.nvim_set_current_win(source)
     end
