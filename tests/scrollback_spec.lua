@@ -88,16 +88,17 @@ describe("cli scrollback", function()
       tool = { native_scroll = false },
     }
 
-    assert.is_true(Scrollback.is_enabled(direct_non_native))
-    assert.is_true(Scrollback.is_enabled(direct_default))
+    assert.is_false(Scrollback.is_enabled(direct_non_native))
+    assert.is_false(Scrollback.is_enabled(direct_default))
     assert.is_false(Scrollback.is_enabled(direct_native))
     assert.is_true(Scrollback.is_enabled(mux_non_native))
     assert.is_false(Scrollback.is_enabled(mux_native))
-    assert.is_true(Scrollback.is_enabled(mux_no_dump))
+    assert.is_false(Scrollback.is_enabled(mux_no_dump))
 
     local old_scrollback = Config.cli.scrollback
-    Config.cli.scrollback = { enabled = false }
-    assert.is_false(Scrollback.is_enabled(direct_non_native))
+    Config.cli.scrollback = { enabled = true }
+    assert.is_true(Scrollback.is_enabled(direct_non_native))
+    assert.is_true(Scrollback.is_enabled(mux_no_dump))
     Config.cli.scrollback = false
     assert.is_false(Scrollback.is_enabled(direct_non_native))
     Config.cli.scrollback = old_scrollback
@@ -250,8 +251,10 @@ describe("cli scrollback", function()
     assert.is_true(ok, err)
   end)
 
-  it("handles TermLeave, WinEnter, and TermEnter through registered autocmds", function()
+  it("handles TermLeave, WinEnter, and TermEnter when snapshots are enabled", function()
     local source = vim.api.nvim_get_current_win()
+    local old_scrollback = Config.cli.scrollback
+    Config.cli.scrollback = vim.tbl_extend("force", {}, old_scrollback, { enabled = true })
     local id = "scrollback-lifecycle-" .. vim.uv.hrtime()
     local t = Session.new({
       id = id,
@@ -319,6 +322,7 @@ describe("cli scrollback", function()
 
     vim.fn.mode = original_mode
     vim.cmd.stopinsert = original_stopinsert
+    Config.cli.scrollback = old_scrollback
     if original_update and sb then
       sb.update = original_update
     end
