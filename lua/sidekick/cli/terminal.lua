@@ -154,6 +154,7 @@ function M:init()
   self._sidekick_output_first = 1
   self._sidekick_output_last = 0
   self._sidekick_output_bytes = 0
+  self._sidekick_output_pending = false
   self.status = self.status or "idle"
   self.group = vim.api.nvim_create_augroup("sidekick_cli_" .. self.id, { clear = true })
   M.terminals[self.id] = self
@@ -164,33 +165,36 @@ function M:init()
   return self
 end
 
----@param output string
+---@param output? string
 function M:_queue_output(output)
   if output == "" or self.closed then
     return
   end
 
-  local chunks = self._sidekick_output_chunks or {}
-  local first = self._sidekick_output_first or 1
-  local last = self._sidekick_output_last or 0
-  local bytes = self._sidekick_output_bytes or 0
-  if #output >= OUTPUT_MAX_BYTES then
-    chunks = { output:sub(-OUTPUT_MAX_BYTES) }
-    first, last, bytes = 1, 1, OUTPUT_MAX_BYTES
-  else
-    last = last + 1
-    chunks[last] = output
-    bytes = bytes + #output
-    while first <= last and (bytes > OUTPUT_MAX_BYTES or last - first + 1 > OUTPUT_MAX_CHUNKS) do
-      bytes = bytes - #chunks[first]
-      chunks[first] = nil
-      first = first + 1
+  self._sidekick_output_pending = true
+  if output then
+    local chunks = self._sidekick_output_chunks or {}
+    local first = self._sidekick_output_first or 1
+    local last = self._sidekick_output_last or 0
+    local bytes = self._sidekick_output_bytes or 0
+    if #output >= OUTPUT_MAX_BYTES then
+      chunks = { output:sub(-OUTPUT_MAX_BYTES) }
+      first, last, bytes = 1, 1, OUTPUT_MAX_BYTES
+    else
+      last = last + 1
+      chunks[last] = output
+      bytes = bytes + #output
+      while first <= last and (bytes > OUTPUT_MAX_BYTES or last - first + 1 > OUTPUT_MAX_CHUNKS) do
+        bytes = bytes - #chunks[first]
+        chunks[first] = nil
+        first = first + 1
+      end
     end
+    self._sidekick_output_chunks = chunks
+    self._sidekick_output_first = first
+    self._sidekick_output_last = last
+    self._sidekick_output_bytes = bytes
   end
-  self._sidekick_output_chunks = chunks
-  self._sidekick_output_first = first
-  self._sidekick_output_last = last
-  self._sidekick_output_bytes = bytes
 
   if self._sidekick_output_scheduled then
     return
@@ -215,25 +219,86 @@ function M:_flush_output()
     self.output_timer:stop()
   end
   self._sidekick_output_scheduled = false
+  local pending = self._sidekick_output_pending
   local chunks = self._sidekick_output_chunks
   local first = self._sidekick_output_first or 1
   local last = self._sidekick_output_last or 0
+  self._sidekick_output_pending = false
   self._sidekick_output_chunks = {}
   self._sidekick_output_first = 1
   self._sidekick_output_last = 0
   self._sidekick_output_bytes = 0
-  if self.closed or not chunks or first > last then
+  if self.closed or not pending then
     return
   end
 
-  local output = {}
-  for i = first, last do
-    output[#output + 1] = chunks[i]
+  local output ---@type string?
+  if chunks and first <= last then
+    local parts = {}
+    for i = first, last do
+      parts[#parts + 1] = chunks[i]
+    end
+    output = table.concat(parts, "\n")
   end
-  Activity.output(self, table.concat(output, "\n"))
+  Activity.output(self, output)
+end
+
+---@param buf integer
+---@param first integer
+---@param last integer
+function M:_on_lines(buf, first, last)
+  if first == last then
+    return
+  end
+  local config = self.tool and self.tool.config
+  if type(config and config.status) ~= "function" then
+    self:_queue_output()
+    return
+  end
+  local output = table.concat(vim.api.nvim_buf_get_lines(buf, first, last, false), "\n")
+  self:_queue_output(output)
 end
 
 function M:attach() end
+
+---@param line string
+local function has_content(line)
+  return line ~= ""
+end
+
+---@param line string
+local function has_non_whitespace(line)
+  return line:find("%S") ~= nil
+end
+
+---@param buf integer
+---@param predicate fun(line:string):boolean
+---@param count? integer
+---@return integer
+local function last_matching_line(buf, predicate, count)
+  local check_end = count or vim.api.nvim_buf_line_count(buf)
+  while check_end > 0 do
+    local chunk_size = math.min(check_end, 100)
+    local start_line = check_end - chunk_size
+    local tail = vim.api.nvim_buf_get_lines(buf, start_line, check_end, false)
+    for i = #tail, 1, -1 do
+      if predicate(tail[i]) then
+        return start_line + i
+      end
+    end
+    check_end = start_line
+  end
+  return 0
+end
+
+---@return integer
+function M:_ready_line_count()
+  local count = vim.api.nvim_buf_line_count(self.buf)
+  if count <= READY_INIT_LINES then
+    return count
+  end
+  return last_matching_line(self.buf, has_content, count)
+end
 
 --- Dump terminal scrollback lines.
 --- For mux-backed terminals, delegates to parent:dump().
@@ -255,24 +320,7 @@ function M:dump(max_lines)
   if count == 0 then
     return ""
   end
-  local last_non_blank = 0
-  local check_end = count
-  while check_end > 0 do
-    local chunk_size = math.min(check_end, 100)
-    local tail = vim.api.nvim_buf_get_lines(self.buf, check_end - chunk_size, check_end, false)
-    local found = false
-    for i = #tail, 1, -1 do
-      if tail[i]:find("%S") then
-        last_non_blank = (check_end - chunk_size) + i
-        found = true
-        break
-      end
-    end
-    if found then
-      break
-    end
-    check_end = check_end - chunk_size
-  end
+  local last_non_blank = last_matching_line(self.buf, has_non_whitespace, count)
   if last_non_blank == 0 then
     return ""
   end
@@ -372,8 +420,7 @@ function M:start()
 
   vim.api.nvim_buf_attach(self.buf, false, {
     on_lines = function(_, buf, _, first, _, last)
-      local output = table.concat(vim.api.nvim_buf_get_lines(buf, first, last, false), "\n")
-      self:_queue_output(output)
+      self:_on_lines(buf, first, last)
     end,
   })
 
@@ -483,16 +530,13 @@ function M:start()
       if not self:win_valid() then
         return -- wait for the window to be ready
       end
-      local lines = vim.api.nvim_buf_get_lines(self.buf, 0, -1, false)
-      while #lines > 0 and lines[#lines] == "" do
-        table.remove(lines)
-      end
+      local lines = self:_ready_line_count()
       local win = self:window()
       local cursor = win and vim.api.nvim_win_get_cursor(win) or { 1, 0 }
-      if #lines > READY_INIT_LINES and cursor[1] > 3 then
+      if lines > READY_INIT_LINES and cursor[1] > 3 then
         ready_init = ready_init or vim.uv.hrtime()
-        if #lines ~= ready_lines then
-          ready_lines = #lines
+        if lines ~= ready_lines then
+          ready_lines = lines
           ready_init = vim.uv.hrtime()
         end
         local init_elapsed = (vim.uv.hrtime() - ready_init) / 1e6 -- ms

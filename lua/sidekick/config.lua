@@ -219,11 +219,11 @@ local defaults = {
     ---@class sidekick.cli.ScrollbackOpts
     ---@field enabled? boolean Opt in to stable plain-text snapshots for direct terminal sessions
     ---@field dump? integer Max lines to capture when snapshotting terminal scrollback (default 2000)
-    ---@field limit? integer Scrollback lines to retain in the live terminal buffer (1-100000, default 10000)
+    ---@field limit? integer Scrollback lines to retain in the live terminal buffer (1-100000, default 5000)
     scrollback = {
       enabled = false,
       dump = 2000,
-      limit = 10000,
+      limit = 5000,
     },
     --- Limits for content returned only when an agent follows a running-agent reference.
     --- The reference sent to the target contains no conversation content.

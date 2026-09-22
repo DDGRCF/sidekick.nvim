@@ -29,6 +29,103 @@ describe("cli terminal scheduling", function()
     assert.matches("line 100", seen[1])
   end)
 
+  it("coalesces output signals without collecting text", function()
+    local old_output = Activity.output
+    local calls = 0
+    local seen = "unexpected"
+    Activity.output = function(_, output)
+      calls = calls + 1
+      seen = output
+    end
+    local t = setmetatable({ id = "output-signal" }, Terminal)
+
+    for _ = 1, 100 do
+      t:_queue_output()
+    end
+    vim.wait(1000, function()
+      return calls > 0
+    end)
+
+    Activity.output = old_output
+    if t.output_timer and not t.output_timer:is_closing() then
+      t.output_timer:close()
+    end
+    assert.are.equal(1, calls)
+    assert.is_nil(seen)
+  end)
+
+  it("reads changed text only for custom status adapters", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two" })
+    local queued = {}
+    local t = setmetatable({
+      tool = { config = {} },
+      _queue_output = function(_, output)
+        queued[#queued + 1] = output == nil and true or output
+      end,
+    }, Terminal)
+    local old_get_lines = vim.api.nvim_buf_get_lines
+    local reads = 0
+    vim.api.nvim_buf_get_lines = function(...)
+      reads = reads + 1
+      return old_get_lines(...)
+    end
+
+    t:_on_lines(buf, 0, 2)
+    assert.are.same({ true }, queued)
+    assert.are.equal(0, reads)
+
+    t.tool.config.status = function() end
+    t:_on_lines(buf, 0, 2)
+
+    vim.api.nvim_buf_get_lines = old_get_lines
+    vim.api.nvim_buf_delete(buf, { force = true })
+    assert.are.same({ true, "one\ntwo" }, queued)
+    assert.are.equal(1, reads)
+  end)
+
+  it("ignores terminal changes with no new lines", function()
+    local queued = false
+    local t = setmetatable({
+      tool = { config = { status = function() end } },
+      _queue_output = function()
+        queued = true
+      end,
+    }, Terminal)
+
+    t:_on_lines(0, 7, 7)
+
+    assert.is_false(queued)
+  end)
+
+  it("counts ready lines without reading the full buffer", function()
+    for _, trailing in ipairs({ 0, 99, 250 }) do
+      local buf = vim.api.nvim_create_buf(false, true)
+      local lines = { "one", "two", "three", "four", "five", "six" }
+      for _ = 1, trailing do
+        lines[#lines + 1] = ""
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      local t = setmetatable({ buf = buf }, Terminal)
+      local old_get_lines = vim.api.nvim_buf_get_lines
+      local reads = {}
+      vim.api.nvim_buf_get_lines = function(changed_buf, first, last, strict)
+        reads[#reads + 1] = { first, last }
+        return old_get_lines(changed_buf, first, last, strict)
+      end
+
+      local count = t:_ready_line_count()
+
+      vim.api.nvim_buf_get_lines = old_get_lines
+      vim.api.nvim_buf_delete(buf, { force = true })
+      assert.are.equal(6, count)
+      for _, range in ipairs(reads) do
+        assert.is_true(range[2] ~= -1)
+        assert.is_true(range[2] - range[1] <= 100)
+      end
+    end
+  end)
+
   it("bounds buffered output passed to status adapters", function()
     local old_output = Activity.output
     local seen
