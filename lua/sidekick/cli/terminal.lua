@@ -90,7 +90,6 @@ local wo = {
 local bo = {
   swapfile = false,
   filetype = "sidekick_terminal",
-  scrollback = 100000,
 }
 
 ---@param session sidekick.cli.Terminal

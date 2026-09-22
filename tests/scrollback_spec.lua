@@ -146,7 +146,7 @@ describe("cli scrollback", function()
 
     local buf1 = vim.api.nvim_create_buf(false, true)
     t:bo(buf1)
-    assert.are.equal(100000, vim.bo[buf1].scrollback)
+    assert.are.equal(10000, vim.bo[buf1].scrollback)
     vim.api.nvim_buf_delete(buf1, { force = true })
 
     local old_scrollback = Config.cli.scrollback
