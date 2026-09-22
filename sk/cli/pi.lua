@@ -1,6 +1,6 @@
 ---@type sidekick.cli.Config
 return {
-  cmd = { "pi" },
+  cmd = { "pi", "--tui-mode", "fullscreen" },
   capabilities = {
     resume = true,
     fork = false,
@@ -15,5 +15,5 @@ return {
   url = "https://github.com/badlogic/pi-mono",
   resume = require("sidekick.cli.managed_sessions").adapter("pi"),
   continue = { "--continue" },
-  native_scroll = false,
+  native_scroll = true,
 }
