@@ -300,6 +300,14 @@ function M:_ready_line_count()
   return last_matching_line(self.buf, has_content, count)
 end
 
+---@param line integer
+---@return boolean
+function M:_ready_cursor(line)
+  -- The window cursor only follows the terminal cursor in terminal mode.
+  -- Background sessions can already have stable output while it stays at line 1.
+  return not self:is_focused() or vim.fn.mode() ~= "t" or line > 3
+end
+
 --- Dump terminal scrollback lines.
 --- For mux-backed terminals, delegates to parent:dump().
 --- For direct terminals, returns the bounded tail of terminal lines.
@@ -533,7 +541,7 @@ function M:start()
       local lines = self:_ready_line_count()
       local win = self:window()
       local cursor = win and vim.api.nvim_win_get_cursor(win) or { 1, 0 }
-      if lines > READY_INIT_LINES and cursor[1] > 3 then
+      if lines > READY_INIT_LINES and self:_ready_cursor(cursor[1]) then
         ready_init = ready_init or vim.uv.hrtime()
         if lines ~= ready_lines then
           ready_lines = lines

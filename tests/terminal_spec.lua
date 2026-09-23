@@ -126,6 +126,31 @@ describe("cli terminal scheduling", function()
     end
   end)
 
+  it("checks the terminal cursor only while focused in terminal mode", function()
+    local cases = {
+      { focused = true, mode = "t", line = 1, ready = false },
+      { focused = true, mode = "t", line = 4, ready = true },
+      { focused = true, mode = "n", line = 1, ready = true },
+      { focused = false, mode = "t", line = 1, ready = true },
+    }
+    local old_mode = vim.fn.mode
+    local ok, err = xpcall(function()
+      for _, case in ipairs(cases) do
+        vim.fn.mode = function()
+          return case.mode
+        end
+        local t = setmetatable({
+          is_focused = function()
+            return case.focused
+          end,
+        }, Terminal)
+        assert.are.equal(case.ready, t:_ready_cursor(case.line))
+      end
+    end, debug.traceback)
+    vim.fn.mode = old_mode
+    assert.is_true(ok, err)
+  end)
+
   it("bounds buffered output passed to status adapters", function()
     local old_output = Activity.output
     local seen
