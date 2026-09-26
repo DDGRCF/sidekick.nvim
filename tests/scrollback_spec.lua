@@ -104,11 +104,10 @@ describe("cli scrollback", function()
     Config.cli.scrollback = old_scrollback
   end)
 
-  it("treats pi as a tool with native scroll and fullscreen tui mode", function()
+  it("treats pi as a tool with native scroll without forcing fullscreen", function()
     local tool = Config.get_tool("pi")
     assert.is_true(tool.config.native_scroll)
-    assert.is_true(vim.tbl_contains(tool.config.cmd, "--tui-mode"))
-    assert.is_true(vim.tbl_contains(tool.config.cmd, "fullscreen"))
+    assert.is_false(vim.tbl_contains(tool.config.cmd, "--tui-mode"))
     assert.is_false(Scrollback.is_enabled({ tool = tool.config }))
   end)
 

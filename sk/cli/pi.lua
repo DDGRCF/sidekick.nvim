@@ -1,6 +1,6 @@
 ---@type sidekick.cli.Config
 return {
-  cmd = { "pi", "--tui-mode", "fullscreen" },
+  cmd = { "pi" },
   capabilities = {
     resume = true,
     fork = false,
