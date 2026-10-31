@@ -313,6 +313,19 @@ function M.start(source, opts)
   end
 
   source._sidekick_forking = true
+  local function child_env()
+    local env = vim.deepcopy(source.tool.env or {})
+    local adapter = adapter_for(tool)
+    if type(adapter) == "table" and not vim.islist(adapter) and type(adapter.env) == "function" then
+      local ok, extra = pcall(adapter.env, tool, conversation, source)
+      if not ok then
+        Util.debug("CLI fork env adapter failed", extra)
+      elseif type(extra) == "table" then
+        env = vim.tbl_extend("force", env, extra)
+      end
+    end
+    return env
+  end
   local function launch(cmd)
     if type(cmd) ~= "table" or #cmd == 0 then
       source._sidekick_forking = nil
@@ -321,7 +334,7 @@ function M.start(source, opts)
     local ok, child = pcall(Session.new, {
       tool = tool:clone({
         cmd = cmd,
-        env = vim.deepcopy(source.tool.env or {}),
+        env = child_env(),
       }),
       cwd = source.cwd,
       backend = "terminal",

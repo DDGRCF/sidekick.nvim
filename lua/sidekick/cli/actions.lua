@@ -164,4 +164,38 @@ M.nav_down = nav("j")
 M.nav_up = nav("k")
 M.nav_right = nav("l")
 
+--- Scroll the agent window without moving the cursor. Works from terminal mode
+--- by leaving it first; the normal-mode buffer (or scrollback snapshot) keeps
+--- the history.
+---@param t sidekick.cli.Terminal
+---@param delta integer positive scrolls down
+local function scroll(t, delta)
+  if vim.fn.mode(true) == "t" then
+    vim.cmd.stopinsert()
+  end
+  vim.schedule(function()
+    local win = t:window()
+    if not (win and vim.api.nvim_win_is_valid(win)) then
+      return
+    end
+    -- <C-y>/<C-e> scroll and pull the cursor along when needed, unlike
+    -- winrestview({topline=...}), which Neovim reverts to keep the
+    -- cursor visible.
+    vim.api.nvim_win_call(win, function()
+      local keys = math.abs(delta) .. (delta < 0 and "\25" or "\5")
+      vim.cmd.normal({ args = { keys }, bang = true })
+    end)
+  end)
+end
+
+---@param t sidekick.cli.Terminal
+function M.scroll_up(t)
+  scroll(t, -3)
+end
+
+---@param t sidekick.cli.Terminal
+function M.scroll_down(t)
+  scroll(t, 3)
+end
+
 return M

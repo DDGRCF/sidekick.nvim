@@ -178,7 +178,7 @@ describe("cli conversation fork", function()
       return "child-conversation"
     end
     for _, case in ipairs({
-      { name = "codex", expected = { "codex", "fork", "conversation-42" } },
+      { name = "codex", expected = { "codex", "--no-alt-screen", "fork", "conversation-42" } },
       {
         name = "claude",
         expected = {
@@ -194,7 +194,7 @@ describe("cli conversation fork", function()
         name = "opencode",
         expected = { "opencode", "--port", "0", "--session", "conversation-42", "--fork" },
       },
-      { name = "grok", expected = { "grok", "--resume", "conversation-42", "--fork-session" } },
+      { name = "grok", expected = { "grok", "--no-alt-screen", "--resume", "conversation-42", "--fork-session" } },
       { name = "antigravity", expected = { "agy", "--conversation", "conversation-42" } },
     }) do
       local config = assert(loadfile("sk/cli/" .. case.name .. ".lua"))()
@@ -207,6 +207,17 @@ describe("cli conversation fork", function()
       assert.are.same(case.expected, cmd)
       assert.are.equal("exact", mode)
     end
+
+    local pi = assert(loadfile("sk/cli/pi.lua"))()
+    local extension = vim.api.nvim_get_runtime_file("sk/extensions/pi-sidekick.ts", false)[1]
+    local expected = { "pi", "--tui-mode", "regular" }
+    if extension then
+      vim.list_extend(expected, { "--extension", extension })
+    end
+    vim.list_extend(expected, { "--fork", "conversation-42" })
+    local cmd, mode = Fork.command({ name = "pi", cmd = pi.cmd, config = pi }, conversation("pi"))
+    assert.are.same(expected, cmd)
+    assert.are.equal("exact", mode)
   end)
 
   it("does not carry Claude's managed id into a fork command", function()

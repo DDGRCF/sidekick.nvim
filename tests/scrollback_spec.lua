@@ -104,11 +104,20 @@ describe("cli scrollback", function()
     Config.cli.scrollback = old_scrollback
   end)
 
-  it("treats pi as a tool with native scroll without forcing fullscreen", function()
+  it("treats pi as a regular-mode tool with Neovim scrolling", function()
     local tool = Config.get_tool("pi")
-    assert.is_true(tool.config.native_scroll)
-    assert.is_false(vim.tbl_contains(tool.config.cmd, "--tui-mode"))
-    assert.is_false(Scrollback.is_enabled({ tool = tool.config }))
+    assert.is_false(tool.config.native_scroll)
+    assert.are.same({ "pi", "--tui-mode", "regular" }, tool.config.cmd)
+    local old_scrollback = Config.cli.scrollback
+    Config.cli.scrollback = { enabled = true }
+    local enabled = Scrollback.is_enabled({ tool = tool.config })
+    Config.cli.scrollback = old_scrollback
+    assert.is_true(enabled)
+  end)
+
+  it("keeps codex and grok out of the alternate screen", function()
+    assert.is_true(vim.tbl_contains(Config.get_tool("codex").config.cmd, "--no-alt-screen"))
+    assert.is_true(vim.tbl_contains(Config.get_tool("grok").config.cmd, "--no-alt-screen"))
   end)
 
   it("bounds terminal dump and provides async dump", function()

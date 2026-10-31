@@ -56,6 +56,7 @@ local M = {}
 ---@field args? string[]
 ---@field available? fun(self:sidekick.cli.Tool,source?:sidekick.cli.Terminal):boolean,string?
 ---@field command? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,source?:sidekick.cli.Terminal):string[]?
+---@field env? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,source?:sidekick.cli.Terminal):table<string,string>?
 ---@field after_start? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation:sidekick.cli.Conversation,source:sidekick.cli.Terminal):boolean,string?
 ---@field prepare? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,source:sidekick.cli.Terminal,done:fun(cmd?:string[],reason?:string)):boolean,string?
 

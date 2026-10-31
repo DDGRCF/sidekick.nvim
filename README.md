@@ -378,6 +378,7 @@ local defaults = {
           copilot = "",
           crush = "󰛡",
           cursor = "󰅴",
+          devin = "◆",
           grok = "󱚥",
           omp = "󰠭",
           opencode = "󰄛",
@@ -415,6 +416,8 @@ local defaults = {
         agent_pick    = { "<leader>bj"  , "pick"            , mode = "n", desc = "pick an agent" },
         agent_ref     = { "<leader>ba"  , "reference"       , mode = "n", desc = "reference another running agent" },
         agent_fork    = { "<leader>bf"  , "fork"            , mode = "n", desc = "fork the current agent conversation" },
+        scroll_up     = { "<a-u>"       , "scroll_up"       , mode = "nt", desc = "scroll agent output up" },
+        scroll_down   = { "<a-d>"       , "scroll_down"     , mode = "nt", desc = "scroll agent output down" },
         agent_back    = { "<leader>bb"  , "previous"        , mode = "n", desc = "previously active agent" },
         agent_back_bt = { "<leader>`"   , "previous"        , mode = "n", desc = "previously active agent" },
         agent_pin     = { "<leader>bp"  , "pin"             , mode = "n", desc = "pin agent" },
@@ -499,6 +502,7 @@ local defaults = {
       copilot     = {},
       crush       = {},
       cursor      = {},
+      devin       = {},
       grok        = {},
       omp         = {},
       opencode    = {},
@@ -1155,10 +1159,11 @@ Sidekick preconfigures popular AI CLIs. Run `:checkhealth sidekick` to see which
 | [`copilot`](https://github.com/github/copilot-cli) | GitHub Copilot CLI | npm install -g @githubnext/github-copilot-cli | yes | - | yes | yes |
 | [`crush`](https://github.com/charmbracelet/crush) | Charm's AI assistant | See [installation](https://github.com/charmbracelet/crush) | yes | - | - | - |
 | [`cursor`](https://cursor.com/cli) | Cursor CLI agent | See [Cursor docs](https://cursor.com/cli) | yes | yes | - | - |
+| [`devin`](https://devin.ai) | Devin CLI | curl -fsSL https://cli.devin.ai/install.sh \| bash | yes | - | yes | - |
 | [`grok`](https://github.com/xai-org/grok-build) | Grok Build CLI | curl -fsSL https://x.ai/cli/install.sh \| bash | yes | yes | - | - |
 | [`omp`](https://github.com/can1357/oh-my-pi) | Oh My Pi CLI | bun install -g @oh-my-pi/pi-coding-agent | yes | yes | yes | yes |
 | [`opencode`](https://github.com/anomalyco/opencode) | OpenCode CLI | npm install -g opencode | yes | yes | yes | - |
-| [`pi`](https://github.com/badlogic/pi-mono) | Pi coding agent | See [installation](https://github.com/badlogic/pi-mono) | yes | - | yes | yes |
+| [`pi`](https://github.com/badlogic/pi-mono) | Pi coding agent | See [installation](https://github.com/badlogic/pi-mono) | yes | yes | yes | yes |
 
 <!-- providers:end -->
 

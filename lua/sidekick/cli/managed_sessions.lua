@@ -111,10 +111,13 @@ local function resolve_path(path, cwd)
   return vim.fs.normalize(absolute and path or vim.fs.joinpath(cwd or vim.fn.getcwd(), path))
 end
 
-local function pi_control_id(session)
+local function pi_control_id(session, tool)
   local control = session.conversation and session.conversation.data and session.conversation.data.control
+  -- Forked sessions get a dedicated control file from the fork adapter env
+  -- before they have a conversation attached.
+  control = control or (tool and env_value(tool, "SIDEKICK_PI_SESSION_FILE"))
   local record = type(control) == "string" and read_json(control) or nil
-  return record and M.valid_id(record.id) and record.id or nil
+  return record and M.valid_id(record.id) and record.id or nil, record and record.file or nil, control
 end
 
 local function valid_omp_id(id)
@@ -143,7 +146,11 @@ end
 
 local function current_id(provider, session, spec, tool)
   if provider == "pi" then
-    return pi_control_id(session) or process_id(session, spec)
+    local id, path, control = pi_control_id(session, tool)
+    if id then
+      return id, path, control
+    end
+    return process_id(session, spec)
   elseif provider == "omp" then
     return omp_control_id(session, tool)
   end
@@ -151,8 +158,9 @@ local function current_id(provider, session, spec, tool)
 end
 
 local function verified_id(provider, session, spec, tool, conversation)
-  if provider == "pi" and conversation.data and conversation.data.control then
-    return pi_control_id(session)
+  if provider == "pi" then
+    local id = pi_control_id(session, tool)
+    return id or process_id(session, spec)
   elseif provider == "omp" then
     return omp_control_id(session, tool)
   end

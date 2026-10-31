@@ -9,10 +9,11 @@ local providers = {
   { name = "copilot", capabilities = { resume = true, fork = false, continue = true, managed_session = true } },
   { name = "crush", capabilities = { resume = true, fork = false, continue = false, managed_session = false } },
   { name = "cursor", capabilities = { resume = true, fork = true, continue = false, managed_session = false } },
+  { name = "devin", capabilities = { resume = true, fork = false, continue = true, managed_session = false } },
   { name = "grok", capabilities = { resume = true, fork = true, continue = false, managed_session = false } },
   { name = "omp", capabilities = { resume = true, fork = true, continue = true, managed_session = true } },
   { name = "opencode", capabilities = { resume = true, fork = true, continue = true, managed_session = false } },
-  { name = "pi", capabilities = { resume = true, fork = false, continue = true, managed_session = true } },
+  { name = "pi", capabilities = { resume = true, fork = true, continue = true, managed_session = true } },
 }
 
 describe("cli provider capabilities", function()

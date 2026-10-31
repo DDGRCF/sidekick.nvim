@@ -98,6 +98,9 @@ end
 ---@type sidekick.cli.Config
 return {
   cmd = { "claude" },
+  -- Keep the transcript in the terminal buffer instead of the alternate
+  -- screen, so it shares Neovim's scrolling and survives a resize.
+  env = { CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = "1" },
   capabilities = {
     resume = true,
     fork = true,

@@ -1,6 +1,8 @@
 ---@type sidekick.cli.Config
 return {
-  cmd = { "codex" },
+  -- Keep the TUI inline so output stays in the terminal buffer and Neovim
+  -- scrolling/resume work instead of the alternate screen owning the viewport.
+  cmd = { "codex", "--no-alt-screen" },
   capabilities = {
     resume = true,
     fork = true,

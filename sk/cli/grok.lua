@@ -1,6 +1,7 @@
 ---@type sidekick.cli.Config
 return {
-  cmd = { "grok" },
+  -- Inline rendering keeps Grok's transcript in terminal scrollback.
+  cmd = { "grok", "--no-alt-screen" },
   capabilities = {
     resume = true,
     fork = true,
