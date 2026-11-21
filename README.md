@@ -31,6 +31,10 @@ Automatic multi-line diff suggestions triggered as you type. Accept line-by-line
 
 ![Copilot NES Diff Preview](assets/nes-diff-demo.svg)
 
+Side-by-side review inside a real Neovim session, with both halves of the diff highlighted per hunk:
+
+![NES review in a real Neovim session](assets/real-nes-preview.svg)
+
 ### 2. Multi-Agent CLI Workbench (Tabbed Container & Context Injection)
 Full-featured terminal harness running your favorite agent CLIs side-by-side with your buffer, featuring one-key context capture (`{selection}`, `{diagnostics}`, `{treesitter_scope}`).
 
