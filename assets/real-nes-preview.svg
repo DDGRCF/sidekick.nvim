@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" width="100%" height="100%">
+  <defs>
+    <linearGradient id="termBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1e1e"/>
+      <stop offset="100%" stop-color="#141414"/>
+    </linearGradient>
+    <filter id="winShadow" x="-2%" y="-2%" width="104%" height="106%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Neovim Window Frame -->
+  <rect width="900" height="520" rx="10" fill="url(#termBg)" stroke="#333842" stroke-width="1.5" filter="url(#winShadow)"/>
+
+  <!-- Native Title / Winbar -->
+  <rect x="0" y="0" width="900" height="38" rx="10" fill="#21252b" stroke="#333842" stroke-width="0.8"/>
+  <circle cx="20" cy="19" r="5.5" fill="#e06c75"/>
+  <circle cx="36" cy="19" r="5.5" fill="#e5c07b"/>
+  <circle cx="52" cy="19" r="5.5" fill="#98c379"/>
+  <text x="75" y="23" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600" fill="#9da5b4">NVIM v0.11.2 — [NES current] ↔ [NES suggested] (Sidekick Interactive Diff)</text>
+  <rect x="765" y="8" width="120" height="22" rx="4" fill="#2c313a"/>
+  <text x="778" y="23" font-family="JetBrains Mono, monospace" font-size="11" fill="#61afef">2 hunks active</text>
+
+  <!-- Real Rendered Code Body -->
+  <g>
+    <text x="32" y="65" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 1 </tspan><tspan fill="#c678dd">local</tspan> <tspan fill="#61afef"><tspan fill="#d19a66">M</tspan></tspan> <tspan fill="#c678dd">=</tspan> <tspan fill="#56b6c2">{</tspan><tspan fill="#56b6c2">}</tspan></text>
+    <text x="32" y="87" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 2 </tspan></text>
+    <text x="32" y="109" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 3 </tspan><tspan fill="#c678dd">function</tspan> <tspan fill="#61afef"><tspan fill="#d19a66">M</tspan></tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">login</tspan><tspan fill="#56b6c2">(</tspan><tspan fill="#61afef">req</tspan><tspan fill="#56b6c2">,</tspan> <tspan fill="#61afef">res</tspan><tspan fill="#56b6c2">)</tspan></text>
+    <text x="32" y="131" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 4 </tspan>  <tspan fill="#c678dd">local</tspan> <tspan fill="#61afef">username</tspan> <tspan fill="#c678dd">=</tspan> <tspan fill="#61afef">req</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">body</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">username</tspan></text>
+    <text x="32" y="153" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 5 </tspan>  <tspan fill="#c678dd">local</tspan> <tspan fill="#61afef">password</tspan> <tspan fill="#c678dd">=</tspan> <tspan fill="#61afef">req</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">body</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">password</tspan></text>
+    <text x="32" y="175" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 6 </tspan>  <tspan fill="#c678dd">if</tspan> <tspan fill="#c678dd">not</tspan> <tspan fill="#61afef">username</tspan> <tspan fill="#c678dd">or</tspan> <tspan fill="#c678dd">not</tspan> <tspan fill="#61afef">password</tspan> <tspan fill="#c678dd">then</tspan></text>
+    <text x="32" y="197" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 7 </tspan>    <tspan fill="#c678dd">return</tspan> <tspan fill="#61afef">res</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">status</tspan><tspan fill="#56b6c2">(</tspan><tspan fill="#d19a66">400</tspan><tspan fill="#56b6c2">)</tspan><tspan fill="#56b6c2">:</tspan><tspan fill="#61afef">send</tspan><tspan fill="#56b6c2">(</tspan><tspan fill="#98c379">'Missing credentials'</tspan><tspan fill="#56b6c2">)</tspan></text>
+    <text x="32" y="219" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 8 </tspan>  <tspan fill="#c678dd">end</tspan></text>
+    <text x="32" y="241" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30"> 9 </tspan>  <tspan fill="#c678dd">local</tspan> <tspan fill="#61afef">user</tspan> <tspan fill="#c678dd">=</tspan> <tspan fill="#61afef">db</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">find_user</tspan><tspan fill="#56b6c2">(</tspan><tspan fill="#61afef">username</tspan><tspan fill="#56b6c2">)</tspan></text>
+    <rect x="24" y="249" width="852" height="20" fill="#2d3139" opacity="0.85" rx="3"/><text x="32" y="263" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">10 </tspan><tspan fill="#61afef" font-weight="bold">  <tspan fill="#c678dd">if</tspan> <tspan fill="#61afef">user</tspan> <tspan fill="#c678dd">and</tspan></tspan> <tspan fill="#e5c07b" font-weight="bold" text-decoration="underline"><tspan fill="#61afef">user</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">password</tspan></tspan> <tspan fill="#c678dd">==</tspan> <tspan fill="#61afef">password</tspan><tspan fill="#61afef" font-weight="bold"> <tspan fill="#c678dd">then</tspan></tspan></text>
+    <rect x="24" y="271" width="852" height="20" fill="#2d3139" opacity="0.85" rx="3"/><text x="32" y="285" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">11 </tspan><tspan fill="#e06c75">-------------------------------------------------</tspan></text>
+    <rect x="24" y="293" width="852" height="20" fill="#2d3139" opacity="0.85" rx="3"/><text x="32" y="307" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">12 </tspan><tspan fill="#61afef" font-weight="bold">    <tspan fill="#c678dd">return</tspan> <tspan fill="#61afef">res</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">send</tspan></tspan><tspan fill="#56b6c2">(</tspan><tspan fill="#56b6c2">{</tspan> <tspan fill="#61afef">token</tspan> <tspan fill="#c678dd">=</tspan> <tspan fill="#e5c07b" font-weight="bold" text-decoration="underline"><tspan fill="#98c379">'mock-token'</tspan></tspan><tspan fill="#61afef" font-weight="bold"> <tspan fill="#56b6c2">}</tspan></tspan><tspan fill="#56b6c2">)</tspan></text>
+    <text x="32" y="329" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">13 </tspan>  <tspan fill="#c678dd">end</tspan></text>
+    <text x="32" y="351" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">14 </tspan>  <tspan fill="#c678dd">return</tspan> <tspan fill="#61afef">res</tspan><tspan fill="#56b6c2">.</tspan><tspan fill="#61afef">status</tspan><tspan fill="#56b6c2">(</tspan><tspan fill="#d19a66">401</tspan><tspan fill="#56b6c2">)</tspan><tspan fill="#56b6c2">:</tspan><tspan fill="#61afef">send</tspan><tspan fill="#56b6c2">(</tspan><tspan fill="#98c379">'Unauthorized'</tspan><tspan fill="#56b6c2">)</tspan></text>
+    <text x="32" y="373" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">15 </tspan><tspan fill="#c678dd">end</tspan></text>
+    <text x="32" y="395" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">16 </tspan></text>
+    <text x="32" y="417" font-family="JetBrains Mono, Menlo, Consolas, monospace" font-size="13" fill="#abb2bf"><tspan fill="#5c6370" width="30">17 </tspan><tspan fill="#c678dd">return</tspan> <tspan fill="#61afef"><tspan fill="#d19a66">M</tspan></tspan></text>
+  </g>
+
+  <!-- Real Sidekick Interactive Review Footer -->
+  <rect x="0" y="476" width="900" height="44" rx="0" fill="#21252b" stroke="#333842" stroke-width="1"/>
+  <rect x="0" y="500" width="900" height="20" rx="10" fill="#21252b"/>
+  <text x="24" y="503" font-family="JetBrains Mono, monospace" font-size="12" fill="#d19a66">
+    <tspan fill="#61afef" font-weight="bold">[a]</tspan><tspan fill="#abb2bf">ccept · </tspan>
+    <tspan fill="#e06c75" font-weight="bold">[r]</tspan><tspan fill="#abb2bf">eject · </tspan>
+    <tspan fill="#98c379" font-weight="bold">[A]</tspan><tspan fill="#abb2bf">ll · </tspan>
+    <tspan fill="#c678dd" font-weight="bold">[]c]</tspan><tspan fill="#abb2bf">jump hunk · </tspan>
+    <tspan fill="#56b6c2" font-weight="bold">[Tab]</tspan><tspan fill="#abb2bf">switch pane · </tspan>
+    <tspan fill="#5c6370" font-weight="bold">[q]</tspan><tspan fill="#abb2bf">uit</tspan>
+  </text>
+</svg>
