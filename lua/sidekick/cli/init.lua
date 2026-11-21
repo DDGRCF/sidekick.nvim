@@ -48,6 +48,8 @@ local M = {}
 ---@field prepare? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):{cmd:string[],env?:table<string,string>,conversation:sidekick.cli.Conversation}?
 ---@field env? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):table<string,string>?
 ---@field capture? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):sidekick.cli.Conversation|string?
+---@field capture_async? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session,cb:fun(conversation:sidekick.cli.Conversation|string?)):any
+---@field capture_cached? fun(self:sidekick.cli.Tool,session:sidekick.cli.Session):sidekick.cli.Conversation|string?
 ---@field command? fun(self:sidekick.cli.Tool,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):string[]?
 ---@field preflight? fun(self:sidekick.cli.Tool,conversation:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean,string?
 ---@field verify? fun(self:sidekick.cli.Tool,terminal:sidekick.cli.Terminal,conversation?:sidekick.cli.Conversation,saved:sidekick.cli.WorkspaceAgent):boolean?,string?

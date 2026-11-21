@@ -14,6 +14,55 @@ local function call(fn, ...)
   Util.debug("CLI resume adapter failed", ret)
 end
 
+--- Capture a session without blocking the editor.
+--- Adapters that can talk to a provider API implement `capture_async`; every
+--- other tool falls back to the synchronous capture.
+---@param session sidekick.cli.Session
+---@param cb? fun(conversation: sidekick.cli.Conversation?)
+---@return boolean handled
+function M.capture_async(session, cb)
+  session = logical(session)
+  local adapter = session.tool and session.tool.config.resume
+  if type(adapter) ~= "table" or vim.islist(adapter) or type(adapter.capture_async) ~= "function" then
+    return false
+  end
+  local ok, err = pcall(adapter.capture_async, session.tool, session, function(conversation)
+    if type(conversation) == "string" then
+      conversation = { id = conversation }
+    end
+    if type(conversation) == "table" then
+      conversation = require("sidekick.cli.session").set_conversation(session, conversation)
+    end
+    if cb then
+      cb(conversation)
+    end
+  end)
+  if not ok then
+    Util.debug("CLI async resume capture failed", err)
+    return false
+  end
+  return true
+end
+
+--- Capture using only local knowledge, never a network round-trip. Used by
+--- workspace snapshots, which run on every agent state change.
+---@param session sidekick.cli.Session
+---@return sidekick.cli.Conversation?
+function M.capture_cached(session)
+  session = logical(session)
+  local adapter = session.tool and session.tool.config.resume
+  if type(adapter) == "table" and not vim.islist(adapter) then
+    if type(adapter.capture_cached) == "function" then
+      local ok, conversation = pcall(adapter.capture_cached, session.tool, session)
+      if ok and type(conversation) == "table" then
+        return require("sidekick.cli.session").set_conversation(session, conversation)
+      end
+      return
+    end
+  end
+  return M.capture(session)
+end
+
 ---@param session sidekick.cli.Session
 ---@param opts? {require_current?:boolean}
 ---@return sidekick.cli.Conversation?

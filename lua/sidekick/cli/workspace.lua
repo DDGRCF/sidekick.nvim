@@ -77,7 +77,7 @@ function M.snapshot()
         mux_session = session.mux_session or t.mux_session,
         instance_id = t.instance_id,
         title = t.title or session.title,
-        conversation = Resume.capture(t),
+        conversation = Resume.capture_cached(t),
         forked_from = vim.deepcopy(t.forked_from or session.forked_from),
         status = t.status,
       }

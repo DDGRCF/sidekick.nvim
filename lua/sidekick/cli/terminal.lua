@@ -621,7 +621,17 @@ end
 
 function M:on_ready()
   -- Capture native session metadata before the ready event triggers a workspace save.
-  require("sidekick.cli.resume").capture(self)
+  -- Tools that resolve sessions over the network do it asynchronously so a slow
+  -- provider API cannot freeze the editor right after the agent opens.
+  local resume = require("sidekick.cli.resume")
+  local captured = resume.capture_async(self, function()
+    if Config.cli.workspace.enabled then
+      pcall(require("sidekick.cli.workspace").save, { silent = true })
+    end
+  end)
+  if not captured then
+    resume.capture(self)
+  end
   Activity.ready(self)
   self._sidekick_ready = true
   self:_schedule_send(0)
