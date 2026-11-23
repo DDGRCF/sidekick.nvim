@@ -122,7 +122,7 @@ describe("cli agent panel", function()
     assert.are.same({ "codex-1", "claude-1" }, Panel.panels[vim.api.nvim_get_current_tabpage()].order)
   end)
 
-  it("locks the panel buffer against external window switches", function()
+  it("redirects external buffer switches out of the panel window", function()
     local first = fake("winfix-one", "codex", "One")
     local second = fake("winfix-two", "claude", "Two")
     Panel.show(first, true)
@@ -131,14 +131,54 @@ describe("cli agent panel", function()
     local other = vim.api.nvim_create_buf(false, true)
     bufs[#bufs + 1] = other
 
-    assert.is_true(vim.wo[win].winfixbuf)
+    assert.is_false(vim.wo[win].winfixbuf)
     local ok = pcall(vim.api.nvim_set_current_buf, other)
-    assert.is_false(ok)
+    assert.is_true(ok)
+    assert.are.equal(other, vim.api.nvim_win_get_buf(win))
+
+    vim.wait(1000, function()
+      return vim.api.nvim_win_get_buf(win) == first.buf
+    end)
+
+    -- the foreign buffer moved to a regular window which is now current
+    local cur = vim.api.nvim_get_current_win()
+    assert.are_not.equal(win, cur)
+    assert.is_falsy(vim.w[cur].sidekick_panel)
+    assert.are.equal(other, vim.api.nvim_win_get_buf(cur))
     assert.are.equal(first.buf, vim.api.nvim_win_get_buf(win))
 
     Panel.select(second.id)
     assert.are.equal(second.buf, vim.api.nvim_win_get_buf(win))
-    assert.is_true(vim.wo[win].winfixbuf)
+    assert.is_false(vim.wo[win].winfixbuf)
+  end)
+
+  it("splits off a foreign buffer when the panel is the only window", function()
+    local first = fake("only-win", "codex", "Only")
+    Panel.show(first, true)
+    vim.cmd.stopinsert()
+    local win = Panel.win(first)
+    local tab = vim.api.nvim_get_current_tabpage()
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+      if w ~= win then
+        vim.api.nvim_win_close(w, true)
+      end
+    end
+    vim.api.nvim_set_current_win(win)
+    local other = vim.api.nvim_create_buf(false, true)
+    bufs[#bufs + 1] = other
+
+    vim.api.nvim_set_current_buf(other)
+
+    vim.wait(1000, function()
+      return vim.api.nvim_win_get_buf(win) == first.buf
+    end)
+    local wins = vim.tbl_filter(function(w)
+      return vim.api.nvim_win_get_buf(w) == other
+    end, vim.api.nvim_tabpage_list_wins(tab))
+    assert.are.equal(1, #wins)
+    assert.are.equal(wins[1], vim.api.nvim_get_current_win())
+    assert.is_falsy(vim.w[wins[1]].sidekick_panel)
+    assert.are.equal(first.buf, vim.api.nvim_win_get_buf(win))
   end)
 
   it("closes duplicate splits created from the panel window", function()
@@ -151,15 +191,93 @@ describe("cli agent panel", function()
       vim.api.nvim_set_current_win(panel_win)
       vim.cmd(command)
 
-      local panel_buffers = vim.tbl_filter(function(win)
-        return vim.api.nvim_win_get_buf(win) == first.buf
-      end, vim.api.nvim_tabpage_list_wins(tab))
-      assert.are.equal(1, #panel_buffers)
+      assert(vim.wait(1000, function()
+        local panel_buffers = vim.tbl_filter(function(win)
+          return vim.api.nvim_win_get_buf(win) == first.buf
+        end, vim.api.nvim_tabpage_list_wins(tab))
+        return #panel_buffers == 1
+      end))
       assert.are.equal(panel_win, Panel.win(first))
 
       Panel.hide()
       Panel.remove(first.id)
     end
+  end)
+
+  it("keeps a split from the panel that gets its own buffer right away", function()
+    local first = fake("split-reuse", "codex", "Split reuse")
+    Panel.show(first)
+    local panel_win = Panel.win(first)
+
+    vim.api.nvim_set_current_win(panel_win)
+    vim.cmd("vsplit")
+    local new_win = vim.api.nvim_get_current_win()
+    local scratch = vim.api.nvim_create_buf(false, true)
+    bufs[#bufs + 1] = scratch
+    vim.api.nvim_win_set_buf(new_win, scratch)
+
+    vim.wait(50, function()
+      return false
+    end)
+    assert.is_true(vim.api.nvim_win_is_valid(new_win))
+    assert.are.equal(scratch, vim.api.nvim_win_get_buf(new_win))
+    assert.are.equal(panel_win, Panel.win(first))
+  end)
+
+  it("restores the panel width after being squeezed", function()
+    local first = fake("squeeze", "codex", "Squeeze")
+    Panel.show(first)
+    local win = Panel.win(first)
+    Panel.resize({ width = 40 })
+    assert.are.equal(40, vim.api.nvim_win_get_width(win))
+
+    -- simulate another plugin shrinking the split
+    vim.api.nvim_win_set_width(win, 10)
+    vim.api.nvim_exec_autocmds("WinResized", {})
+
+    assert(vim.wait(1000, function()
+      return vim.api.nvim_win_get_width(win) == 40
+    end))
+  end)
+
+  it("leaves zoomed and wider-than-desired panels alone on resize", function()
+    local first = fake("no-restore", "codex", "No restore")
+    Panel.show(first)
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
+    local win = Panel.win(first)
+    Panel.resize({ width = 40 })
+
+    -- a wider window is not shrunk back
+    vim.api.nvim_win_set_width(win, 70)
+    vim.api.nvim_exec_autocmds("WinResized", {})
+    vim.wait(50, function()
+      return false
+    end)
+    assert.are.equal(70, vim.api.nvim_win_get_width(win))
+
+    -- a zoomed panel is not restored
+    Panel.toggle_zoom()
+    vim.api.nvim_win_set_width(win, 15)
+    vim.api.nvim_exec_autocmds("WinResized", {})
+    vim.wait(50, function()
+      return false
+    end)
+    assert.are.equal(15, vim.api.nvim_win_get_width(win))
+    p.zoomed = false
+  end)
+
+  it("carries normal mode over when switching agent tabs in the panel", function()
+    local first = fake("mode-one", "codex", "One")
+    local second = fake("mode-two", "claude", "Two")
+    Panel.show(first, true)
+    vim.cmd.stopinsert()
+    Panel.show(second)
+    Panel.select(first.id, true)
+    vim.cmd.stopinsert()
+    assert.are.equal(Panel.win(first), vim.api.nvim_get_current_win())
+
+    Panel.select(second.id)
+    assert.is_true(second.normal_mode)
   end)
 
   it("cleans duplicate panel splits during refresh", function()

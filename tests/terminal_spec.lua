@@ -197,6 +197,120 @@ describe("cli terminal scheduling", function()
     assert.is_false(t._sidekick_send_scheduled)
   end)
 
+  it("detects a nested terminal editor in the process tree", function()
+    local Procs = require("sidekick.cli.procs")
+    local old_pids = Procs.pids
+    local old_get_proc = vim.api.nvim_get_proc
+    local ok, err = xpcall(function()
+      local t = setmetatable({ pids = { 100 } }, Terminal)
+
+      Procs.pids = function()
+        return { 100, 200, 300 }
+      end
+      vim.api.nvim_get_proc = function(pid)
+        if pid == 300 then
+          return { name = "/usr/bin/NVIM" }
+        end
+        return { name = "sh" }
+      end
+      assert.is_true(t:editor_active())
+
+      vim.api.nvim_get_proc = function()
+        return { name = "sh" }
+      end
+      assert.is_false(t:editor_active())
+
+      -- the root process itself (the agent) is never counted as an editor
+      Procs.pids = function()
+        return { 100 }
+      end
+      vim.api.nvim_get_proc = function()
+        return { name = "nvim" }
+      end
+      assert.is_false(t:editor_active())
+
+      -- no tracked pid: not running / plain fake
+      assert.is_false(setmetatable({}, Terminal):editor_active())
+    end, debug.traceback)
+    Procs.pids = old_pids
+    vim.api.nvim_get_proc = old_get_proc
+    assert.is_true(ok, err)
+  end)
+
+  it("passes terminal-mode keys through to a nested editor", function()
+    local editor = false
+    local hide_called = false
+    local Panel = require("sidekick.cli.panel")
+    local old_hide = Panel.hide
+    Panel.hide = function()
+      hide_called = true
+    end
+    local buf = vim.api.nvim_create_buf(false, true)
+    local t = setmetatable({
+      buf = buf,
+      opts = {
+        keys = {
+          test_passthrough = {
+            "<c-x>",
+            function()
+              return "action-ran"
+            end,
+            mode = "t",
+          },
+          test_expr = {
+            "<c-y>",
+            function()
+              return "expr-ran"
+            end,
+            mode = "t",
+            expr = true,
+          },
+          test_hide = { "<c-g>", "hide", mode = "nt" },
+        },
+      },
+      tool = { keys = {} },
+      editor_active = function()
+        return editor
+      end,
+    }, Terminal)
+    t:keys()
+
+    local fed = {}
+    local old_feedkeys = vim.api.nvim_feedkeys
+    local old_mode = vim.fn.mode
+    vim.api.nvim_feedkeys = function(keys, mode, escape)
+      fed[#fed + 1] = { keys = keys, mode = mode }
+    end
+    vim.fn.mode = function()
+      return "t"
+    end
+    local maps = {}
+    for _, km in ipairs(vim.api.nvim_buf_get_keymap(buf, "t")) do
+      maps[km.lhs] = km
+    end
+
+    local ok, err = xpcall(function()
+      editor = true
+      assert.is_nil(maps["<C-X>"].callback())
+      assert.are.same({ { keys = vim.keycode("<c-x>"), mode = "n" } }, fed)
+      -- expr mappings return their own lhs so the key reaches the job
+      assert.are.equal("<c-y>", maps["<C-Y>"].callback())
+      -- hide stays mapped as an escape hatch
+      maps["<C-G>"].callback()
+      assert.is_true(hide_called)
+
+      editor = false
+      assert.are.equal("action-ran", maps["<C-X>"].callback())
+      assert.are.equal("expr-ran", maps["<C-Y>"].callback())
+    end, debug.traceback)
+
+    vim.api.nvim_feedkeys = old_feedkeys
+    vim.fn.mode = old_mode
+    Panel.hide = old_hide
+    vim.api.nvim_buf_delete(buf, { force = true })
+    assert.is_true(ok, err)
+  end)
+
   it("clears unread output when entering an agent from another window", function()
     local source = vim.api.nvim_get_current_win()
     local id = "focus-unread-" .. vim.uv.hrtime()

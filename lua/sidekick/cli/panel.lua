@@ -71,7 +71,7 @@ end
 ---@param buf integer
 local function set_panel_buf(p, buf)
   if valid(p.win) then
-    set_window_buf(p.win, buf, true)
+    set_window_buf(p.win, buf, false)
   end
 end
 
@@ -1084,7 +1084,7 @@ local function open(p, buf)
   end
   vim.wo[p.win].winfixwidth = layout == "left" or layout == "right"
   vim.wo[p.win].winfixheight = layout == "top" or layout == "bottom"
-  vim.wo[p.win].winfixbuf = true
+  vim.wo[p.win].winfixbuf = false
   vim.w[p.win].sidekick_panel = true
 end
 
@@ -1095,11 +1095,108 @@ local function activate_window(p, t)
     return
   end
   set_panel_buf(p, t.buf)
+  -- marks the buffer as allowed in the panel for the BufWinEnter redirect
+  vim.b[t.buf].sidekick_session_id = t.id
   vim.w[p.win].sidekick_cli = t.tool
   vim.w[p.win].sidekick_session_id = t.id
   t.win = p.win -- backwards compatibility for window callbacks
   t:wo()
   M.keys(t.buf)
+end
+
+--- Restore the configured panel size after another plugin squeezed the split.
+--- Only ever grows the window back to its desired size; a wider window and a
+--- zoomed panel are left alone.
+---@param p sidekick.cli.Panel
+local function restore_size(p)
+  if p._restoring or p.zoomed or not valid(p.win) or p.layout == "float" then
+    return
+  end
+  local base = p.opts or Config.cli.win
+  local saved = p.sizes[p.layout] or {}
+  local horizontal = p.layout == "left" or p.layout == "right"
+  local desired = horizontal and (saved.width or base.split.width) or (saved.height or base.split.height)
+  if type(desired) ~= "number" or desired <= 0 then
+    return
+  end
+  local target = horizontal and math.min(desired, vim.o.columns - 20) or math.min(desired, vim.o.lines - 10)
+  local current = horizontal and vim.api.nvim_win_get_width(p.win) or vim.api.nvim_win_get_height(p.win)
+  if target <= 0 or current >= target then
+    return
+  end
+  p._restoring = true
+  if horizontal then
+    pcall(vim.api.nvim_win_set_width, p.win, target)
+  else
+    pcall(vim.api.nvim_win_set_height, p.win, target)
+  end
+  p._restoring = false
+end
+
+---@param buf integer
+local function allowed_panel_buf(buf)
+  return vim.b[buf].sidekick_session_id ~= nil or vim.bo[buf].filetype == "sidekick_terminal"
+end
+
+local opposite_split = { left = "right", right = "left", top = "below", bottom = "above" }
+
+--- A foreign buffer was forced into the panel window (`:buffer`, bufferline,
+--- winfixbuf is off). Move it to the most recently visited editor window and
+--- put the active agent back in the panel.
+---@param win integer
+---@param buf integer
+local function redirect_panel_buffer(win, buf)
+  if not valid(win) or not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+  if not vim.w[win].sidekick_panel or vim.api.nvim_win_get_buf(win) ~= buf or allowed_panel_buf(buf) then
+    return
+  end
+  local p ---@type sidekick.cli.Panel?
+  for _, q in pairs(M.panels) do
+    if q.win == win then
+      p = q
+      break
+    end
+  end
+  if not p then
+    return
+  end
+  local target ---@type integer?
+  local best_visit = -1
+  local fallback ---@type integer?
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(p.tab)) do
+    if w ~= win and valid(w) and vim.api.nvim_win_get_config(w).relative == "" and not vim.w[w].sidekick_panel then
+      if vim.bo[vim.api.nvim_win_get_buf(w)].buftype == "" then
+        local visit = tonumber(vim.w[w].sidekick_visit) or 0
+        if visit > best_visit then
+          best_visit = visit
+          target = w
+        end
+      end
+      fallback = fallback or w
+    end
+  end
+  target = target or fallback
+  if target then
+    vim.api.nvim_win_set_buf(target, buf)
+  else
+    local cfg = { split = opposite_split[p.layout] or "right" } ---@type vim.api.keyset.win_config
+    if p.layout ~= "float" then
+      cfg.win = p.win
+    end
+    target = vim.api.nvim_open_win(buf, true, cfg)
+  end
+  local active = usable(p.active)
+  if active then
+    activate_window(p, active)
+  else
+    close_window(p)
+  end
+  if valid(target) then
+    vim.api.nvim_set_current_win(target)
+  end
+  vim.cmd.stopinsert()
 end
 
 ---@param t sidekick.cli.Terminal
@@ -1126,6 +1223,11 @@ function M.show(t, focus)
     History.record("agents", History.agent_key(t))
   end
   local buf = t.buf --[[@as integer]]
+  if not focus and changed and valid(p.win) and vim.api.nvim_get_current_win() == p.win then
+    -- The BufEnter handler restores the mode of the terminal being shown, so
+    -- carry the current mode over when switching agents inside the panel.
+    t.normal_mode = vim.fn.mode() ~= "t"
+  end
   open(p, buf)
   activate_window(p, t)
   Config.set_hl()
@@ -1845,16 +1947,46 @@ function M.setup()
   end
   vim.api.nvim_create_autocmd({ "VimResized", "TabEnter" }, {
     group = Config.augroup,
-    callback = refresh_activation,
+    callback = function()
+      refresh_activation()
+      local p = panel()
+      if p then
+        vim.schedule(function()
+          restore_size(p)
+        end)
+      end
+    end,
   })
   vim.api.nvim_create_autocmd("WinNew", {
     group = Config.augroup,
-    callback = close_duplicate_window,
+    -- Plugins like dapui create a split from the panel window and only then
+    -- set their own buffer. Wait a tick so we only close real duplicates.
+    callback = function()
+      vim.schedule(close_duplicate_window)
+    end,
   })
   vim.api.nvim_create_autocmd("WinResized", {
     group = Config.augroup,
     callback = function()
       M.refresh()
+      vim.schedule(function()
+        local p = panel()
+        if p then
+          restore_size(p)
+        end
+      end)
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufWinEnter", {
+    group = Config.augroup,
+    callback = function(ev)
+      local win = vim.api.nvim_get_current_win()
+      if not vim.w[win].sidekick_panel or allowed_panel_buf(ev.buf) then
+        return
+      end
+      vim.schedule(function()
+        redirect_panel_buffer(win, ev.buf)
+      end)
     end,
   })
   vim.api.nvim_create_autocmd("User", {

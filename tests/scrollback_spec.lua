@@ -71,6 +71,106 @@ describe("cli scrollback", function()
     assert.are.same({ { 3, 4 } }, opened)
   end)
 
+  it("does not open the snapshot while a nested editor is active", function()
+    local old_mode = vim.fn.mode
+    vim.fn.mode = function(full)
+      return full and "nt" or "n"
+    end
+    local ok, err = xpcall(function()
+      for _, active in ipairs({ true, false }) do
+        local opens = 0
+        local terminal = {
+          is_open = function()
+            return true
+          end,
+          is_focused = function()
+            return true
+          end,
+          buf = 1,
+          editor_active = function()
+            return active
+          end,
+        }
+        local scrollback = setmetatable({
+          terminal = function()
+            return terminal
+          end,
+          is_open = function()
+            return false
+          end,
+          open = function()
+            opens = opens + 1
+          end,
+        }, Scrollback)
+
+        scrollback:update({ reason = "TermLeave" })
+        scrollback:update({ open = true, reason = "mouse" })
+        assert.are.equal(active and 0 or 2, opens)
+      end
+    end, debug.traceback)
+    vim.fn.mode = old_mode
+    assert.is_true(ok, err)
+  end)
+
+  it("opens the scrollback snapshot before scrolling in normal mode", function()
+    local Actions = require("sidekick.cli.actions")
+    local win = vim.api.nvim_get_current_win()
+    local order = {}
+    local opened = false
+    local editor = false
+    local t = {
+      window = function()
+        return win
+      end,
+      editor_active = function()
+        return editor
+      end,
+      scrollback = {
+        is_open = function()
+          return opened
+        end,
+        open = function()
+          opened = true
+          order[#order + 1] = "open"
+        end,
+      },
+    }
+
+    local old_win_call = vim.api.nvim_win_call
+    vim.api.nvim_win_call = function(w, fn)
+      order[#order + 1] = "scroll"
+      return old_win_call(w, fn)
+    end
+    local ok, err = xpcall(function()
+      Actions.scroll_up(t)
+      vim.wait(1000, function()
+        return #order >= 2
+      end)
+      assert.are.same({ "open", "scroll" }, order)
+
+      -- already open: no extra open call
+      order = {}
+      Actions.scroll_down(t)
+      vim.wait(1000, function()
+        return #order >= 1
+      end)
+      assert.are.same({ "scroll" }, order)
+
+      -- nested editor active: never snapshot over it
+      opened = false
+      editor = true
+      order = {}
+      Actions.scroll_up(t)
+      vim.wait(1000, function()
+        return #order >= 1
+      end)
+      assert.are.same({ "scroll" }, order)
+      assert.is_false(opened)
+    end, debug.traceback)
+    vim.api.nvim_win_call = old_win_call
+    assert.is_true(ok, err)
+  end)
+
   it("respects native_scroll and configuration when determining enablement", function()
     local direct_non_native = { tool = { native_scroll = false } }
     local direct_default = { tool = {} }

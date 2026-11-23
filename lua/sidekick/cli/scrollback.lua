@@ -224,6 +224,9 @@ function M:update(opts)
       end)
     end
   elseif not self.closing then
+    -- A nested terminal editor (like the agent's $EDITOR) has its own
+    -- scrollback; showing a stale snapshot would hide it.
+    local editor_active = terminal.editor_active and terminal:editor_active()
     if mode == "nt" and is_focused then
       if self.term_buf and self.term_buf ~= terminal.buf then
         -- we were in terminal mode and another terminal left terminal mode
@@ -232,10 +235,12 @@ function M:update(opts)
         vim.cmd.startinsert()
         return
       end
-      -- normal mode in the terminal buffer: open the scrollback
-      self:debug("opening", opts.reason)
-      self:open(opts.win_pos)
-    elseif opts.open then
+      if not editor_active then
+        -- normal mode in the terminal buffer: open the scrollback
+        self:debug("opening", opts.reason)
+        self:open(opts.win_pos)
+      end
+    elseif opts.open and not editor_active then
       -- explicitly requested to open the scrollback (mouse events)
       self:debug("open_request", opts.reason)
       self:open(opts.win_pos)

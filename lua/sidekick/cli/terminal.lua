@@ -369,6 +369,40 @@ function M:buf_valid()
   return self.buf and vim.api.nvim_buf_is_valid(self.buf)
 end
 
+local EDITOR_PROCS = {
+  nvim = true,
+  vim = true,
+  vi = true,
+  view = true,
+  nano = true,
+  hx = true,
+  helix = true,
+  emacs = true,
+  emacsclient = true,
+  micro = true,
+  kak = true,
+}
+
+--- Whether a terminal editor (like a nested `$EDITOR=nvim` spawned by the
+--- agent with <C-g>) is running inside this terminal's process tree.
+---@return boolean
+function M:editor_active()
+  local root = self.pids and self.pids[1]
+  if not root then
+    return false
+  end
+  for _, pid in ipairs(require("sidekick.cli.procs").pids(root)) do
+    if pid ~= root then
+      local ok, proc = pcall(vim.api.nvim_get_proc, pid)
+      local name = ok and proc and proc.name or nil
+      if name and EDITOR_PROCS[vim.fs.basename(name):lower()] then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function M:win_valid()
   return self:window() ~= nil
 end
@@ -823,6 +857,11 @@ function M:keys(buf)
         local mode = km.mode or "t"
         mode = type(mode) == "table" and table.concat(mode, "") or mode --[[@as string]]
         mode = vim.split(mode, "", { plain = true })
+        local rhs_name = type(km[2]) == "string" and km[2] or name
+        -- Forward keys to a nested terminal editor (like the agent's $EDITOR)
+        -- instead of running the sidekick action. `hide` stays mapped as an
+        -- escape hatch; <C-\><C-n> is built-in and always works.
+        local passthrough = type(action) == "function" and rhs_name ~= "hide" and vim.list_contains(mode, "t")
         local km_opts = vim.deepcopy(km) ---@type vim.keymap.set.Opts
         ---@diagnostic disable-next-line: inject-field, no-unknown
         km_opts.mode, km_opts[1], km_opts[2] = nil, nil, nil
@@ -830,6 +869,13 @@ function M:keys(buf)
         km_opts.buffer = buf
         km_opts.desc = km_opts.desc or ("Sidekick: %s"):format(name:gsub("^%l", string.upper))
         vim.keymap.set(mode, lhs, type(action) == "string" and action or function()
+          if passthrough and vim.fn.mode() == "t" and self:editor_active() then
+            if km.expr then
+              return lhs
+            end
+            vim.api.nvim_feedkeys(vim.keycode(lhs), "n", false)
+            return
+          end
           return action(self)
         end, km_opts)
       end

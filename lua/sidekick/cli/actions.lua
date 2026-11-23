@@ -178,6 +178,12 @@ local function scroll(t, delta)
     if not (win and vim.api.nvim_win_is_valid(win)) then
       return
     end
+    -- Open the scrollback snapshot first so the relative scroll below is not
+    -- undone when the TermLeave handler snapshots the live terminal.
+    local sb = t.scrollback
+    if sb and not sb:is_open() and not (t.editor_active and t:editor_active()) then
+      sb:open()
+    end
     -- <C-y>/<C-e> scroll and pull the cursor along when needed, unlike
     -- winrestview({topline=...}), which Neovim reverts to keep the
     -- cursor visible.
