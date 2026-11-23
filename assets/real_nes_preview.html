@@ -1,0 +1,43 @@
+<!-- vim: set nomodeline: -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>/home/r/Scripts/sidekick.nvim/[NES current]</title>
+<meta name="colorscheme" content="habamax"></meta>
+<style>
+* {font-family: monospace}
+body {background-color: #1c1c1c; color: #bcbcbc}
+.DiffText {color: #af87af}
+.DiffDelete {color: #af5f5f}
+.DiffChange {color: #5f87af}
+.Identifier {color: #87afaf}
+.String {color: #5faf5f}
+.Special {color: #5f8787}
+.Statement {color: #af87af}
+.Constant {color: #d75f87}
+</style>
+</head>
+<body style="display: flex">
+<pre>
+<span class="Statement">local</span> <span class="Identifier"><span class="Constant">M</span></span> <span class="Statement">=</span> <span class="Special"><span class="Special">{</span></span><span class="Special"><span class="Special">}</span></span>
+
+<span class="Statement">function</span> <span class="Identifier"><span class="Constant">M</span></span><span class="Special">.</span><span class="Identifier"><span class="Identifier"><span class="Identifier">login</span></span></span><span class="Special">(</span><span class="Identifier"><span class="Identifier">req</span></span><span class="Special">,</span> <span class="Identifier"><span class="Identifier">res</span></span><span class="Special">)</span>
+  <span class="Statement">local</span> <span class="Identifier">username</span> <span class="Statement">=</span> <span class="Identifier">req</span><span class="Special">.</span><span class="Identifier"><span class="Identifier">body</span></span><span class="Special">.</span><span class="Identifier"><span class="Identifier">username</span></span>
+  <span class="Statement">local</span> <span class="Identifier">password</span> <span class="Statement">=</span> <span class="Identifier">req</span><span class="Special">.</span><span class="Identifier"><span class="Identifier">body</span></span><span class="Special">.</span><span class="Identifier"><span class="Identifier">password</span></span>
+  <span class="Statement">if</span> <span class="Statement"><span class="Statement">not</span></span> <span class="Identifier">username</span> <span class="Statement"><span class="Statement">or</span></span> <span class="Statement"><span class="Statement">not</span></span> <span class="Identifier">password</span> <span class="Statement">then</span>
+    <span class="Statement">return</span> <span class="Identifier">res</span><span class="Special">.</span><span class="Identifier"><span class="Identifier"><span class="Identifier">status</span></span></span><span class="Special">(</span><span class="Constant">400</span><span class="Special">)</span><span class="Special">:</span><span class="Identifier"><span class="Identifier">send</span></span><span class="Special">(</span><span class="String">'Missing credentials'</span><span class="Special">)</span>
+  <span class="Statement">end</span>
+  <span class="Statement">local</span> <span class="Identifier">user</span> <span class="Statement">=</span> <span class="Identifier">db</span><span class="Special">.</span><span class="Identifier"><span class="Identifier"><span class="Identifier">find_user</span></span></span><span class="Special">(</span><span class="Identifier">username</span><span class="Special">)</span>
+<span class="DiffChange">  <span class="Statement">if</span> <span class="Identifier">user</span> <span class="Statement"><span class="Statement">and</span></span> </span><span class="DiffText"><span class="Identifier">user</span><span class="Special">.</span><span class="Identifier"><span class="Identifier">password</span></span> <span class="Statement">==</span> <span class="Identifier">password</span></span><span class="DiffChange"> <span class="Statement">then</span></span>
+<span class="DiffDelete">-------------------------------------------------</span>
+<span class="DiffChange">    <span class="Statement">return</span> <span class="Identifier">res</span><span class="Special">.</span><span class="Identifier"><span class="Identifier"><span class="Identifier">send</span></span></span><span class="Special">(</span><span class="Special"><span class="Special">{</span></span> <span class="Identifier"><span class="Identifier">token</span></span> <span class="Statement">=</span> </span><span class="DiffText"><span class="String">'mock-token'</span></span><span class="DiffChange"> <span class="Special"><span class="Special">}</span></span><span class="Special">)</span></span>
+  <span class="Statement">end</span>
+  <span class="Statement">return</span> <span class="Identifier">res</span><span class="Special">.</span><span class="Identifier"><span class="Identifier"><span class="Identifier">status</span></span></span><span class="Special">(</span><span class="Constant">401</span><span class="Special">)</span><span class="Special">:</span><span class="Identifier"><span class="Identifier">send</span></span><span class="Special">(</span><span class="String">'Unauthorized'</span><span class="Special">)</span>
+<span class="Statement">end</span>
+
+<span class="Statement">return</span> <span class="Identifier"><span class="Constant">M</span></span>
+
+</pre>
+</body>
+</html>
