@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Docs
+
+* **remote:** add remote-sync design docs under `app/docs/` (master spec + Go server + Android stack docs)
+
 ## [2.3.0](https://github.com/folke/sidekick.nvim/compare/v2.2.0...v2.3.0) (2026-03-20)
 
 
