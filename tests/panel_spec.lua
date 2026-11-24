@@ -224,20 +224,22 @@ describe("cli agent panel", function()
     assert.are.equal(panel_win, Panel.win(first))
   end)
 
-  it("restores the panel width after being squeezed", function()
+  it("keeps a squeezed panel width instead of restoring the configured one", function()
     local first = fake("squeeze", "codex", "Squeeze")
     Panel.show(first)
+    local p = Panel.panels[vim.api.nvim_get_current_tabpage()]
     local win = Panel.win(first)
     Panel.resize({ width = 40 })
     assert.are.equal(40, vim.api.nvim_win_get_width(win))
 
-    -- simulate another plugin shrinking the split
+    -- the user drags the split, or another plugin shrinks it
     vim.api.nvim_win_set_width(win, 10)
     vim.api.nvim_exec_autocmds("WinResized", {})
 
     assert(vim.wait(1000, function()
-      return vim.api.nvim_win_get_width(win) == 40
+      return p.sizes[p.layout].width == 10
     end))
+    assert.are.equal(10, vim.api.nvim_win_get_width(win))
   end)
 
   it("leaves zoomed and wider-than-desired panels alone on resize", function()
@@ -1385,5 +1387,27 @@ describe("cli agent panel", function()
     local win = Panel.win(first)
     assert.are.equal(first, Panel.active())
     assert.are.equal(first.id, vim.w[win].sidekick_session_id)
+  end)
+
+  it("pushes a new panel size into the agent pty", function()
+    local first = fake("one", "codex", "One")
+    first.job = 101
+    first.window = function()
+      return Panel.win(first)
+    end
+    Panel.show(first)
+
+    local calls = {}
+    local old_jobresize = vim.fn.jobresize
+    vim.fn.jobresize = function(job, width, height)
+      calls[#calls + 1] = { job, width, height }
+      return 1
+    end
+    Panel.resize({ width = 33 })
+    vim.fn.jobresize = old_jobresize
+
+    assert.are.equal(101, calls[1][1])
+    assert.are.equal(33, calls[1][2])
+    assert.are.equal(vim.api.nvim_win_get_height(Panel.win(first)), calls[1][3])
   end)
 end)

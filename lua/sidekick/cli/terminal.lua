@@ -4,6 +4,26 @@ local Panel = require("sidekick.cli.panel")
 local Session = require("sidekick.cli.session")
 local Util = require("sidekick.util")
 
+-- TODO(cli): inline TUIs leave their input dock stranded above the window bottom.
+--
+-- Providers running on the main screen (`pi --tui-mode regular`, `codex
+-- --no-alt-screen`, claude with CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN, grok
+-- --no-alt-screen`) print the input dock directly below their output and draw
+-- the autocomplete list below the dock. A Neovim terminal buffer always starts
+-- at the first row of its window, so a short UI stays in the upper part with
+-- blank rows below, and every `/model` or slash dropdown pushes the dock further
+-- up. Reproduces without Neovim: `pi --tui-mode regular` in a 24 row terminal,
+-- type `/`, press Escape, the dock ends up around row 16 with blank rows below.
+--
+-- Fix sketch: once output settles, if the terminal cursor sits well above the
+-- window bottom and the lines below it are blank, nudge the pty
+-- (`vim.fn.jobresize(self.job, w, h - 1)` then `(self.job, w, h)`) so the CLI
+-- redraws its dock lower. Measured on pi: one nudge moves the dock from rows
+-- 11-14 to 18-21 of a 24 row window and keeps the scrollback intact; the last
+-- 3 rows are pi's own layout gap. Still needs the same check on codex, claude
+-- and agy, plus debouncing so output bursts cannot cause redraw loops.
+-- Alternate-screen providers do not need this.
+
 ---@class sidekick.cli.terminal.Cmd
 ---@field name string Name of the tool
 ---@field cmd string[] Command to run the CLI tool

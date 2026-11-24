@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* **cli:** keep manual panel resizes, drop `winfixwidth`/`winfixheight` so the panel and the neighbouring sidebar can be resized again, record squeezed sizes instead of springing back to the configured default, and push the panel size into the agent pty so zooming or resizing no longer leaves parts of the panel blank
+
 ### Docs
 
+* **cli:** note the inline TUI dock-drift TODO (pi, codex, claude, agy) in `lua/sidekick/cli/terminal.lua`
 * **remote:** add remote-sync design docs under `app/docs/` (master spec + Go server + Android stack docs)
 
 ## [2.3.0](https://github.com/folke/sidekick.nvim/compare/v2.2.0...v2.3.0) (2026-03-20)

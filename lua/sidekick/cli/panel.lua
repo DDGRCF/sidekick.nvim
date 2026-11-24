@@ -1082,10 +1082,53 @@ local function open(p, buf)
   else
     create()
   end
-  vim.wo[p.win].winfixwidth = layout == "left" or layout == "right"
-  vim.wo[p.win].winfixheight = layout == "top" or layout == "bottom"
+  -- No winfixwidth/winfixheight here: they made the panel refuse `:resize` and
+  -- mouse drags, and kept the neighbouring sidebar from reclaiming its columns.
+  vim.wo[p.win].winfixwidth = false
+  vim.wo[p.win].winfixheight = false
   vim.wo[p.win].winfixbuf = false
   vim.w[p.win].sidekick_panel = true
+end
+
+--- Remember the current panel size so a manual `:resize`, a mouse drag or a
+--- layout plugin moving the split sticks instead of being reverted on the next
+--- event.
+---@param p sidekick.cli.Panel
+local function remember_size(p)
+  if p._restoring or p.zoomed or not valid(p.win) or p.layout == "float" then
+    return
+  end
+  local size = vim.deepcopy(p.sizes[p.layout] or {})
+  if p.layout == "left" or p.layout == "right" then
+    size.width = vim.api.nvim_win_get_width(p.win)
+  else
+    size.height = vim.api.nvim_win_get_height(p.win)
+  end
+  p.sizes[p.layout] = size
+end
+
+--- Push the panel window size into the pty of the agent it shows.
+--- An inline CLI only repaints the area it believes it owns, so a stale pty
+--- size leaves parts of the panel blank after a resize, a zoom or a layout
+--- change.
+---@param win integer
+local function sync_pty_size(win)
+  if not valid(win) then
+    return
+  end
+  local ok_w, width = pcall(vim.api.nvim_win_get_width, win)
+  local ok_h, height = pcall(vim.api.nvim_win_get_height, win)
+  if not (ok_w and ok_h) then
+    return
+  end
+  for _, t in pairs(require("sidekick.cli.terminal").terminals or {}) do
+    local ok, t_win = pcall(function()
+      return t:window()
+    end)
+    if ok and t_win == win and t.job then
+      pcall(vim.fn.jobresize, t.job, width, height)
+    end
+  end
 end
 
 ---@param p sidekick.cli.Panel
@@ -1102,6 +1145,7 @@ local function activate_window(p, t)
   t.win = p.win -- backwards compatibility for window callbacks
   t:wo()
   M.keys(t.buf)
+  sync_pty_size(p.win)
 end
 
 --- Restore the configured panel size after another plugin squeezed the split.
@@ -1689,6 +1733,7 @@ function M.resize(opts)
   if not opts._zoom then
     p.sizes[p.layout] = size
   end
+  sync_pty_size(p.win)
   M.refresh(p.tab)
   Util.emit("SidekickCliPanel", { tab = p.tab, layout = p.layout, size = size })
 end
@@ -1953,6 +1998,7 @@ function M.setup()
       if p then
         vim.schedule(function()
           restore_size(p)
+          sync_pty_size(p.win)
         end)
       end
     end,
@@ -1972,7 +2018,11 @@ function M.setup()
       vim.schedule(function()
         local p = panel()
         if p then
-          restore_size(p)
+          -- Record the size the user or another plugin just picked instead of
+          -- fighting it back to the configured default, then tell the agent
+          -- about it so it repaints the whole window.
+          remember_size(p)
+          sync_pty_size(p.win)
         end
       end)
     end,
