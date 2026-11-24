@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Features
+
+* **remote:** add headless Neovim CLI launcher `sk/cli/remote.lua` with session state cleanup and `tests/remote_spec.lua` coverage
+* **remote-server:** implement `sidekick-bridge` and `sidekick-relay` (P1–P4: tmux/zellij mux, codex/claude/pi/devin history providers + watch, SQLite + Ed25519 JWT/OAuth/TOTP/device-flow auth, Noise XXpsk3/KK + L2 chunking, WSS hub, bridge daemon/CLI, Docker/Caddy deploy, and in-process e2e tests)
+* **remote-android:** implement `app/android` P5 client (`:core:{protocol,noise,ansi,store,relay}` and `:app` Compose/Nav3/Hilt/ForegroundService with Noise interop vectors, dual dark/light Material 3 themes, Edge-to-Edge, local debug cleartext manifest, `@Preview` suite, Debug demo flow, and unit/UI tests)
+
 ### Bug Fixes
 
 * **cli:** keep manual panel resizes, drop `winfixwidth`/`winfixheight` so the panel and the neighbouring sidebar can be resized again, record squeezed sizes instead of springing back to the configured default, and push the panel size into the agent pty so zooming or resizing no longer leaves parts of the panel blank
@@ -9,7 +15,7 @@
 ### Docs
 
 * **cli:** note the inline TUI dock-drift TODO (pi, codex, claude, agy) in `lua/sidekick/cli/terminal.lua`
-* **remote:** add remote-sync design docs under `app/docs/` (master spec + Go server + Android stack docs)
+* **remote:** add remote-sync design docs under `app/docs/` (master spec including E2E image/video/audio media transfer design §3.5 + Go server + Android stack docs)
 
 ## [2.3.0](https://github.com/folke/sidekick.nvim/compare/v2.2.0...v2.3.0) (2026-03-20)
 

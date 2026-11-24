@@ -22,9 +22,9 @@
 | 用途 | 坐标 | 最新版本 | 备注 |
 |---|---|---|---|
 | 语言 | `org.jetbrains.kotlin` | **2.4.21**（10-08） | 2.5.0-RC 已出，正式版预计 2026-12 |
-| Gradle | `com.android.application` | AGP 最新（随 Android Studio）+ Gradle 9.x | Kotlin 2.3+ 兼容 Gradle 9 |
+| Gradle | `com.android.application` | AGP **9.5.2** + Gradle **9.6.0** | Kotlin 2.4+ 兼容 Gradle 9 |
 | SDK | — | compileSdk/targetSdk **37.1**，minSdk **26** | Compose 1.13 要求 compileSdk 37.1 |
-| UI | `androidx.compose:compose-bom` | **2026.11.01**（11-19） | Compose 1.13 / Material3 1.5.0；深色优先，`dynamicColorScheme` 可选 |
+| UI | `androidx.compose:compose-bom` | **2026.11.01**（11-19） | Compose 1.13 / Material3 1.5.0；深色 + 浅色双主题（跟随系统 / 深色 / 浅色三档切换，持久化于 SecretStore；支持可选 `dynamicColorScheme`）；Edge-to-Edge 系统栏适配 |
 | 导航 | `androidx.navigation3:navigation3-*` | **1.2.2**（11-18） | Navigation 2.x 已进入维护模式；新项目用 Nav3 |
 | 生命周期 | `androidx.lifecycle:lifecycle-*` | **2.11.1**（11-18） | `ViewModel` + `collectAsStateWithLifecycle` |
 | DI | `com.google.dagger:hilt-*` / `androidx.hilt:*` | **2.60.1**（07-07）/ **1.4.0**（07-01） | KSP；`hiltViewModel()` 在 `hilt-lifecycle-viewmodel-compose` artifact |
@@ -36,7 +36,7 @@
 | 登录浏览器 | `androidx.browser:browser` | 最新 | Custom Tabs 承载 GitHub OAuth |
 | 扫码 | `com.google.android.gms:play-services-mlkit-barcode-scanning` + `androidx.camera:camera-*` | **18.3.1** / **1.7.0**（11-18） | thin 模型走 GMS 省体积；bundled 为 `com.google.mlkit:barcode-scanning:17.3.0` |
 | 后台 | `androidx.work:work-*` | **2.12.0**（09-23） | + ForegroundService 前台保活 WSS；推送见 §10 |
-| Noise | **待定（先 spike）** | — | 见 §4，必须与 Go `flynn/noise` 互操作 |
+| Noise | `org.bouncycastle:bcprov-jdk18on` + 纯 Kotlin 状态机 | **1.87** | 见 §4，已通过 `flynn/noise` `interop_vectors.json` 字节级互操作验证 |
 | JSON | `org.jetbrains.kotlinx:kotlinx-serialization-json` | 随 Kotlin 插件最新 | REST 响应、enroll 载荷 |
 | 测试 | JUnit + Robolectric + Compose UI test | 最新 | `core/*` 纯 JVM 模块可脱离 Android 测 |
 
@@ -72,32 +72,20 @@ app/android/
   1. `cp ../server/proto/sidekick/v1/remote.proto proto/`；
   2. CI 里对比两文件 SHA-256，不一致 → fail（防止协议漂移）。
 - codegen：Wire Gradle plugin，`com.squareup.wire` 生成 Kotlin 类到 `build/generated`。
-- `Frame` 序列化 → `core/noise` 分片（总纲 §3.4 帧格式：`u48 msg_id | u8 flags | u15 len | payload`，
+- `Frame` 序列化 → `core/noise` 分片（总纲 §3.4 帧格式：`u48 msg_id | u8 flags | u16 len | payload`，
   `chunk_len ≤ 60000`，单 Frame ≤ 8MiB，`LAST=1` 重组）→ Noise 加密 → WS binary。
 - 应用层约定：request `id` 单调递增不复用；响应按 `reply_to` 配对，60s 超时；
   `version != PROTOCOL_VERSION_1` 的 Frame 直接忽略并 log。
 
-## 4. Noise on Android（需先 spike）
+## 4. Noise on Android（已选型并完成互操作验证）
 
 目标：与 Go `flynn/noise` 的 `XXpsk3`/`KK` + `25519_ChaChaPoly_BLAKE2s` 完全互操作。
 
-候选（**按优先级**，P5 开工第一件事是 spike，产出互操作 demo 再定）：
+已选方案：**`org.bouncycastle:bcprov-jdk18on:1.87` 原语 + 纯 Kotlin `NoiseHandshake` / `NoiseSession` 状态机**（`core/noise` 模块）：
+- 使用 BouncyCastle `X25519`、`ChaCha20Poly1305`、`Blake2sDigest` 实现 Noise `CipherState`、`SymmetricState` 与 `XXpsk3`/`KK` `HandshakeState`。
+- 通过 Go 端 `internal/noise` 生成的 `interop_vectors.json` 完成字节级互操作单测（含 `XXpsk3` 配对、`KK` 断线重连双向加解密与错误 PSK / 静态钥拒绝）。
 
-1. **`com.goterl:lazysodium-android` + libsodium**：libsodium 有 `crypto_kx`/`crypto_aead`，
-   但没有现成 Noise pattern 封装——需手写 X25519 DH + ChaChaPoly + BLAKE2s 的
-   Noise state machine（工作量中等，库成熟）；
-2. **`cashapp/bouncy` 或 BouncyCastle**：手写 Noise，crypto 原语全，但引入大依赖；
-3. **裁剪 WireGuard Android 的 noise 实现**（`wireguard-android` tunnel 模块里有
-   `NoiseHandshake`，基于自己 fork 的原语）——可读但耦合 WG 逻辑；
-4. 纯 Kotlin 手写 Noise（最后手段）。
-
-spike 验收：Go 端起 echo server 跑 XXpsk3+KK；Android 端完成握手、echo 10 条加密消息、
-断线重连 KK 再 echo。用 Noise spec 附录的测试向量 + Go 端生成的真实握手 transcript
-（存 `core/noise/testdata/`）双端互验。
-
-密钥存储：静态 X25519 私钥优先 `AndroidKeyStore`（`PURPOSE_AGREE_KEY`）；若所选 Noise
-实现拿不到私钥做 DH（硬件 key 不可导出），fallback 到 DataStore-tink 存
-raw 32B 私钥 + pin 表 —— **spike 时一并验证**。
+密钥存储：使用 `DataStore` + Google `Tink` AES256-GCM AEAD（`SecretStore`）持久化 32B 静态 X25519 私钥、device token 与 peer pin 表（`AndroidKeyStore` 作为 Tink master key）。
 
 ## 5. 登录与配对流程
 
@@ -139,8 +127,13 @@ App → Custom Tab: GET /auth/github/start?redirect_uri=sidekick://auth/callback
 
 ## 6. UI 规格
 
-深色优先（M3 `darkColorScheme`），tool 色板：codex=蓝、claude=橙、pi=紫、devin=青、agy=绿
-（与 nvim 侧 `Config.cli.icons` 的 glyph 对应的 Material Symbol 映射，icon 放 `ui/icons.kt`）。
+### 双主题视觉体系（Dark & Light）
+
+- **三档主题切换**：支持 `system`（默认跟随系统）/ `dark`（Obsidian 暗色 IDE 风格）/ `light`（Daylight Porcelain 亮色 IDE 风格），可在 `settings` 顶部分段切换并持久化于 `SecretStore`（退出登录后保留）。冷启动通过 `values/themes.xml` 与 `values-night/themes.xml` 匹配窗口背景色，避免闪白/闪黑。
+- **色彩层级与对比度**：采用完整的 Material 3 `surfaceContainerLowest..Highest` 表面层级 + 1dp hairline 边框卡片；`SidekickExtendedColors` 统一管理连接状态色、聊天气泡色、代码块色、快捷键键帽色；Tool 色板按深/浅底色分别调优（`ToolVisuals.color(tool, isDark)` / `containerColor(tool, isDark)`），映射放 `ui/Icons.kt`。
+- **高对比度终端画布**：`Terminal` 视图在浅色主题下依然保持暗色终端画布（`#0B0E14` + 圆角边框容器），确保 ANSI SGR 色彩清晰可读。
+- **Edge-to-Edge 与键盘适配**：启用 `enableEdgeToEdge` 并随当前主题切换亮/暗状态栏及导航栏图标；`session` 底部输入栏适配 `navigationBarsPadding().imePadding()`。
+- **交互与视觉细化**：登录页品牌头卡片与 E2E/OAuth 徽章；TOTP 6 格分段验证码框；首页呼吸连接状态胶囊、等宽指纹标签与引导空状态；电脑详情页 `ModalBottomSheet` 新建会话与 `LIVE` 徽章；Chat 左右气泡区分、`AnimatedVisibility` 折叠思考/工具卡片及带语言头和一键复制的代码块；扫码页圆角取景框与四角支架；设置页主题切换、TOTP 二维码白色留白框及吊销/登出二次确认弹窗。
 
 | 路由 | 内容 | 验收要点 |
 |---|---|---|
@@ -150,21 +143,23 @@ App → Custom Tab: GET /auth/github/start?redirect_uri=sidekick://auth/callback
 | `bridge/{deviceId}` | live sessions 分组在上 + history 列表在下；tab "会话/全部历史" | `Subscribe(updated)` 实时改 `live` 徽标 |
 | `session/{sid}` | 顶部标题/工具徽标/在场状态；tab `Chat`/`Terminal`；底部输入栏 | 见下 |
 | `pair` | 扫码 + 手输降级 + 配对结果 | 全流程 ≤3 屏 |
-| `settings` | 账号卡片、TOTP 绑定状态、设备管理（吊销）、登出 | 吊销 remote 设备立即生效 |
+| `settings` | 外观主题（跟随系统/深色/浅色）、账号卡片、TOTP 绑定状态、设备管理（吊销）、登出 | 吊销 remote 设备立即生效；主题即时生效并持久化 |
 
-`session/{sid}` 底部输入栏：文本框（IME action=send 等价于 `submit=true`）+ 一排快捷键
-chip：`⏎`、`Esc`、`Tab`、`S-Tab`、`⌫`、`↑`、`↓`、`Ctrl-C`、`Ctrl-D` + 剪贴板粘贴。
+`session/{sid}` 交互与输入栏：
+- **顶部与模式切换**：`TopAppBar` 展示工具徽标、标题、实时连接状态胶囊与溢出菜单（同步历史、复制 `session_id`、停止会话二次确认）；双模话柄采用分段胶囊切换 `Chat` / `Terminal`。
+- **底部输入栏**：自适应 `navigationBarsPadding().imePadding()`；`+` 多媒体附件面板（图片 / 视频 / 音频选择与剪贴板粘贴，自动标注 `Noise ≤2MiB` 或 `Blob >2MiB` 分级路由 + 待发送附件托盘）、可折叠终端快捷键栏（`⏎`、`Esc`、`Tab`、`S-Tab`、`⌫`、`↑`、`↓`、`←`、`→`、`Ctrl-C`、`Ctrl-D`、`粘贴`）及胶囊文本框（IME action=send 等价于 `submit=true`）。
 **输入框获焦时**发 `Presence{REMOTE,typing=true}`（节流 1s），失焦发 false；
 对端 `Presence{LOCAL}` 时输入栏上方显示"本地正在输入…"banner（不锁输入，只提示）。
 
 **Chat 视图**（`STREAM_MESSAGES`）：
-- `LazyColumn` 按 `seq` 排序；`text` 渲染 markdown（`compose-markdown` 或自写简化版：
-  `##` 标题/``` 代码块/行内 `code`/列表/加粗，够用即可——**不要引入完整 CommonMark 渲染器**）。
-- `thinking` 默认折叠成一行灰字"思考过程"；`tool_call`/`tool_result` 卡片
-  （icon+name+status chip，点开展开 input_json/output 的等宽文本）。
-- `reset` 事件 → 清空该 conv 的 Room 缓存 + `after_seq=0` 重拉 + 顶部 toast "历史已刷新"。
+- `LazyColumn` 按 `seq` 排序；User 右侧气泡与 Assistant 左侧卡片区分（含模型标签、时间与整段复制）；
+- `text` 渲染增强 Markdown（标题 / 列表 / 引用块 / 分割线 / 加粗 / 行内代码 / 带语言头与复制按钮的代码块）；
+- `thinking` 默认折叠（`AnimatedVisibility` 展开，带左侧强调条）；`tool_call`/`tool_result` 状态着色卡片；
+- `media` 媒体卡片：支持图片预览与全屏双指缩放灯箱、视频封面与时长徽章、音频波形与播放条（详见总纲 §3.5）；
+- 底部 sticky "回到底部" 悬浮按钮，未上翻时自动滚底；`reset` 事件 → 清空该 conv 的 Room 缓存 + `after_seq=0` 重拉 + 顶部 toast "历史已刷新"。
 
 **Terminal 视图**（`STREAM_SCREEN`）：
+- 顶部紧凑控制条：显示行数，支持字号缩放（10–16sp）、自动换行/横向滚动切换与一键复制屏幕文本；
 - `core/ansi` 把 `Screen.ansi` 解析成 `List<AnnotatedString>`（只支持 SGR：
   `0,1,3,4,7,30-37,90-97,38;5;n,38;2;r;g;b` + `39/49` reset 前景/背景；其余 sequence 丢弃）。
 - 渲染：`LazyColumn` 分块（每 ~50 行一块）+ `item key=revision`；**不要** `Text(ansiString)` 一把梭
@@ -196,7 +191,8 @@ data class HistoryEntity(bridgeId: String, convId: String, tool: String, cwd: St
 
 - `messages` 的 `reset` = `DELETE WHERE convId=?` 再重拉；`seq` 不回插，防脏数据。
 - 敏感项（DataStore + `datastore-tink`，key 存 AndroidKeyStore）：`refresh_token`、
-  `noise_static_priv`、`peer_pins`（Map<deviceId,pubkey>）、`last_bridge_id`。
+  `noise_static_priv`、`peer_pins`（Map<deviceId,pubkey>）、`last_bridge_id`、
+  以及外观偏好 `theme_mode`（`system|dark|light`，登出保留）。
 
 ## 8. 网络与生命周期
 
@@ -211,12 +207,11 @@ data class HistoryEntity(bridgeId: String, convId: String, tool: String, cwd: St
 
 ## 9. 测试与验收
 
-- **JUnit/Robolectric**：`core/protocol` 分片重组（含乱序/丢片/8MiB 边界）、
-  `core/ansi` SGR 解析（Go 端 `capture-pane` 真实样本存 `testdata/`）、
-  token 刷新逻辑、Noise spike 的互操作 transcript。
-- **Compose UI test**：登录按钮→fake relay 回调；会话列表渲染 fake `ListSessionsResponse`；
-  session 输入栏交互（fake `InputRequest` 断言发出）。
-- **手工 e2e**（里程碑验收，P5 完成标准）：
+- [x] **JUnit/Robolectric**：`core/protocol` 分片重组（含乱序/丢片/8MiB 边界）、
+  `core/ansi` SGR 解析（真彩/256 色/属性）、
+  token 刷新逻辑、`NoiseInteropTest` 与 `flynn/noise` 互操作向量、`core/store` SecretStore/Room 单测。
+- [x] **Compose UI test**：登录按钮/认证流、`HomeScreen`/`BridgeScreen`/`SessionScreen` 渲染与输入栏交互（`AppUiTest`）。
+- [ ] **手工 e2e**（真机里程碑验收，待有真机/Docker Compose 环境时实测）：
   1. 未登录冷启动 → GitHub 登录 →（若开 TOTP）TOTP → home；
   2. 扫码 → bridge 出现在 home；
   3. 进入一个 codex live session → Chat/Terminal 双视图都有内容；
@@ -233,4 +228,5 @@ data class HistoryEntity(bridgeId: String, convId: String, tool: String, cwd: St
   relay 只看到 bridge 上报的**明文 metadata**（"session X needs attention"），
   内容仍 E2E；总纲 P6 再评估是否接受这个泄露面。v1 只做"App 前台时本地通知"。
 - agy 结构化历史（若 server spike 成功，Chat 视图直接复用，无额外工作）。
+- **媒体端到端收发管线**：按总纲 `§3.5` 落地图片压缩/EXIF 剥离、Opus 语音录制、Tier A Noise 流式分片、Tier B 客户端 AEAD 加密 Blob 上传/断点续传下载与 Media3 音视频播放。
 - 多 bridge 并存时的快速切换 UI；session 搜索（Room FTS）。

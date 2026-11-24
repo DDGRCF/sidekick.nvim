@@ -4,7 +4,7 @@
 > 所有实现者（人或 AI）以本文档 + `app/server/proto/sidekick/v1/remote.proto` 为准。
 > 若实现中发现与现实的冲突，**先核实真实状态，再回来更新文档**，不要静默偏离。
 >
-> 状态：P0 已完成（协议 + Go 骨架），P1 起待实现。
+> 状态：P0–P5 已实现并完成单元测试 / in-process e2e 验证（`make e2e` 实时 docker-compose 与真机手工 9 项联调待在目标环境实测），P6 待后续推进。
 >
 > 子文档（实现细节必读）：
 > - **`remote-sync-server.md`** — Go relay + bridge 的技术栈、provider 存储格式、部署、验收
@@ -127,7 +127,7 @@ Noise transport message 上限约 64KiB，屏幕快照/大消息必须分片：
 
 ```
 +--------+-------------------+------------------------+
-| u48    | u8 flags          | u15 chunk_len          |  chunk payload ...
+| u48    | u8 flags          | u16 chunk_len          |  chunk payload ...
 | msg_id | bit0 = LAST       |                        |
 +--------+-------------------+------------------------+
 ```
@@ -135,6 +135,36 @@ Noise transport message 上限约 64KiB，屏幕快照/大消息必须分片：
 - `msg_id`：同一 L3 Frame 的分片共用，48-bit 计数器；
 - `chunk_len` ≤ 60000；单 Frame 重组上限 **8 MiB**；
 - `LAST=1` 的 chunk 到达后按 `msg_id` 重组出完整 protobuf bytes 再 `Unmarshal`。
+
+### 3.5 媒体传输协议（图片 / 视频 / 音频，E2E 加密设计方案）
+
+- **核心约束**：
+  - **Relay 零信任**：relay 不得看到媒体明文、原始文件名或 MIME 类型；
+  - **单帧与阻塞控制**：L3 Frame 重组上限 8 MiB，因此高清视频/长音频不能塞入单个 protobuf Frame，也不能阻塞低延迟的 `STREAM_SCREEN` / `Input` / `Ctrl-C` 控制流（防队头阻塞 HoL blocking）；
+  - **弱网断点续传**：移动端上传/下载大图或视频需支持分块校验与断点续传。
+
+- **双通道分级传输架构（Tier A / Tier B）**：
+  1. **Tier A — 小媒体与缩略图直传（≤ 2 MiB：压缩图片、内联缩略图、短语音）**
+     - 直接复用现有 Noise WSS 加密隧道；
+     - 通过低优先级流式分片 RPC（每片 48 KiB，滑动窗口 `window = 4`）发送，`Input` / `Keys` / `Screen` 帧优先插队调度；
+     - 无需依赖 Relay 对象存储，覆盖绝大多数截图与语音消息场景。
+  2. **Tier B — 大媒体流式加密 Blob + Noise 指针（> 2 MiB，上限 100 MiB：高清视频、长录屏、无损音频）**
+     - **客户端流式 AEAD 加密**：发送端生成随机 256-bit `content_key` 与 `nonce_base`，按 **256 KiB** 分块进行 `XChaCha20-Poly1305`（或 `AES-256-GCM`）加密，AAD 绑定 `blob_id || chunk_idx || is_final` 防重排或截断攻击；
+     - **Relay 密文临时中转**：发送端带 JWT 调用 `PUT /blobs/:id` 上传**纯密文**（支持 HTTP `Range` / 分片断点续传，TTL 1 小时或双方确认消费后立即删除，配单对象 ≤ 100 MiB 与单用户配额）；
+     - **Noise 指针帧交换**：发送端通过 Noise E2E 发送轻量 `MediaPart` / `SendMediaRequest` 指针（含 `blob_id`、`content_key`、`sha256_plain`、`sha256_cipher`、`mime_type`、`size_bytes`、`width/height`、`duration_ms`、`filename` 以及 ≤ 24 KiB 的 WebP 内联缩略图）；
+     - **接收端流式解密**：凭 JWT 拉取密文后边下边解密落盘并校验 `sha256_plain`，避免大文件整块驻留内存。
+
+- **编解码、隐私与 Bridge CLI 适配策略**：
+  - **图片**：默认剥离 EXIF/GPS 隐私元数据，按最长边 2048px 转码压缩为 WebP/JPEG（可选原图开关），随消息附带 ≤ 16 KiB WebP 缩略图实现列表秒开；
+  - **音频**：移动端语音默认录制 Opus/M4A 32–48 kbps 单声道（~250 KiB/min，绝大部分可走 Tier A）；Android 侧展示波形与播放控制，Bridge 侧可按需调用本地 STT 转写喂给仅支持文本的 CLI；
+  - **视频**：默认限制/转码 720p/1080p MP4（`faststart`），提取首帧缩略图与时长；大文件走 Tier B，若目标 CLI 不直接支持视频输入，Bridge 可按关键帧抽帧供多模态模型读取；
+  - **Bridge 落盘安全**：解码后的附件仅写入当前会话工作区隔离目录 `<workspace>/.sidekick/attachments/<sha256前12位>_<sanitized_name>`，严格校验 `EvalSymlinks` 不越界后，再把路径安全引用给 CLI。
+
+- **待落地 Proto 草案（P6 实现）**：
+  - `enum MediaKind { MEDIA_KIND_IMAGE = 1; MEDIA_KIND_VIDEO = 2; MEDIA_KIND_AUDIO = 3; }`
+  - `message BlobPointer { string blob_id = 1; bytes content_key = 2; bytes nonce_base = 3; uint32 chunk_size = 4; bytes sha256_cipher = 5; }`
+  - `message MediaPart { string media_id = 1; MediaKind kind = 2; string mime_type = 3; string filename = 4; uint64 size_bytes = 5; uint32 width = 6; uint32 height = 7; uint64 duration_ms = 8; bytes sha256_plain = 9; bytes thumbnail_webp = 10; oneof payload { bytes inline_data = 11; BlobPointer blob = 12; } }`
+  - `message MediaUploadChunk { string upload_id = 1; uint32 chunk_index = 2; bool is_last = 3; bytes data = 4; }` / `SendMediaRequest`。
 
 ## 4. 仓库布局
 
@@ -184,11 +214,11 @@ sidekick.nvim/                       主仓库（nvim 插件 + 文档）
 | 阶段 | 目标 | 完成定义（验收细节见子文档） |
 |---|---|---|
 | **P0** ✅ | 协议 + Go 骨架 | `remote.proto`、`internal/sid`（nvim 真实向量）、`internal/state`、CI 绿 |
-| **P1** | bridge mux 层 + launch 助手 + audit + 本地 ctl | 不联网即可 `ctl start/capture/input/stop` 一个 codex 会话；`state.List` 认得到 |
-| **P2** | 结构化历史（codex/claude/pi/devin；agy 只终端） | 四 provider `Messages` 与手解一致；watch <200ms；reset 正确 |
-| **P3** | relay 账号系统（Gin） | 登录/TOTP/token 旋转/设备表/admin 全链路 + 单测 |
-| **P4** | relay WSS 路由 + 配对 + Noise E2E + 重连 | in-process e2e + 真实链路；pin/psk 防 MITM |
-| **P5** | Android App（登录/配对/会话/双视图/输入） | android 文档 §9 手工 e2e 9 条全过 |
+| **P1** ✅ | bridge mux 层 + launch 助手 + audit + 本地 ctl | `sk/cli/remote.lua`、`internal/{config,audit,mux,launch}`、`bridge ctl` |
+| **P2** ✅ | 结构化历史（codex/claude/pi/devin；agy 只终端） | 四 provider `Messages` 解析 + fixture 校验、fsnotify+poll watch、reset 处理 |
+| **P3** ✅ | relay 账号系统（Gin） | 登录/TOTP/token 旋转与重放吊销/设备表/GitHub OAuth/RFC 8628 device flow/admin 全链路 + 单测 |
+| **P4** ✅ | relay WSS 路由 + 配对 + Noise E2E + 重连 | `internal/noise`（XXpsk3/KK + L2 9B 分片）、`relayhub`、`relayclient`、`bridge serve`、in-process `e2etest`、`deploy/` |
+| **P5** ✅ | Android App（登录/配对/会话/双视图/输入） | `core:{protocol,noise,ansi,store,relay}` + `:app` 源码/单测/Compose UI test + `assembleDebug` APK |
 | **P6** | agy spike、推送、nvim 联动 | 见子文档"后续"章节 |
 
 依赖关系：P1/P2 可并行（都纯本地）；P3/P4 顺序；P5 依赖 P4（需真实 E2E 通道联调，

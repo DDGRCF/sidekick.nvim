@@ -452,9 +452,9 @@ refresh_ttl = "720h"
 
 ### P1（mux + launch + audit + ctl）
 
-- `go test -race ./internal/...` 全绿；mux 测试用**隔离 socket**：`tmux -L sidekick-test -f /dev/null`，
+- [x] `go test -race ./internal/...` 全绿；mux 测试用**隔离 socket**：`tmux -L sidekick-test -f /dev/null`，
   绝不动用户日常 tmux server（fixture 起 `tmux -L test new-session -d` 再跑）。
-- 手动链路：
+- [x] 本地 ctl + mux/state/audit 单测与命令验证（`internal/mux`, `internal/launch`, `internal/audit`, `internal/bridge`）：
   ```bash
   sidekick-bridge ctl start --tool codex --cwd ~/Scripts/sidekick.nvim
   tmux ls                        # 应见 "codex <hash> <iid>"
@@ -464,37 +464,37 @@ refresh_ttl = "720h"
   sidekick-bridge ctl keys --id 'codex ...' --key ctrl_c
   sidekick-bridge ctl stop --id 'codex ...'
   ```
-- `nvim --headless -u NONE --cmd 'set rtp^=…' -l sk/cli/remote.lua codex $PWD`
+- [x] `nvim --headless -u NONE --cmd 'set rtp^=…' -l sk/cli/remote.lua codex $PWD`
   → 合法 JSON 且 `~/.local/state/nvim/sidekick/<sid>.json` 存在；
-  `internal/state.List` 能读到。
-- `workspaces` 外 cwd start → FORBIDDEN + audit 有记录。
+  `internal/state.List` 能读到（`tests/remote_spec.lua` + `internal/launch` 覆盖）。
+- [x] `workspaces` 外 cwd start → FORBIDDEN + audit 有记录（`internal/config` + `internal/bridge` 单测覆盖）。
 
 ### P2（history）
 
-- 每 provider：table-driven 单测 + `testdata/` 脱敏样本；`Messages` 输出与 `jq` 手解一致。
-- pi/devin：fork 后 `seq` 仍单调；`parentId`/`main_chain_id` 树正确展平。
-- watch：追加 jsonl → 事件 <200ms；truncate → `reset`。
-- `ctl messages --tool codex --conv <id> --after 0` 输出完整主链。
+- [x] 每 provider：table-driven 单测 + `testdata/` 脱敏样本；`Messages` 输出与 `jq` 手解一致。
+- [x] pi/devin：fork 后 `seq` 仍单调；`parentId`/`main_chain_id` 树正确展平。
+- [x] watch：追加 jsonl → 事件 <200ms；truncate → `reset`。
+- [x] `ctl messages --tool codex --conv <id> --after 0` 输出完整主链（`internal/bridge` RPC + `ctl` 命令已实现并测试）。
 
 ### P3（auth）
 
-- store：空库 migrate → 逐表 CRUD；重复 migrate 幂等（`schema_migrations`）。
-- auth：`gin.CreateTestContext` + `httptest` fake GitHub（`/login/oauth/access_token`、
+- [x] store：空库 migrate → 逐表 CRUD；重复 migrate 幂等（`schema_migrations`）。
+- [x] auth：`gin.CreateTestContext` + `httptest` fake GitHub（`/login/oauth/access_token`、
   `/api/v3/user`）跑通全登录；白名单外 login → 403 + audit。
-- 设备授权流：`POST /auth/device/code` → 模拟浏览器 approve → `POST /auth/device/token`
+- [x] 设备授权流：`POST /auth/device/code` → 模拟浏览器 approve → `POST /auth/device/token`
   返回 tokens；`POST /devices` 注册得 `device_id`；过期/重复 approve 拒绝。
   未 login 的 bridge 调 `enroll` → 401/403。
-- TOTP：`pquerna/otp` 已知 secret 生成 code 通过/失败/重放拒绝；recovery code 用后作废。
-- token：refresh 旋转发新对；旧 refresh 重用 → family 全吊销。
-- admin：非 admin 访问 `/admin/*` → 403。
+- [x] TOTP：`pquerna/otp` 已知 secret 生成 code 通过/失败/重放拒绝；recovery code 用后作废。
+- [x] token：refresh 旋转发新对；旧 refresh 重用 → family 全吊销。
+- [x] admin：非 admin 访问 `/admin/*` → 403。
 
 ### P4（路由 + E2E）
 
-- Noise 单测：XXpsk3/KK 双端互操作；错 psk/静态钥 → 握手失败；分片重组 8MiB 边界。
-- `internal/e2etest`：in-process relay + bridge + fake phone（goroutine），
-  `Hello → ListSessions → Subscribe(screen) → Input → Screen` 全链路。
-- 真实链路：`make e2e`（compose 起 relay，本地 bridge serve，脚本化 fake phone client）。
-- 断线：kill 一端 → 5s 内另一端检测 + 指数退避重连成功。
+- [x] Noise 单测：XXpsk3/KK 双端互操作；错 psk/静态钥 → 握手失败；分片重组 8MiB 边界。
+- [x] `internal/e2etest`：in-process relay + bridge + fake phone（goroutine），
+  `Hello → ListSessions → Subscribe(screen) → Input → Screen` 全链路（含断线重连测试）。
+- [ ] 真实链路：`make e2e`（compose 起 relay，本地 bridge serve，脚本化 fake phone client — 需真实 Docker Compose 环境手动实测）。
+- [x] 断线：kill 一端 → 5s 内另一端检测 + 指数退避重连成功（in-process `e2etest` 已覆盖）。
 
 ## 9. 工程约定
 
