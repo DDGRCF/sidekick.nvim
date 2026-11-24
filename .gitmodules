@@ -1,0 +1,6 @@
+[submodule "app/android"]
+	path = app/android
+	url = git@github.com:DDGRCF/sidekick.android.git
+[submodule "app/server"]
+	path = app/server
+	url = https://github.com/DDGRCF/sidekick.server.git
