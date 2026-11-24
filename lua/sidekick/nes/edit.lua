@@ -1,5 +1,5 @@
-local Util = require("sidekick.util")
 local Config = require("sidekick.config")
+local Util = require("sidekick.util")
 
 ---@alias sidekick.Pos {[1]:integer, [2]:integer}
 

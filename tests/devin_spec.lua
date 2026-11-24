@@ -9,11 +9,12 @@ describe("cli devin provider", function()
     old_exec = Util.exec
     Util.exec = function(cmd)
       assert.are.same({ "devin", "list", "--format", "json" }, cmd)
-      return {}, vim.json.encode({
-        { id = "older", last_activity_at = 1, working_directory = "/tmp" },
-        { id = "newer-session", last_activity_at = 5, working_directory = "/tmp" },
-        { id = "hidden-one", last_activity_at = 99, hidden = true, working_directory = "/tmp" },
-      })
+      return {},
+        vim.json.encode({
+          { id = "older", last_activity_at = 1, working_directory = "/tmp" },
+          { id = "newer-session", last_activity_at = 5, working_directory = "/tmp" },
+          { id = "hidden-one", last_activity_at = 99, hidden = true, working_directory = "/tmp" },
+        })
     end
   end)
 
@@ -31,9 +32,10 @@ describe("cli devin provider", function()
 
   it("ignores sessions from other working directories", function()
     Util.exec = function()
-      return {}, vim.json.encode({
-        { id = "other-project", last_activity_at = 50, working_directory = "/elsewhere" },
-      })
+      return {},
+        vim.json.encode({
+          { id = "other-project", last_activity_at = 50, working_directory = "/elsewhere" },
+        })
     end
     local config = assert(loadfile("sk/cli/devin.lua"))()
     assert.is_nil(config.resume.capture({}, { cwd = "/tmp" }))

@@ -396,7 +396,12 @@ describe("nes review navigation", function()
       diff = function()
         return {
           hunks = {
-            { pos = { 0, 0 }, cover = 1, extmarks = { { row = 0, col = 0, hl_group = "SidekickDiffAdd" } }, kind = "change" },
+            {
+              pos = { 0, 0 },
+              cover = 1,
+              extmarks = { { row = 0, col = 0, hl_group = "SidekickDiffAdd" } },
+              kind = "change",
+            },
           },
         }
       end,
@@ -444,7 +449,13 @@ describe("nes review navigation", function()
     Nes._edits = { test_edit }
     UI.render(test_edit)
 
-    local marks = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_create_namespace("sidekick.nes.summary"), 0, -1, { details = true })
+    local marks = vim.api.nvim_buf_get_extmarks(
+      buf,
+      vim.api.nvim_create_namespace("sidekick.nes.summary"),
+      0,
+      -1,
+      { details = true }
+    )
     assert.are.equal(1, #marks)
     local vt = marks[1][4].virt_text
     assert.are.equal(2, #vt)

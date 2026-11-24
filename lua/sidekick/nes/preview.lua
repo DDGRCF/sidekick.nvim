@@ -59,10 +59,8 @@ local function window_configs(source_buf)
   if summary and summary.hunks and summary.hunks > 0 then
     suggested_title = (" Suggested [%d hunk%s] "):format(summary.hunks, summary.hunks == 1 and "" or "s")
   end
-  local footer = pane_width >= 55
-    and " [a]ccept · [r]eject · [A]ll · []c]jump · [Tab]pane · [q]uit "
-    or pane_width >= 35
-    and " [a]ccept · [r]eject · [A]ll · [q]uit "
+  local footer = pane_width >= 55 and " [a]ccept · [r]eject · [A]ll · []c]jump · [Tab]pane · [q]uit "
+    or pane_width >= 35 and " [a]ccept · [r]eject · [A]ll · [q]uit "
     or " [a]ccept · [q]uit "
   return vim.tbl_extend("force", base, {
     col = col,
@@ -70,13 +68,14 @@ local function window_configs(source_buf)
     title_pos = "center",
     footer = footer,
     footer_pos = "center",
-  }), vim.tbl_extend("force", base, {
-    col = col + pane_width + 1,
-    title = suggested_title,
-    title_pos = "center",
-    footer = footer,
-    footer_pos = "center",
-  })
+  }),
+    vim.tbl_extend("force", base, {
+      col = col + pane_width + 1,
+      title = suggested_title,
+      title_pos = "center",
+      footer = footer,
+      footer_pos = "center",
+    })
 end
 
 local function edit_key(edits)
@@ -423,11 +422,24 @@ local function configure_window(buf, win)
   vim.keymap.set("n", "A", accept_all, { buffer = buf, silent = true, nowait = true, desc = "Accept all suggestions" })
   vim.keymap.set("n", "r", reject_hunk, { buffer = buf, silent = true, nowait = true, desc = "Reject current hunk" })
   vim.keymap.set("n", "x", reject_hunk, { buffer = buf, silent = true, nowait = true, desc = "Reject current hunk" })
-  vim.keymap.set("n", "]c", function() jump_hunk(1) end, { buffer = buf, silent = true, nowait = true, desc = "Next diff hunk" })
-  vim.keymap.set("n", "[c", function() jump_hunk(-1) end, { buffer = buf, silent = true, nowait = true, desc = "Previous diff hunk" })
-  vim.keymap.set("n", "]h", function() jump_hunk(1) end, { buffer = buf, silent = true, nowait = true, desc = "Next diff hunk" })
-  vim.keymap.set("n", "[h", function() jump_hunk(-1) end, { buffer = buf, silent = true, nowait = true, desc = "Previous diff hunk" })
-  vim.keymap.set("n", "<Tab>", switch_pane, { buffer = buf, silent = true, nowait = true, desc = "Switch preview pane" })
+  vim.keymap.set("n", "]c", function()
+    jump_hunk(1)
+  end, { buffer = buf, silent = true, nowait = true, desc = "Next diff hunk" })
+  vim.keymap.set("n", "[c", function()
+    jump_hunk(-1)
+  end, { buffer = buf, silent = true, nowait = true, desc = "Previous diff hunk" })
+  vim.keymap.set("n", "]h", function()
+    jump_hunk(1)
+  end, { buffer = buf, silent = true, nowait = true, desc = "Next diff hunk" })
+  vim.keymap.set("n", "[h", function()
+    jump_hunk(-1)
+  end, { buffer = buf, silent = true, nowait = true, desc = "Previous diff hunk" })
+  vim.keymap.set(
+    "n",
+    "<Tab>",
+    switch_pane,
+    { buffer = buf, silent = true, nowait = true, desc = "Switch preview pane" }
+  )
 end
 
 function M.close()
@@ -663,8 +675,7 @@ function M.refresh(opts)
     return finish(true)
   end
 
-  local source_cursor = valid_win(source_win) and vim.api.nvim_win_get_cursor(source_win)
-    or { 1, 0 }
+  local source_cursor = valid_win(source_win) and vim.api.nvim_win_get_cursor(source_win) or { 1, 0 }
   local current_lines = vim.api.nvim_buf_get_lines(source_buf, 0, -1, false)
   local left_buf, right_buf = current.left_buf, current.right_buf
   -- Buffer updates below can emit TextChanged while a preview pane is
