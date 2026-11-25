@@ -46,10 +46,12 @@ app/server/
 │   ├── remote.pb.go
 │   └── remote_test.go                 # Frame round-trip 测试
 ├── tools/                             # 独立 module：buf + protoc-gen-go 的 tool directives
+├── _admin/                            # 管理控制台（Next.js 项目；`_` 前缀被 go 工具忽略，§5.6）
 ├── cmd/
 │   ├── sidekick-bridge/               # bridge 守护进程
 │   └── sidekick-relay/                # relay 服务器
 ├── internal/
+│   ├── adminui/      ✅ done          # //go:embed 管理控制台静态导出 + SPA handler（§5.6）
 │   ├── sid/          ✅ done          # session-id 命名，与 Lua 逐字节一致（含 nvim 生成的向量）
 │   ├── state/        ✅ done          # nvim 持久化会话元数据读器
 │   ├── config/       P1               # bridge/relay TOML 配置
@@ -301,6 +303,7 @@ DELETE /devices/:id                        → 吊销（断开其 WSS）
 GET   /admin/users                         → 用户列表
 GET   /admin/audit                         → audit_events 分页
 PATCH /admin/users/:id                     → 禁用/启用
+GET   /admin/ui/*filepath                  → 内嵌管理控制台（§5.6）
 GET   /ws/device                           → WSS 设备通道（§5.4）
 ```
 
@@ -374,6 +377,45 @@ enroll 流程（把 phone 绑到已登录 bridge）：
    enrollment 批准，双方互相可见对方 device + pubkey；
 4. `user_code` 是 QR 扫码的降级路径：App 手动输入 6 位码找到 enrollment 再 approve。
 
+### 5.6 管理控制台 `/admin/ui`
+
+浏览器后台（用户禁用/恢复、审计日志）是 **Next.js 静态导出**，被 `go:embed` 打进
+`sidekick-relay` 二进制，运行时不需要 Node.js，也没有额外容器。
+
+```
+_admin/                       # Next.js 项目（Go 默认忽略 `_` 前缀目录，不污染 go list ./...）
+├── src/app/{page,login,callback,users,audit}
+└── out/                      # next build 产物
+
+internal/adminui/             # Go 侧
+├── adminui.go                # //go:embed all:dist + SPA handler（SPA fallback、no-store、immutable 静态资源）
+└── dist/                     # 由 make admin-ui 从 _admin/out 拷贝（只提交 .gitkeep）
+```
+
+- 挂载点是 `/admin/ui`，**不是** `/admin`：Gin 的 `/admin/*filepath` 会和 `/admin/users`
+  这类静态路由冲突，所以 API 与 UI 分开两级前缀。
+- `next.config.ts` 的 `basePath` 必须等于 `adminui.BasePath`；`trailingSlash = true`，
+  页面导出为 `<page>/index.html`，handler 对无斜杠的页面路径发 301。
+- 组件：shadcn/ui 的 `base-nova` 风格（Base UI 原语 + `cn` 包），`components.json` 已固化，
+  加组件用 `npx shadcn@latest add <name>`；本机挂代理时该 CLI 会 `other side closed`，需直连运行。
+- 构建：`make admin-ui`（`npm ci` + `next build --webpack` + 拷贝），`make build` 依赖它。
+  Turbopack 在本机 fixture 下会卡在 "Creating an optimized production build"，因此固定在 webpack 上。
+  Docker 侧在 `Dockerfile` 里用 `node:24-alpine` stage 产出 `out/` 再拷进 Go 构建上下文。
+- 没有构建产物时 handler 返回 503 并提示 `make admin-ui`，不影响 relay 其余路由。
+
+浏览器登录链路（与 App 的 `sidekick://` 回调并列）：
+
+```
+GET /admin/ui/login/  →  /auth/github/start?redirect_uri=https://<domain>/admin/ui/callback/
+                      →  /auth/github/callback（GitHub）→ 302 /admin/ui/callback/?code=<one-time>
+                      →  POST /auth/token/exchange {code} → tokens | {mfa_required, mfa_ticket}
+                      →  POST /auth/totp/verify {mfa_ticket, code} → tokens
+```
+
+`allowedRedirectURI()` 放行 `public_url + "/admin/ui/"` 前缀；这类回调走 302 带 code
+（不是 JSON token），由 `isBrowserRedirect()` 判定。token 存 `sessionStorage`（不落 cookie，
+免 CSRF），401 时用 refresh token 自动续一次。
+
 ## 6. E2E 加密与断线重连（Go 侧）
 
 - Noise：`noise.NewHandshakeState(noise.Config{Pattern: noise.HandshakeXX,
@@ -442,8 +484,12 @@ refresh_ttl = "720h"
 
 - GitHub OAuth App：callback 白名单加 `https://<domain>/auth/github/callback` 与
   `sidekick://auth/callback`（GitHub 支持自定义 scheme 回调，需在 App 设置里注册该 URL）。
-- Dockerfile：multi-stage（`golang:1.26` build → `gcr.io/distroless/static` run），
-  CGO_ENABLED=0。
+- Dockerfile：multi-stage（`node:24-alpine` 构建管理后台 → `golang:1.26` build →
+  `gcr.io/distroless/static` run），CGO_ENABLED=0。管理后台在镜像里只是静态文件，
+  运行时没有 Node。
+- 管理后台不需要额外的 GitHub App 配置：GitHub 始终只回调
+  `https://<domain>/auth/github/callback`，再由 relay 302 到 `public_url + /admin/ui/callback/`
+  （该前缀由 `public_url` 拼出，无独立配置项）。
 - 备份：`relay.db` + `jwt-ed25519.pem`；丢 key 只意味全员重新登录，对话内容不在 relay。
 
 ## 8. 分阶段验收

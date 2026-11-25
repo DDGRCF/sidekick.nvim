@@ -160,11 +160,11 @@ Noise transport message 上限约 64KiB，屏幕快照/大消息必须分片：
   - **视频**：默认限制/转码 720p/1080p MP4（`faststart`），提取首帧缩略图与时长；大文件走 Tier B，若目标 CLI 不直接支持视频输入，Bridge 可按关键帧抽帧供多模态模型读取；
   - **Bridge 落盘安全**：解码后的附件仅写入当前会话工作区隔离目录 `<workspace>/.sidekick/attachments/<sha256前12位>_<sanitized_name>`，严格校验 `EvalSymlinks` 不越界后，再把路径安全引用给 CLI。
 
-- **待落地 Proto 草案（P6 实现）**：
-  - `enum MediaKind { MEDIA_KIND_IMAGE = 1; MEDIA_KIND_VIDEO = 2; MEDIA_KIND_AUDIO = 3; }`
-  - `message BlobPointer { string blob_id = 1; bytes content_key = 2; bytes nonce_base = 3; uint32 chunk_size = 4; bytes sha256_cipher = 5; }`
-  - `message MediaPart { string media_id = 1; MediaKind kind = 2; string mime_type = 3; string filename = 4; uint64 size_bytes = 5; uint32 width = 6; uint32 height = 7; uint64 duration_ms = 8; bytes sha256_plain = 9; bytes thumbnail_webp = 10; oneof payload { bytes inline_data = 11; BlobPointer blob = 12; } }`
-  - `message MediaUploadChunk { string upload_id = 1; uint32 chunk_index = 2; bool is_last = 3; bytes data = 4; }` / `SendMediaRequest`。
+- **已实现（Tier A 电脑 Agent → 手机图片回传）与待落地草案（P6 双向音视频 / Blob）**：
+  - 已在 `remote.proto` 落地 `MediaKind`、`MediaPart`、`Part.media`、`GetMediaRequest`、`GetMediaResponse`；
+  - Bridge 侧 (`internal/bridge/media.go`) 支持提取 Codex `image_url` / Claude `image` 及工作区 Markdown/路径图片（严格 `EvalSymlinks` 白名单校验），自动生成 `≤ 24 KiB`（320px）内联缩略图并按 256 KiB 分块响应 `GetMedia`；
+  - Android 侧通过 `BitmapFactory` 在聊天气泡展示真实缩略图并在点击后拉取原图至私有缓存，支持全屏双指缩放灯箱查看；
+  - 待落地（P6 后续）：`BlobPointer`、`MediaUploadChunk`、`SendMediaRequest` 以及移动端 → 电脑端的图片/视频/音频加密上传。
 
 ## 4. 仓库布局
 

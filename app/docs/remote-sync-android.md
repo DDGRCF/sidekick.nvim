@@ -129,34 +129,33 @@ App → Custom Tab: GET /auth/github/start?redirect_uri=sidekick://auth/callback
 
 ### 双主题视觉体系（Dark & Light）
 
-- **三档主题切换**：支持 `system`（默认跟随系统）/ `dark`（Obsidian 暗色 IDE 风格）/ `light`（Daylight Porcelain 亮色 IDE 风格），可在 `settings` 顶部分段切换并持久化于 `SecretStore`（退出登录后保留）。冷启动通过 `values/themes.xml` 与 `values-night/themes.xml` 匹配窗口背景色，避免闪白/闪黑。
-- **色彩层级与对比度**：采用完整的 Material 3 `surfaceContainerLowest..Highest` 表面层级 + 1dp hairline 边框卡片；`SidekickExtendedColors` 统一管理连接状态色、聊天气泡色、代码块色、快捷键键帽色；Tool 色板按深/浅底色分别调优（`ToolVisuals.color(tool, isDark)` / `containerColor(tool, isDark)`），映射放 `ui/Icons.kt`。
-- **高对比度终端画布**：`Terminal` 视图在浅色主题下依然保持暗色终端画布（`#0B0E14` + 圆角边框容器），确保 ANSI SGR 色彩清晰可读。
-- **Edge-to-Edge 与键盘适配**：启用 `enableEdgeToEdge` 并随当前主题切换亮/暗状态栏及导航栏图标；`session` 底部输入栏适配 `navigationBarsPadding().imePadding()`。
-- **交互与视觉细化**：登录页品牌头卡片与 E2E/OAuth 徽章；TOTP 6 格分段验证码框；首页呼吸连接状态胶囊、等宽指纹标签与引导空状态；电脑详情页 `ModalBottomSheet` 新建会话与 `LIVE` 徽章；Chat 左右气泡区分、`AnimatedVisibility` 折叠思考/工具卡片及带语言头和一键复制的代码块；扫码页圆角取景框与四角支架；设置页主题切换、TOTP 二维码白色留白框及吊销/登出二次确认弹窗。
+- **三档主题切换**：支持 `system`（默认跟随系统）/ `dark`（Obsidian `#0C0E12` 终端暗色工作台）/ `light`（Crisp Daylight `#FFFFFF` 亮色工作台），可在 `settings` 顶部分段切换并持久化于 `SecretStore`（退出登录后保留）。冷启动通过 `values/themes.xml` 与 `values-night/themes.xml` 匹配窗口背景色，避免闪白/闪黑。
+- **终端原生层次与 WCAG AA 对比度**：列表与分组采用 `0.5dp` hairline 分隔行与 Material 3 `PrimaryTabRow` / `PullToRefreshBox`（去除了多余卡片边框、装饰性圆角底块与无限呼吸圆点）；`SidekickExtendedColors` 统一管理 `#34D399`（Dark）/ `#047857`（Light）状态强调色、聊天气泡色、代码块色与快捷键键帽色；Tool 色板按深/浅底色分别满足 AA 对比度并映射于 `ui/Icons.kt`。
+- **高对比度终端画布与性能保障**：`Terminal` 视图在浅色主题下依然保持暗色终端画布（`#0B0E14` + 圆角边框容器）；图片缩略图/海报解码、QR 生成、附件元数据解析与长 scrollback（`>200` 行）ANSI 分块均在后台线程执行；交互控件满足最小 `48dp` 触控区与大字号 `defaultMinSize` 自适应布局。
+- **Edge-to-Edge 与键盘适配**：启用 `enableEdgeToEdge` 并随当前主题切换亮/暗状态栏及导航栏图标；`session` 底部输入栏适配 `imePadding()`。
 
 | 路由 | 内容 | 验收要点 |
 |---|---|---|
-| `login` | GitHub 登录按钮 → Custom Tab | 未登录冷启动必到；返回键退出 App |
+| `login` | GitHub 登录表单 → Custom Tab | 未登录冷启动必到；返回键退出 App |
 | `login/totp` | 6 位 code 输入 + recovery code 入口 | 错误 code 抖动提示 |
-| `home` | bridge 卡片列表（在线/离线、名称、最后活跃） | 离线置灰；下拉刷新 `/devices` |
-| `bridge/{deviceId}` | live sessions 分组在上 + history 列表在下；tab "会话/全部历史" | `Subscribe(updated)` 实时改 `live` 徽标 |
-| `session/{sid}` | 顶部标题/工具徽标/在场状态；tab `Chat`/`Terminal`；底部输入栏 | 见下 |
-| `pair` | 扫码 + 手输降级 + 配对结果 | 全流程 ≤3 屏 |
-| `settings` | 外观主题（跟随系统/深色/浅色）、账号卡片、TOTP 绑定状态、设备管理（吊销）、登出 | 吊销 remote 设备立即生效；主题即时生效并持久化 |
+| `home` | 电脑列表（`0.5dp` hairline 分隔、在线/离线区分与错误重试） | 下拉刷新 `/devices` |
+| `bridge/{deviceId}` | `PrimaryTabRow`（"会话/全部历史"）+ `PullToRefreshBox` + 虚拟化 `StartSessionSheet` | `Subscribe(updated)` 实时改 `LIVE` 徽标 |
+| `session/{sid}` | 顶部标题/会话与工具状态/`DEMO` 标记；`PrimaryTabRow`（`Chat`/`Terminal`）；底部输入栏 | 见下 |
+| `pair` | 扫码 + 手输降级 + 相机权限重试与类型化配对结果 | 全流程 ≤3 屏 |
+| `settings` | 外观主题（跟随系统/深色/浅色）、账号信息、TOTP 绑定、设备管理（标注本机/吊销）、登出 | 吊销 remote 设备立即生效；主题即时生效并持久化 |
 
 `session/{sid}` 交互与输入栏：
-- **顶部与模式切换**：`TopAppBar` 展示工具徽标、标题、实时连接状态胶囊与溢出菜单（同步历史、复制 `session_id`、停止会话二次确认）；双模话柄采用分段胶囊切换 `Chat` / `Terminal`。
-- **底部输入栏**：自适应 `navigationBarsPadding().imePadding()`；`+` 多媒体附件面板（图片 / 视频 / 音频选择与剪贴板粘贴，自动标注 `Noise ≤2MiB` 或 `Blob >2MiB` 分级路由 + 待发送附件托盘）、可折叠终端快捷键栏（`⏎`、`Esc`、`Tab`、`S-Tab`、`⌫`、`↑`、`↓`、`←`、`→`、`Ctrl-C`、`Ctrl-D`、`粘贴`）及胶囊文本框（IME action=send 等价于 `submit=true`）。
+- **顶部与模式切换**：紧凑 `TopAppBar`（标题、连接图标+工具/会话后缀、溢出菜单含同步历史/复制 ID/分组分隔线后停止会话二次确认）；双视图采用 Material 3 `PrimaryTabRow` 切换 `Chat` / `Terminal`。
+- **底部悬浮输入框（ChatGPT 风格一体化胶囊）**：自适应 `navigationBarsPadding().imePadding()`；内部为无边框文本域（IME action=send 等价于 `submit=true`）、左下角 `+` 多媒体附件面板与可折叠终端快捷键键帽开关、右下角高对比度圆形发送按钮（`↑`）；待发送附件以紧凑条展示在胶囊上方。
 **输入框获焦时**发 `Presence{REMOTE,typing=true}`（节流 1s），失焦发 false；
 对端 `Presence{LOCAL}` 时输入栏上方显示"本地正在输入…"banner（不锁输入，只提示）。
 
 **Chat 视图**（`STREAM_MESSAGES`）：
-- `LazyColumn` 按 `seq` 排序；User 右侧气泡与 Assistant 左侧卡片区分（含模型标签、时间与整段复制）；
-- `text` 渲染增强 Markdown（标题 / 列表 / 引用块 / 分割线 / 加粗 / 行内代码 / 带语言头与复制按钮的代码块）；
-- `thinking` 默认折叠（`AnimatedVisibility` 展开，带左侧强调条）；`tool_call`/`tool_result` 状态着色卡片；
-- `media` 媒体卡片：支持图片预览与全屏双指缩放灯箱、视频封面与时长徽章、音频波形与播放条（详见总纲 §3.5）；
-- 底部 sticky "回到底部" 悬浮按钮，未上翻时自动滚底；`reset` 事件 → 清空该 conv 的 Room 缓存 + `after_seq=0` 重拉 + 顶部 toast "历史已刷新"。
+- **去重框流式排版（类 ChatGPT / Claude 移动端）**：User 消息为右侧无边框柔和圆角气泡；Assistant 回复**直接铺在纯净主画布上**（浅色为纯白 `#FFFFFF`，深色为 `#0B0E14`），顶部仅极简工具头像+模型名，底部附轻量复制按钮；
+- `text` 渲染增强 Markdown（15.5sp/24sp 舒适行距、标题 / 列表 / 引用块 / 分割线 / 加粗 / 行内代码 / 无边框带语言头与复制按钮的代码块）；
+- `thinking`、`tool_call`/`tool_result` 采用轻量无边框内联折叠条，点开才展开等宽 JSON/输出；
+- `media` 媒体卡片：支持真实 PNG/JPEG/WebP 缩略图预览与全屏双指缩放灯箱（自动触发 `GetMediaRequest` 拉取并校验原图）、视频封面与时长角标、音频波形与播放条；
+- 底部 sticky "回到底部" 悬浮按钮，未上翻或主动发送时自动滚底；`reset` 事件 → 清空该 conv 的 Room 缓存 + `after_seq=0` 重拉 + 顶部 toast "历史已刷新"。
 
 **Terminal 视图**（`STREAM_SCREEN`）：
 - 顶部紧凑控制条：显示行数，支持字号缩放（10–16sp）、自动换行/横向滚动切换与一键复制屏幕文本；
