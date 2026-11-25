@@ -377,6 +377,18 @@ enroll 流程（把 phone 绑到已登录 bridge）：
    enrollment 批准，双方互相可见对方 device + pubkey；
 4. `user_code` 是 QR 扫码的降级路径：App 手动输入 6 位码找到 enrollment 再 approve。
 
+### 5.5b 日志（`internal/logging`）
+
+两个二进制都用 `slog`，默认 text/Info 到 stderr；`log_level` / `log_format`（或
+`RELAY_LOG_LEVEL` / `RELAY_LOG_FORMAT`）可切 `debug|info|warn|error` 与 `text|json`。
+
+- 访问日志：`method path status dur_ms ip rid bytes`，鉴权后追加 `user`/`device`；
+  `rid` 写入响应头 `X-Request-Id`（可传入，用于把用户反馈对上日志行）。
+- 脱敏：`/auth/*`、`/devices/enroll*`、`/admin/ui/*` 的 query 不落日志（`code`/`token` 在其中）。
+- 分级：`>=500` → `error`，`>=400` → `warn`，静态资源成功请求 → `debug`（否则每次页面加载刷几十行）。
+- `debug` 级别附带 `source`；panic 由 `recoveryMiddleware` 记 `slog` + 堆栈。
+- WSS：设备上线/下线、握手失败（带声称的 `device`/`kind`/`version`）都记日志，`online` 是当前连接数。
+
 ### 5.6 管理控制台 `/admin/ui`
 
 浏览器后台（用户禁用/恢复、审计日志）是 **Next.js 静态导出**，被 `go:embed` 打进
