@@ -34,7 +34,7 @@
 | 数据存储 | `androidx.datastore:datastore*` + `datastore-tink` | **1.3.0**（10-21） | 1.3.0 起官方内置 Tink AEAD（`AeadSerializer`）——**替代已弃用的 `security-crypto`/`EncryptedSharedPreferences`，禁止引入后者** |
 | 敏感密钥 | Android Keystore | — | Noise 静态私钥优先 `AndroidKeyStore`（`PURPOSE_AGREE_KEY`）；拿不到私钥时 fallback：datastore-tink 存 raw key |
 | 登录浏览器 | `androidx.browser:browser` | 最新 | Custom Tabs 承载 GitHub OAuth |
-| 扫码 | `com.google.android.gms:play-services-mlkit-barcode-scanning` + `androidx.camera:camera-*` | **18.3.1** / **1.7.0**（11-18） | thin 模型走 GMS 省体积；bundled 为 `com.google.mlkit:barcode-scanning:17.3.0` |
+| 扫码 | `com.google.zxing:core` + `androidx.camera:camera-*` | **3.5.4** / **1.7.0**（11-18） | 100% 离线 YUV 解码（含反色适配暗底终端 ASCII 二维码），无需 GMS 动态模型；`PreviewView` 使用 `COMPATIBLE` 模式 |
 | 后台 | `androidx.work:work-*` | **2.12.0**（09-23） | + ForegroundService 前台保活 WSS；推送见 §10 |
 | Noise | `org.bouncycastle:bcprov-jdk18on` + 纯 Kotlin 状态机 | **1.87** | 见 §4，已通过 `flynn/noise` `interop_vectors.json` 字节级互操作验证 |
 | JSON | `org.jetbrains.kotlinx:kotlinx-serialization-json` | 随 Kotlin 插件最新 | REST 响应、enroll 载荷 |
@@ -140,19 +140,19 @@ App → Custom Tab: GET /auth/github/start?redirect_uri=sidekick://auth/callback
 | `login/totp` | 6 位 code 输入 + recovery code 入口 | 错误 code 抖动提示 |
 | `home` | 电脑列表（`0.5dp` hairline 分隔、在线/离线区分与错误重试） | 下拉刷新 `/devices` |
 | `bridge/{deviceId}` | `PrimaryTabRow`（"会话/全部历史"）+ `PullToRefreshBox` + 虚拟化 `StartSessionSheet` | `Subscribe(updated)` 实时改 `LIVE` 徽标 |
-| `session/{sid}` | 顶部标题/会话与工具状态/`DEMO` 标记；`PrimaryTabRow`（`Chat`/`Terminal`）；底部输入栏 | 见下 |
-| `pair` | 扫码 + 手输降级 + 相机权限重试与类型化配对结果 | 全流程 ≤3 屏 |
+| `session/{sid}` | 单行极简顶栏（`<-` + 工具文字锚点 + 无边框 `Chat / Terminal` 下划线切换 + `...`）与自动显隐标题/状态条；底部输入栏 | 见下 |
+| `pair` | 离线 ZXing 扫码（`TextureView` `COMPATIBLE` + 反色解码）+ 手输降级 + 返回前台权限刷新与系统设置跳转 | 全流程 ≤3 屏（Demo 演示模式同样进入真实 `PairContent`） |
 | `settings` | 外观主题（跟随系统/深色/浅色）、账号信息、TOTP 绑定、设备管理（标注本机/吊销）、登出 | 吊销 remote 设备立即生效；主题即时生效并持久化 |
 
 `session/{sid}` 交互与输入栏：
-- **顶部与模式切换**：紧凑 `TopAppBar`（标题、连接图标+工具/会话后缀、溢出菜单含同步历史/复制 ID/分组分隔线后停止会话二次确认）；双视图采用 Material 3 `PrimaryTabRow` 切换 `Chat` / `Terminal`。
-- **底部悬浮输入框（ChatGPT 风格一体化胶囊）**：自适应 `navigationBarsPadding().imePadding()`；内部为无边框文本域（IME action=send 等价于 `submit=true`）、左下角 `+` 多媒体附件面板与可折叠终端快捷键键帽开关、右下角高对比度圆形发送按钮（`↑`）；待发送附件以紧凑条展示在胶囊上方。
+- **自适应极简顶栏与自动唤出标题条**：移除冗余胶囊外框，顶栏仅保留 `<-`、工具名称点击锚点、无边框 `Chat / Terminal` 平滑滑动下划线 Tab（`48dp` 触控区，仅指示条轻量滑动、内容区干脆直切，大字体模式自动换行不挤压工具标题）与溢出菜单（内置终端字号/换行/复制屏幕）；进入页面或切换 Tab 时完整标题、连接状态、`session_id` 与终端 `ANSI · N 行` 信息条自然展示 `2.4s` 后平滑收起，弹出键盘、点击对话/终端空白处或向下滚动阅读时自动收起键盘/弹窗与标题条；当手指向上回拉、断开连接、回到前台或点按顶栏工具锚点时自动唤出或固定原标题条，且各悬浮操作按钮统一降为 `1dp` 轻阴影与 `0.5dp` hairline 轮廓。
+- **底部悬浮输入框（ChatGPT 风格一体化胶囊）**：自适应 `navigationBarsPadding().imePadding()`；内部为 `16sp/23sp` 无边框文本域（IME action=send 等价于 `submit=true`）、左下角 `+` 多媒体附件面板与可折叠终端快捷键键帽开关、右下角高对比度圆形发送按钮（`↑`）；待发送附件以紧凑条展示在胶囊上方；支持消息引用回复条（`QuotedMessageBanner`）、`@` 工作区文件补全浮层（`ListFiles` E2E RPC）与 `/` CLI 命令补全浮层（`ListCommands` E2E RPC，融合核心内置命令保底含 `/compact` 与磁盘动态发现，并支持「终端实时 `>_`」PTY 直通兜底）。
 **输入框获焦时**发 `Presence{REMOTE,typing=true}`（节流 1s），失焦发 false；
 对端 `Presence{LOCAL}` 时输入栏上方显示"本地正在输入…"banner（不锁输入，只提示）。
 
 **Chat 视图**（`STREAM_MESSAGES`）：
-- **去重框流式排版（类 ChatGPT / Claude 移动端）**：User 消息为右侧无边框柔和圆角气泡；Assistant 回复**直接铺在纯净主画布上**（浅色为纯白 `#FFFFFF`，深色为 `#0B0E14`），顶部仅极简工具头像+模型名，底部附轻量复制按钮；
-- `text` 渲染增强 Markdown（15.5sp/24sp 舒适行距、标题 / 列表 / 引用块 / 分割线 / 加粗 / 行内代码 / 无边框带语言头与复制按钮的代码块）；
+- **去重框流式排版（类 ChatGPT / Claude 移动端）**：User 消息为右侧 `RoundedCornerShape(22.dp)` 柔和圆角气泡（`16sp/23sp`）；Assistant 回复**直接铺在纯净主画布上**（浅色为纯白 `#FFFFFF`，深色为 `#0B0E14`），顶部仅极简工具头像+模型名，底部附轻量引用回复（`FormatQuote`）与复制按钮；
+- `text` 渲染增强 Markdown（类 ChatGPT 移动端字号：正文 `16sp/26sp`、标题 `21/19/17sp`、行内代码 `14sp`、代码块 `13.5sp/20sp`；支持表格 / 语法高亮 / 引用块 / 分割线 / 加粗 / 列表）；
 - `thinking`、`tool_call`/`tool_result` 采用轻量无边框内联折叠条，点开才展开等宽 JSON/输出；
 - `media` 媒体卡片：支持真实 PNG/JPEG/WebP 缩略图预览与全屏双指缩放灯箱（自动触发 `GetMediaRequest` 拉取并校验原图）、视频封面与时长角标、音频波形与播放条；
 - 底部 sticky "回到底部" 悬浮按钮，未上翻或主动发送时自动滚底；`reset` 事件 → 清空该 conv 的 Room 缓存 + `after_seq=0` 重拉 + 顶部 toast "历史已刷新"。
