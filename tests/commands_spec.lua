@@ -112,7 +112,7 @@ describe("commands", function()
       {
         name = "filters by prefix",
         input = "cli s",
-        expected_completions = { "select", "show", "send", "switch", "sync" },
+        expected_completions = { "select", "show", "send", "status", "switch", "sync" },
       },
       {
         name = "includes fork in cli completions",
@@ -167,7 +167,7 @@ describe("commands", function()
       {
         name = "suggests subcommands",
         input = "Sidekick cli s",
-        expected = { "select", "show", "send", "switch", "sync" },
+        expected = { "select", "show", "send", "status", "switch", "sync" },
       },
       {
         name = "suggests tools for a new agent",

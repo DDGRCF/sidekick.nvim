@@ -262,10 +262,15 @@ prompt_history(id PK AUTOINCREMENT, content, timestamp, session_id, is_shell)
   `file:...?mode=ro&_pragma=busy_timeout(3000)` + `BEGIN DEFERRED`；
   增量轮询 `MAX(row_id)` 与 `last_activity_at`。
 
-### antigravity (agy) — `~/.gemini/antigravity-cli/conversations/<uuid>.db`
+### antigravity (agy) — `~/.gemini/antigravity-cli`
 
-`steps.step_payload` 是**无 schema protobuf blob**，v1 不解析 →
-`ToolInfo.structured_history=false`，只走终端平面。P6 spike 用 `protoc --decode_raw` 评估。
+- 会话索引：`conversation_summaries.db`（表 `conversation_summaries`：`conversation_id`、`title`、`preview`、`step_count`、`last_modified_time`、`workspace_uris`、`parent_conversation_id`，只读打开，过滤子代理会话 `parent_conversation_id != ''`；若无索引 DB 则回退扫描 `brain/*/`)；
+- 结构化消息流：`brain/<uuid>/.system_generated/logs/transcript.jsonl`（与 `watchJSONLFile` 增量监听复用）：
+  - `USER_EXPLICIT` / `USER_INPUT` → 提取 `<USER_REQUEST>...</USER_REQUEST>` 用户消息；
+  - `MODEL` / `PLANNER_RESPONSE` → `thinking` + `tool_calls` + `content`；
+  - `MODEL` / `GENERIC` → `ToolResultPart`（支持 `error` 与 `64 KiB` 截断）；
+  - `CHECKPOINT` → `ROLE_SYSTEM` 压缩边界提示。
+- `ToolInfo.structured_history = true`（同时支持 `antigravity` 与 `agy` 别名）。
 
 ## 5. relay 服务器
 

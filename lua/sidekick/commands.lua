@@ -107,6 +107,9 @@ M.commands = {
     prompt = function()
       require("sidekick.cli").prompt()
     end,
+    status = function()
+      require("sidekick.cli.status").report()
+    end,
     workspace = {
       save = function()
         require("sidekick.cli").workspace("save")

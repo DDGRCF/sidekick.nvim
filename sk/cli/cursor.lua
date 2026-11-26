@@ -1,3 +1,5 @@
+local Status = require("sidekick.cli.status")
+
 ---@type sidekick.cli.Config
 return {
   cmd = { "cursor-agent" },
@@ -19,4 +21,7 @@ return {
       return require("sidekick.cli.cursor_fork").prepare(tool, conversation, source, done)
     end,
   },
+  -- Best effort: most agent TUIs print an interrupt hint in the footer while a
+  -- turn runs. This only overrides the quiet-output heuristic when it matches.
+  status = Status.markers({ busy = Status.INTERRUPT_HINT }),
 }

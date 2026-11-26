@@ -1,3 +1,5 @@
+local Status = require("sidekick.cli.status")
+
 ---@type sidekick.cli.Config
 return {
   cmd = { "agy" },
@@ -35,4 +37,7 @@ return {
     end,
   },
   continue = { "--continue" },
+  -- Best effort: most agent TUIs print an interrupt hint in the footer while a
+  -- turn runs. This only overrides the quiet-output heuristic when it matches.
+  status = Status.markers({ busy = Status.INTERRUPT_HINT }),
 }

@@ -1,3 +1,4 @@
+local Status = require("sidekick.cli.status")
 local Util = require("sidekick.util")
 
 -- `devin list` talks to the Devin API and takes seconds on every call, so the
@@ -107,8 +108,7 @@ local function pick(cwd, list, id)
     local found = entry(item)
     -- `devin list` is scoped to the working directory it runs in, but guard
     -- against cross-project leakage anyway.
-    local same_cwd = not (cwd and found and found.cwd)
-      or vim.fs.normalize(found.cwd) == vim.fs.normalize(cwd)
+    local same_cwd = not (cwd and found and found.cwd) or vim.fs.normalize(found.cwd) == vim.fs.normalize(cwd)
     if found and same_cwd then
       if id and found.id == id then
         return found
@@ -207,12 +207,14 @@ return {
       -- refresh, because that would reorder autosave work behind a fetch.
       local hit = cache[session.cwd or ""]
       local found = hit and pick(session.cwd, hit.list) or nil
-      return found and {
-        id = found.id,
-        provider = "devin",
-        resumable = true,
-        data = { cwd = found.cwd },
-      } or nil
+      return found
+          and {
+            id = found.id,
+            provider = "devin",
+            resumable = true,
+            data = { cwd = found.cwd },
+          }
+        or nil
     end,
     -- `nil` means "the cached list cannot answer yet"; `resume.verify` only
     -- blocks on an explicit `false`, so an unverified id never costs a freeze.
@@ -232,4 +234,7 @@ return {
     end,
   },
   continue = { "--continue" },
+  -- Devin prints the interrupt shortcut while working; it exposes no stable
+  -- idle footer, so `done` still comes from the quiet-output fallback.
+  status = Status.markers({ busy = Status.INTERRUPT_HINT }),
 }

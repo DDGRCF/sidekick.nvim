@@ -1,4 +1,5 @@
 local Managed = require("sidekick.cli.managed_sessions")
+local Status = require("sidekick.cli.status")
 
 ---@type sidekick.cli.Config
 return {
@@ -19,4 +20,7 @@ return {
   fork = Managed.fork("omp"),
   continue = { "--continue" },
   native_scroll = false,
+  -- OMP prints the interrupt shortcut while working and an `esc to cancel`
+  -- footer while it waits for a choice.
+  status = Status.markers({ busy = Status.INTERRUPT_HINT, waiting = { "esc to cancel" } }),
 }

@@ -154,7 +154,8 @@ App → Custom Tab: GET /auth/github/start?redirect_uri=sidekick://auth/callback
 - **去重框流式排版（类 ChatGPT / Claude 移动端）**：User 消息为右侧 `RoundedCornerShape(22.dp)` 柔和圆角气泡（`16sp/23sp`）；Assistant 回复**直接铺在纯净主画布上**（浅色为纯白 `#FFFFFF`，深色为 `#0B0E14`），顶部仅极简工具头像+模型名，底部附轻量引用回复（`FormatQuote`）与复制按钮；
 - `text` 渲染增强 Markdown（类 ChatGPT 移动端字号：正文 `16sp/26sp`、标题 `21/19/17sp`、行内代码 `14sp`、代码块 `13.5sp/20sp`；支持表格 / 语法高亮 / 引用块 / 分割线 / 加粗 / 列表）；
 - `thinking`、`tool_call`/`tool_result` 采用轻量无边框内联折叠条，点开才展开等宽 JSON/输出；
-- `media` 媒体卡片：支持真实 PNG/JPEG/WebP 缩略图预览与全屏双指缩放灯箱（自动触发 `GetMediaRequest` 拉取并校验原图）、视频封面与时长角标、音频波形与播放条；
+- `media` 媒体卡片：支持真实 PNG/JPEG/WebP 缩略图预览与全屏双指缩放灯箱（自动触发 `GetMediaRequest` 拉取并校验原图）、视频封面与全屏 `VideoView` 播放弹窗（点击后加密拉取并播放）、内联 `MediaPlayer` 音频波形与进度播放条，以及底部图片/视频/音频选择后分块加密上传（`UploadMediaRequest` ≤ 16 MiB）并以 `@rel_path` 发送给会话；
+- **同机 Agent 工作移交（Handover）**：会话顶部更多菜单提供 `"移交给其他 Agent"`，弹出面板支持选择同机其他 Agent（自动新建同目录会话）或注入到同机另一运行中会话，填写交接说明并按需自动附带最近对话/终端摘要，通过 `HandoverSessionRequest` 交接并直接切换进入目标 Agent 会话；
 - 底部 sticky "回到底部" 悬浮按钮，未上翻或主动发送时自动滚底；`reset` 事件 → 清空该 conv 的 Room 缓存 + `after_seq=0` 重拉 + 顶部 toast "历史已刷新"。
 
 **Terminal 视图**（`STREAM_SCREEN`）：
@@ -219,13 +220,13 @@ data class HistoryEntity(bridgeId: String, convId: String, tool: String, cwd: St
   6. 手机切飞行模式 → "离线"提示 → 恢复后自动重连且消息不丢（`after_seq` 续传）；
   7. 在电脑上 nvim attach 同一会话输入 → 手机显示"本地正在输入"；
   8. 吊销该手机设备 → App 被迫登出/断连；
-  9. `structured_history=false` 的 agy 会话 → Chat tab 隐藏，Terminal 正常。
+  9. `structured_history=false` 的无历史工具会话 → Chat tab 隐藏，Terminal 正常；`antigravity` (`agy`) 与 `codex/claude/pi/devin` 均支持 Chat/Terminal 双视图。
 
 ## 10. 后续（P6+）
 
 - **推送**：FCM（Google 服务）或 UnifiedPush/ntfy（无 GMS 也通）。注意隐私边界：
   relay 只看到 bridge 上报的**明文 metadata**（"session X needs attention"），
   内容仍 E2E；总纲 P6 再评估是否接受这个泄露面。v1 只做"App 前台时本地通知"。
-- agy 结构化历史（若 server spike 成功，Chat 视图直接复用，无额外工作）。
-- **媒体端到端收发管线**：按总纲 `§3.5` 落地图片压缩/EXIF 剥离、Opus 语音录制、Tier A Noise 流式分片、Tier B 客户端 AEAD 加密 Blob 上传/断点续传下载与 Media3 音视频播放。
+- agy 结构化历史已在 Go bridge 落地（`conversation_summaries.db` + `brain/<uuid>/.system_generated/logs/transcript.jsonl`），App 侧已同步开启 Chat/Terminal 双视图。
+- **后续（Tier B 超大媒体扩展）**：>16 MiB 超大视频加密 Blob 中继断点续传（`BlobPointer`）、移动端直接录制 Opus 语音条与 Media3 高级自定义控制。
 - 多 bridge 并存时的快速切换 UI；session 搜索（Room FTS）。

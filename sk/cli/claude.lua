@@ -1,5 +1,6 @@
 local Managed = require("sidekick.cli.managed_sessions")
 local Provider = require("sidekick.cli.provider_sessions")
+local Status = require("sidekick.cli.status")
 
 local function arg_value(cmd, flag)
   for i, arg in ipairs(cmd) do
@@ -112,6 +113,13 @@ return {
     install = "See [Claude Code docs](https://code.claude.com/docs/en/overview#get-started)",
   },
   is_proc = "\\<claude\\>",
+  -- Claude renders "esc to interrupt" in the footer while a turn runs and
+  -- "? for shortcuts" once it hands control back to the prompt.
+  status = Status.markers({
+    busy = { "esc to interrupt" },
+    waiting = { "Do you want to proceed", "Do you want to allow", "Do you want to make this edit" },
+    idle = { "? for shortcuts" },
+  }),
   url = "https://github.com/anthropics/claude-code",
   usage = require("sidekick.cli.agent_usage").claude,
   resume = resume,

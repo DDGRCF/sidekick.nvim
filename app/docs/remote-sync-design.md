@@ -160,11 +160,14 @@ Noise transport message 上限约 64KiB，屏幕快照/大消息必须分片：
   - **视频**：默认限制/转码 720p/1080p MP4（`faststart`），提取首帧缩略图与时长；大文件走 Tier B，若目标 CLI 不直接支持视频输入，Bridge 可按关键帧抽帧供多模态模型读取；
   - **Bridge 落盘安全**：解码后的附件仅写入当前会话工作区隔离目录 `<workspace>/.sidekick/attachments/<sha256前12位>_<sanitized_name>`，严格校验 `EvalSymlinks` 不越界后，再把路径安全引用给 CLI。
 
-- **已实现（Tier A 电脑 Agent → 手机图片回传）与待落地草案（P6 双向音视频 / Blob）**：
-  - 已在 `remote.proto` 落地 `MediaKind`、`MediaPart`、`Part.media`、`GetMediaRequest`、`GetMediaResponse`；
-  - Bridge 侧 (`internal/bridge/media.go`) 支持提取 Codex `image_url` / Claude `image` 及工作区 Markdown/路径图片（严格 `EvalSymlinks` 白名单校验），自动生成 `≤ 24 KiB`（320px）内联缩略图并按 256 KiB 分块响应 `GetMedia`；
-  - Android 侧通过 `BitmapFactory` 在聊天气泡展示真实缩略图并在点击后拉取原图至私有缓存，支持全屏双指缩放灯箱查看；
-  - 待落地（P6 后续）：`BlobPointer`、`MediaUploadChunk`、`SendMediaRequest` 以及移动端 → 电脑端的图片/视频/音频加密上传。
+- **同机 Agent 工作移交（Handover）**：
+  - `remote.proto` 新增 `HandoverSessionRequest` / `HandoverSessionResponse`：支持从当前会话移交给同台 Bridge 上的其他 Agent（自动新建同目录会话）或注入到同机另一运行中会话；Bridge 校验工作区与目标工具白名单后，组合用户输入的交接说明与自动抽取的最近结构化消息或终端屏幕尾行，注入目标会话并推送给目标 Agent，手机端随即可直接切换进入目标会话查看进度。
+
+- **已实现（Tier A 双向图片/音频/视频零 Relay 存储端到端传输）与后续 Tier B 大文件扩展**：
+  - 已在 `remote.proto` 落地 `MediaKind`、`MediaPart`、`Part.media`、`GetMediaRequest`、`GetMediaResponse`、`UploadMediaRequest`、`UploadMediaResponse`；
+  - Bridge 侧 (`internal/bridge/media.go`, `media_upload.go`) 支持提取 Codex/Claude/工作区 Markdown/路径的图片、音频与视频（严格 `EvalSymlinks` 白名单校验），图片生成 `≤ 24 KiB`（320px）内联缩略图，音频/视频直接磁盘 `ReadAt` 按 256 KiB 分块流式响应 `GetMedia`（最高 24 MiB）；手机端分块上传走 `UploadMedia`（最高 16 MiB），校验 `sha256_plain` 后原子写入 `<cwd>/.sidekick/attachments/<sha12>_<sanitized_name>` 并自动生成 `.gitignore`，全程密文透传 Relay、不在 Relay 落盘；
+  - Android 侧通过 `BitmapFactory`、`MediaPlayer` 与原生 `VideoView` 在聊天界面支持缩略图与双指缩放灯箱、内联音频播放条（真实波形进度 + 计时）及全屏视频播放弹窗，选中图片/视频/音频附件后分块加密上传并附带 `@rel_path` 引用发送给会话；
+  - 待落地（P6 后续扩展）：Relay 加密 Blob（`BlobPointer`、>16 MiB 超大视频断点续传）及服务端可选转码/STT。
 
 ## 4. 仓库布局
 
@@ -215,11 +218,11 @@ sidekick.nvim/                       主仓库（nvim 插件 + 文档）
 |---|---|---|
 | **P0** ✅ | 协议 + Go 骨架 | `remote.proto`、`internal/sid`（nvim 真实向量）、`internal/state`、CI 绿 |
 | **P1** ✅ | bridge mux 层 + launch 助手 + audit + 本地 ctl | `sk/cli/remote.lua`、`internal/{config,audit,mux,launch}`、`bridge ctl` |
-| **P2** ✅ | 结构化历史（codex/claude/pi/devin；agy 只终端） | 四 provider `Messages` 解析 + fixture 校验、fsnotify+poll watch、reset 处理 |
+| **P2** ✅ | 结构化历史（codex/claude/pi/devin/antigravity） | 五大 provider `Messages` 解析 + fixture 校验、fsnotify+poll watch、reset 处理 |
 | **P3** ✅ | relay 账号系统（Gin） | 登录/TOTP/token 旋转与重放吊销/设备表/GitHub OAuth/RFC 8628 device flow/admin 全链路 + 单测 |
 | **P4** ✅ | relay WSS 路由 + 配对 + Noise E2E + 重连 | `internal/noise`（XXpsk3/KK + L2 9B 分片）、`relayhub`、`relayclient`、`bridge serve`、in-process `e2etest`、`deploy/` |
 | **P5** ✅ | Android App（登录/配对/会话/双视图/输入） | `core:{protocol,noise,ansi,store,relay}` + `:app` 源码/单测/Compose UI test + `assembleDebug` APK |
-| **P6** | agy spike、推送、nvim 联动 | 见子文档"后续"章节 |
+| **P6** | 推送、nvim 联动、媒体完善 | 见子文档"后续"章节 |
 
 依赖关系：P1/P2 可并行（都纯本地）；P3/P4 顺序；P5 依赖 P4（需真实 E2E 通道联调，
 但 UI/协议层可用 fake relay 先行开发）；P6 任意顺序。
@@ -255,4 +258,4 @@ sidekick.nvim/                       主仓库（nvim 插件 + 文档）
 | SQLite | 单机部署最简单；个人规模足够 |
 | `nvim -l` launch 助手 | tool `cmd`/`env`/`mux_focus` 可被用户配置覆盖，Go 不复制 |
 | v1 Screen 全量快照 | 增量 diff 复杂收益小；后续再优化 |
-| agy 结构化延后 | protobuf blob 无 schema 需逆向；终端平面可用 |
+| agy 结构化支持 | 已基于 `conversation_summaries.db` + `brain/<uuid>/.system_generated/logs/transcript.jsonl` 完成结构化解析 |

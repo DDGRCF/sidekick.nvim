@@ -5,6 +5,31 @@ local M = {}
 
 local ACTIVITY_EVENT_INTERVAL = 100 -- ms
 
+-- A submitted prompt is echoed back by the PTY. That echo is not evidence
+-- that the agent started working, so it is ignored for this window.
+local ECHO_WINDOW_MS = 3000
+
+---@param str string
+---@return string
+local function normalize(str)
+  return vim.trim(str:gsub("[%c]+", " "):gsub("%s+", " "))
+end
+
+---@param terminal sidekick.cli.Terminal
+---@param output? string
+---@return boolean
+local function is_echo(terminal, output)
+  local submit = terminal._sidekick_submit
+  if not submit or type(output) ~= "string" or submit.text == "" then
+    return false
+  end
+  if vim.uv.now() - submit.at > ECHO_WINDOW_MS then
+    return false
+  end
+  -- The echo only contains the submitted prompt plus prompt decorations.
+  return output:find(submit.text, 1, true) ~= nil and #output <= #submit.text + 32
+end
+
 ---@alias sidekick.cli.ActivityStatus "idle"|"starting"|"working"|"waiting"|"done"|"error"
 ---@alias sidekick.cli.ActivityEventType "input"|"output"|"ready"|"exit"
 
@@ -209,6 +234,12 @@ end
 ---@param input? string
 function M.input(terminal, input)
   stop_timer(terminal)
+  if type(input) == "string" then
+    local text = normalize(input)
+    if text ~= "" then
+      terminal._sidekick_submit = { text = text, at = vim.uv.now() }
+    end
+  end
   terminal._sidekick_working = true
   if not event(terminal, "input", { data = input }) then
     M.set(terminal, "working")
@@ -219,6 +250,9 @@ end
 ---@param output? string
 function M.output(terminal, output)
   if not terminal._sidekick_working then
+    return
+  end
+  if is_echo(terminal, output) then
     return
   end
   mark_unread(terminal)

@@ -1,3 +1,4 @@
+local Status = require("sidekick.cli.status")
 local re = vim.regex("\\<copilot\\>")
 
 ---@type sidekick.cli.Config
@@ -19,4 +20,7 @@ return {
   url = "https://github.com/github/copilot-cli",
   resume = require("sidekick.cli.managed_sessions").adapter("copilot"),
   continue = { "--continue" },
+  -- Copilot prints its interrupt shortcut in the footer while working. It has
+  -- no stable idle footer, so `done` still comes from the quiet-output fallback.
+  status = Status.markers({ busy = { "to interrupt", "ctrl+c to cancel" } }),
 }

@@ -1,4 +1,5 @@
 local Managed = require("sidekick.cli.managed_sessions")
+local Status = require("sidekick.cli.status")
 
 ---@return string?
 local function extension()
@@ -53,4 +54,6 @@ return {
   },
   continue = { "--continue" },
   native_scroll = false,
+  -- Pi renders the `app.interrupt` shortcut in its footer while a turn runs.
+  status = Status.markers({ busy = Status.INTERRUPT_HINT }),
 }

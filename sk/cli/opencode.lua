@@ -1,3 +1,5 @@
+local Status = require("sidekick.cli.status")
+
 ---@class sidekick.cli.session.Opencode: sidekick.cli.Session
 ---@field port number
 ---@field pid number
@@ -163,4 +165,7 @@ return {
     end,
   },
   native_scroll = true,
+  -- Best effort: most agent TUIs print an interrupt hint in the footer while a
+  -- turn runs. This only overrides the quiet-output heuristic when it matches.
+  status = Status.markers({ busy = Status.INTERRUPT_HINT }),
 }

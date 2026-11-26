@@ -1,3 +1,4 @@
+local Status = require("sidekick.cli.status")
 ---@type sidekick.cli.Config
 return {
   -- Inline rendering keeps Grok's transcript in terminal scrollback.
@@ -22,4 +23,7 @@ return {
       return cmd
     end,
   },
+  -- Grok prints the interrupt shortcut while working; there is no stable idle
+  -- footer, so `done` still comes from the quiet-output fallback.
+  status = Status.markers({ busy = Status.INTERRUPT_HINT }),
 }
