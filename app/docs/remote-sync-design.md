@@ -161,7 +161,7 @@ Noise transport message 上限约 64KiB，屏幕快照/大消息必须分片：
   - **Bridge 落盘安全**：解码后的附件仅写入当前会话工作区隔离目录 `<workspace>/.sidekick/attachments/<sha256前12位>_<sanitized_name>`，严格校验 `EvalSymlinks` 不越界后，再把路径安全引用给 CLI。
 
 - **同机 Agent 工作移交（Handover）**：
-  - `remote.proto` 新增 `HandoverSessionRequest` / `HandoverSessionResponse`：支持从当前会话移交给同台 Bridge 上的其他 Agent（自动新建同目录会话）或注入到同机另一运行中会话；Bridge 校验工作区与目标工具白名单后，组合用户输入的交接说明与自动抽取的最近结构化消息或终端屏幕尾行，注入目标会话并推送给目标 Agent，手机端随即可直接切换进入目标会话查看进度。
+  - `remote.proto` 新增 `HandoverSessionRequest` / `HandoverSessionResponse`：支持从当前会话移交给同台 Bridge 上的其他 Agent（自动新建同目录会话）或注入到同机另一运行中会话；Bridge 校验工作区与目标工具白名单后，默认写入来源/目标必要元信息（`source_agent`、`source_session_id`、`source_conversation_id`、`target_agent`、`target_session_id`、`workspace`）与用户交接说明，并在可选开关开启时附带最近对话或终端屏幕摘要注入目标会话，手机端随即可直接切换进入目标会话查看进度。
 
 - **已实现（Tier A 双向图片/音频/视频零 Relay 存储端到端传输）与后续 Tier B 大文件扩展**：
   - 已在 `remote.proto` 落地 `MediaKind`、`MediaPart`、`Part.media`、`GetMediaRequest`、`GetMediaResponse`、`UploadMediaRequest`、`UploadMediaResponse`；
