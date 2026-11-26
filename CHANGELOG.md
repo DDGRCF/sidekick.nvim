@@ -17,6 +17,7 @@
 
 ### Bug Fixes
 
+* **remote-android:** render the expandable session title details bar as a top overlay rather than inside the Scaffold topBar so scrolling or expanding full title info never squeezes or shifts chat/terminal content
 * **cli:** keep manual panel resizes, drop `winfixwidth`/`winfixheight` so the panel and the neighbouring sidebar can be resized again, record squeezed sizes instead of springing back to the configured default, and push the panel size into the agent pty so zooming or resizing no longer leaves parts of the panel blank
 * **cli:** ignore the PTY echo of a submitted prompt so sending a message no longer counts as the agent starting work
 
