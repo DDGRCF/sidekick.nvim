@@ -43,7 +43,7 @@ describe("cli status markers", function()
   local claude = Status.markers({
     busy = { "esc to interrupt" },
     waiting = { "Do you want to proceed" },
-    idle = { "? for shortcuts" },
+    idle = { "? for shortcuts", "for agents", "shift+tab to cycle" },
   })
 
   ---@param t any
@@ -80,6 +80,31 @@ describe("cli status markers", function()
     assert.are.equal("done", output(t, "redrawn footer"))
     assert.is_nil(claude(t.tool, { type = "input", data = "next\n", terminal = t }))
     vim.api.nvim_buf_set_lines(t.buf, -1, -1, false, { "✻ Noodling… (2s · esc to interrupt)" })
+    assert.are.equal("working", output(t, "esc to interrupt"))
+  end)
+
+  it("resolves the real claude 2.1.296 footers", function()
+    -- Captured from a live `claude` TUI: the interrupt hint is appended to the
+    -- same footer row that also carries the idle hint.
+    local working = terminal({
+      "────────────────────────────",
+      "❯ ",
+      "────────────────────────────",
+      "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents",
+    })
+    assert.are.equal("working", output(working, "esc to interrupt"))
+
+    local idle = terminal({
+      "────────────────────────────",
+      "❯ ",
+      "────────────────────────────",
+      "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
+    })
+    assert.are.equal("done", output(idle, "← for agents"))
+  end)
+
+  it("prefers busy over idle when both hit the same row", function()
+    local t = terminal({ "  auto mode on · esc to interrupt · ← for agents" })
     assert.are.equal("working", output(t, "esc to interrupt"))
   end)
 

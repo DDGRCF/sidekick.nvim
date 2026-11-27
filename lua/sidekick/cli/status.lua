@@ -82,7 +82,10 @@ function M.resolve(terminal, spec)
   if waiting and (not busy or waiting > busy) and (not idle or waiting > idle) then
     return "waiting"
   end
-  if busy and (not idle or busy > idle) then
+  -- A footer can carry the idle hint and the interrupt hint on the same row
+  -- (claude renders `… · esc to interrupt · ← for agents`). The interrupt hint
+  -- is the more specific one, so a tie counts as working.
+  if busy and (not idle or busy >= idle) then
     return "working"
   end
   if idle then

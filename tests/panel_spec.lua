@@ -1408,6 +1408,8 @@ describe("cli agent panel", function()
 
     assert.are.equal(101, calls[1][1])
     assert.are.equal(33, calls[1][2])
-    assert.are.equal(vim.api.nvim_win_get_height(Panel.win(first)), calls[1][3])
+    -- The panel draws a winbar in its own grid row, so the pty gets the text
+    -- area (`winheight`), not the full window height.
+    assert.are.equal(vim.fn.winheight(Panel.win(first)), calls[1][3])
   end)
 end)

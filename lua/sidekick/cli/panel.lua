@@ -1111,14 +1111,32 @@ end
 --- An inline CLI only repaints the area it believes it owns, so a stale pty
 --- size leaves parts of the panel blank after a resize, a zoom or a layout
 --- change.
+--- The panel draws a `winbar` in its own grid row, so `nvim_win_get_height`
+--- reports one row more than the terminal can paint. Sizing the pty from it
+--- pushes the agent's last row out of view: `pi` renders 42 rows into a 41 row
+--- text area, its status line lands on the row that is already scrolled off,
+--- and the dock appears stranded mid-window. Measure the text area instead.
+---@param win integer
+local function text_rows(win)
+  local ok, rows = pcall(vim.api.nvim_win_get_height, win)
+  if not ok then
+    return nil
+  end
+  local height = vim.fn.winheight(win)
+  if type(height) == "number" and height > 0 and height <= rows then
+    return height
+  end
+  return rows
+end
+
 ---@param win integer
 local function sync_pty_size(win)
   if not valid(win) then
     return
   end
   local ok_w, width = pcall(vim.api.nvim_win_get_width, win)
-  local ok_h, height = pcall(vim.api.nvim_win_get_height, win)
-  if not (ok_w and ok_h) then
+  local height = text_rows(win)
+  if not (ok_w and height) then
     return
   end
   for _, t in pairs(require("sidekick.cli.terminal").terminals or {}) do

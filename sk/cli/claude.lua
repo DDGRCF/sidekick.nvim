@@ -113,12 +113,15 @@ return {
     install = "See [Claude Code docs](https://code.claude.com/docs/en/overview#get-started)",
   },
   is_proc = "\\<claude\\>",
-  -- Claude renders "esc to interrupt" in the footer while a turn runs and
-  -- "? for shortcuts" once it hands control back to the prompt.
+  -- Verified against claude 2.1.296: the footer reads
+  -- `⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents`
+  -- while a turn runs and drops the interrupt hint once it hands control back.
+  -- `? for shortcuts` is the older idle footer and stays listed for versions
+  -- that still render it.
   status = Status.markers({
     busy = { "esc to interrupt" },
     waiting = { "Do you want to proceed", "Do you want to allow", "Do you want to make this edit" },
-    idle = { "? for shortcuts" },
+    idle = { "? for shortcuts", "for agents", "shift+tab to cycle" },
   }),
   url = "https://github.com/anthropics/claude-code",
   usage = require("sidekick.cli.agent_usage").claude,

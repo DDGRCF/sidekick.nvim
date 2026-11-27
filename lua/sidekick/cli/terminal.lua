@@ -4,25 +4,24 @@ local Panel = require("sidekick.cli.panel")
 local Session = require("sidekick.cli.session")
 local Util = require("sidekick.util")
 
--- TODO(cli): inline TUIs leave their input dock stranded above the window bottom.
+-- Inline TUIs (`pi --tui-mode regular`, `codex --no-alt-screen`, claude with
+-- CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN, grok --no-alt-screen, agy inline) render
+-- from the top of their pty grid and keep the input dock right below the
+-- transcript, so a short session leaves the dock above the window bottom. That
+-- is the CLI's own layout and a pty resize cannot move it: a SIGWINCH round trip
+-- leaves the dock where it was (measured on agy: row 18 of 40 before a resize,
+-- row 16 after 40→39→40), and `virt_lines_above` does not render in a terminal
+-- buffer.
 --
--- Providers running on the main screen (`pi --tui-mode regular`, `codex
--- --no-alt-screen`, claude with CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN, grok
--- --no-alt-screen`) print the input dock directly below their output and draw
--- the autocomplete list below the dock. A Neovim terminal buffer always starts
--- at the first row of its window, so a short UI stays in the upper part with
--- blank rows below, and every `/model` or slash dropdown pushes the dock further
--- up. Reproduces without Neovim: `pi --tui-mode regular` in a 24 row terminal,
--- type `/`, press Escape, the dock ends up around row 16 with blank rows below.
+-- What *is* fixable is the off-by-one this used to add on top: the panel draws a
+-- `winbar` in one of the window's grid rows, and `nvim_win_get_height` counts it
+-- while `winheight()` does not. Sizing the pty from the former handed each CLI
+-- one row more than it could paint, pushing its bottom row out of the viewport
+-- and, on `agy`, merging the notice text into the separator border. Both the
+-- spawn path (`start_job`) and the resize path (`panel.sync_pty_size`) measure
+-- the text area now.
 --
--- Fix sketch: once output settles, if the terminal cursor sits well above the
--- window bottom and the lines below it are blank, nudge the pty
--- (`vim.fn.jobresize(self.job, w, h - 1)` then `(self.job, w, h)`) so the CLI
--- redraws its dock lower. Measured on pi: one nudge moves the dock from rows
--- 11-14 to 18-21 of a 24 row window and keeps the scrollback intact; the last
--- 3 rows are pi's own layout gap. Still needs the same check on codex, claude
--- and agy, plus debouncing so output bursts cannot cause redraw loops.
--- Alternate-screen providers do not need this.
+-- Alternate-screen providers are unaffected: they own the whole pty grid.
 
 ---@class sidekick.cli.terminal.Cmd
 ---@field name string Name of the tool
@@ -612,6 +611,15 @@ function M:start()
   self.timer = vim.uv.new_timer()
 
   local function start_job()
+    -- The panel draws a `winbar`, which occupies one of the window's grid
+    -- rows, and Neovim does not export the resulting text-area size to a
+    -- `term=true` job. Seeding the pty from `nvim_win_get_height` therefore
+    -- hands the CLI one row more than it can paint, and its last row scrolls
+    -- out of view (`pi` renders its status line on that row). Use the real
+    -- text height so the first frame already fits.
+    local win = self:window()
+    local lines = win and vim.fn.winheight(win) or nil
+    local columns = win and vim.api.nvim_win_get_width(win) or nil
     ---@type table<string, string|false>
     local env = vim.tbl_extend("force", {}, vim.uv.os_environ(), self.tool.config.env or {}, self.tool.env or {}, {
       NVIM = vim.v.servername,
@@ -620,6 +628,8 @@ function M:start()
       VIM = false,
       VIMRUNTIME = false,
       TERM = "xterm-256color",
+      LINES = lines and tostring(lines) or nil,
+      COLUMNS = columns and tostring(columns) or nil,
     })
     -- add support for clearing env vars
     for k, v in pairs(env) do
