@@ -494,7 +494,7 @@ end
 ---@param target sidekick.cli.Session
 ---@param opts? sidekick.cli.AgentReferenceOpts
 function M.handover_opts(source, target, opts)
-  opts = vim.deepcopy(opts or {})
+  opts = vim.tbl_extend("force", {}, opts or {})
   local context_lines = tonumber((Config.cli.agent_reference or {}).context_lines) or 100
   vim.ui.input({
     prompt = "Handover note (optional): ",
