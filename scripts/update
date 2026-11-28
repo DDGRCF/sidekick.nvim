@@ -1,0 +1,336 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPLOY_TMP="/tmp/sidekick-deploy"
+TARGET=""
+HOST="${RELAY_HOST:-jdserver}"
+DEVICE_FILTER=""
+SKIP_TESTS=0
+NO_INSTALL=0
+BUILD_VARIANT="debug"
+GO_TESTED=0
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/update <relay|bridge|server|android|all> [options]
+
+Targets:
+  relay     Build static linux/amd64 sidekick-relay (with admin-ui) and atomic-deploy to jdserver
+  bridge    Build sidekick-bridge and restart local user systemd daemon
+  server    Update both relay and bridge (runs Go tests/lint at most once)
+  android   Verify proto/UI, run Gradle test + assemble APK (debug by default), and install via ADB
+  all       Run server + android
+
+Options:
+  --release       Build signed Android release APK (assembleRelease) instead of debug
+  --skip-tests    Skip Go unit tests / golangci-lint and Gradle unit tests (still builds & verifies health)
+  --no-install    Build Android APK without ADB install/push
+  --host <name>   SSH host for relay deployment (default: jdserver)
+  --device <pat>  Match specific ADB device model/serial (e.g. V2419A)
+  -h, --help      Show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    relay|bridge|server|android|all)
+      if [[ -n "$TARGET" ]]; then
+        echo "Multiple targets specified: $TARGET and $1" >&2
+        exit 2
+      fi
+      TARGET="$1"
+      shift
+      ;;
+    --release)
+      BUILD_VARIANT="release"
+      shift
+      ;;
+    --skip-tests)
+      SKIP_TESTS=1
+      shift
+      ;;
+    --no-install)
+      NO_INSTALL=1
+      shift
+      ;;
+    --host)
+      HOST="${2:?--host requires a value}"
+      shift 2
+      ;;
+    --device)
+      DEVICE_FILTER="${2:?--device requires a value}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "$TARGET" ]]; then
+  usage >&2
+  exit 2
+fi
+
+log() {
+  printf '\n\033[1;34m==> %s\033[0m\n' "$*"
+}
+
+check_proto_sync() {
+  log "Checking proto sync"
+  "$REPO_ROOT/app/android/scripts/sync-proto.sh" --check
+}
+
+run_go_checks() {
+  if [[ "$SKIP_TESTS" -eq 1 || "$GO_TESTED" -eq 1 ]]; then
+    return 0
+  fi
+  log "Running Go tests (-race) & golangci-lint"
+  (
+    cd "$REPO_ROOT/app/server"
+    go test -race -p 2 ./...
+    golangci-lint run
+  )
+  GO_TESTED=1
+}
+
+update_relay() {
+  check_proto_sync
+  run_go_checks
+
+  mkdir -p "$DEPLOY_TMP"
+  local git_sha version_tag
+  git_sha="$(git -C "$REPO_ROOT/app/server" rev-parse --short HEAD 2>/dev/null || echo dev)"
+  version_tag="$(date +%Y%m%d)-${git_sha}"
+
+  log "Building admin-ui & static sidekick-relay ($version_tag)"
+  (
+    cd "$REPO_ROOT/app/server"
+    make admin-ui
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+      -ldflags "-s -w -X main.version=${version_tag}" \
+      -o "$DEPLOY_TMP/sidekick-relay" ./cmd/sidekick-relay
+  )
+
+  log "Atomic upload & restart sidekick-relay on $HOST"
+  scp "$DEPLOY_TMP/sidekick-relay" "${HOST}:/usr/local/bin/.sidekick-relay.new"
+  ssh "$HOST" 'chmod 755 /usr/local/bin/.sidekick-relay.new && mv -f /usr/local/bin/.sidekick-relay.new /usr/local/bin/sidekick-relay && systemctl restart sidekick-relay && sleep 1 && systemctl is-active sidekick-relay'
+
+  local public_url
+  public_url="$(ssh "$HOST" "awk -F'\"' '/^public_url[[:space:]]*=/{print \$2; exit}' /etc/sidekick-relay/relay.toml" || true)"
+  if [[ -n "$public_url" ]]; then
+    log "Verifying ${public_url}/auth/relay"
+    curl -sf "${public_url%/}/auth/relay"
+    echo ""
+  else
+    log "Warning: public_url not found in $HOST:/etc/sidekick-relay/relay.toml"
+  fi
+}
+
+update_bridge() {
+  run_go_checks
+
+  log "Building sidekick-bridge"
+  (
+    cd "$REPO_ROOT/app/server"
+    make build
+  )
+
+  log "Restarting local sidekick bridge systemd user service"
+  local unit=""
+  if systemctl --user is-active --quiet sidekick-bridge.service 2>/dev/null || systemctl --user cat sidekick-bridge.service >/dev/null 2>&1; then
+    unit="sidekick-bridge.service"
+    systemctl --user restart "$unit"
+  elif systemctl --user is-active --quiet sidekick-local-bridge.service 2>/dev/null || systemctl --user cat sidekick-local-bridge.service >/dev/null 2>&1; then
+    unit="sidekick-local-bridge.service"
+    systemctl --user restart "$unit"
+  else
+    unit="sidekick-local-bridge.service"
+    mkdir -p "$HOME/.local/state/sidekick-bridge"
+    systemd-run --user --unit=sidekick-local-bridge \
+      --property="StandardOutput=append:$HOME/.local/state/sidekick-bridge/bridge.log" \
+      --property="StandardError=append:$HOME/.local/state/sidekick-bridge/bridge.log" \
+      "$REPO_ROOT/app/server/bin/sidekick-bridge" serve
+  fi
+
+  systemctl --user is-active "$unit"
+  systemctl --user show -p MainPID,ActiveState,SubState "$unit" --no-pager
+}
+
+find_jdk() {
+  if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]]; then
+    echo "$JAVA_HOME"
+  elif [[ -x "/opt/android-studio/jbr/bin/java" ]]; then
+    echo "/opt/android-studio/jbr"
+  elif command -v java >/dev/null 2>&1; then
+    dirname "$(dirname "$(readlink -f "$(command -v java)")")"
+  else
+    echo "No usable JDK found (checked JAVA_HOME and /opt/android-studio/jbr)" >&2
+    exit 1
+  fi
+}
+
+find_adb() {
+  if [[ -n "${ANDROID_HOME:-}" && -x "${ANDROID_HOME}/platform-tools/adb" ]]; then
+    echo "${ANDROID_HOME}/platform-tools/adb"
+  elif [[ -n "${ANDROID_SDK_ROOT:-}" && -x "${ANDROID_SDK_ROOT}/platform-tools/adb" ]]; then
+    echo "${ANDROID_SDK_ROOT}/platform-tools/adb"
+  elif [[ -x "$HOME/Android/Sdk/platform-tools/adb" ]]; then
+    echo "$HOME/Android/Sdk/platform-tools/adb"
+  elif command -v adb >/dev/null 2>&1; then
+    command -v adb
+  else
+    echo ""
+  fi
+}
+
+find_apksigner() {
+  local candidate=""
+  for base in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Android/Sdk"; do
+    [[ -n "$base" && -d "$base/build-tools" ]] || continue
+    candidate="$(find "$base/build-tools" -maxdepth 2 -type f -name apksigner 2>/dev/null | sort -V | tail -n 1 || true)"
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  if command -v apksigner >/dev/null 2>&1; then
+    command -v apksigner
+    return 0
+  fi
+  echo ""
+}
+
+check_android_release_signing() {
+  if [[ -n "${SIDEKICK_KEYSTORE_PATH:-}" && -n "${SIDEKICK_KEYSTORE_PASSWORD:-}" && -n "${SIDEKICK_KEY_ALIAS:-}" && -n "${SIDEKICK_KEY_PASSWORD:-}" ]]; then
+    return 0
+  fi
+  for props in "${SIDEKICK_SIGNING_PROPS:-}" "$REPO_ROOT/app/android/keystore.properties" "$HOME/.config/sidekick-android/signing.properties"; do
+    if [[ -n "$props" && -f "$props" ]]; then
+      return 0
+    fi
+  done
+  echo "Android release signing config not found (checked SIDEKICK_KEYSTORE_* env vars, SIDEKICK_SIGNING_PROPS, app/android/keystore.properties, and ~/.config/sidekick-android/signing.properties)." >&2
+  echo "See app/docs/update-workflow.md for keystore setup." >&2
+  return 1
+}
+
+update_android() {
+  check_proto_sync
+
+  local gradle_assemble apk phone_fallback
+  if [[ "$BUILD_VARIANT" == "release" ]]; then
+    check_android_release_signing
+    gradle_assemble="assembleRelease"
+    apk="$REPO_ROOT/app/android/app/build/outputs/apk/release/app-release.apk"
+    phone_fallback="/sdcard/Download/sidekick-release.apk"
+  else
+    gradle_assemble="assembleDebug"
+    apk="$REPO_ROOT/app/android/app/build/outputs/apk/debug/app-debug.apk"
+    phone_fallback="/sdcard/Download/sidekick-debug.apk"
+  fi
+
+  local detect_js="$REPO_ROOT/.agents/skills/unslop-anything/scripts/detect.js"
+  if [[ -f "$detect_js" ]] && command -v node >/dev/null 2>&1; then
+    log "Running UI static checks (detect.js)"
+    node "$detect_js" "$REPO_ROOT/app/android/app/src/main/kotlin/dev/ddgrcf/sidekick/ui/"
+  fi
+
+  local jdk
+  jdk="$(find_jdk)"
+  log "Running Gradle $gradle_assemble (JDK: $jdk)"
+  (
+    cd "$REPO_ROOT/app/android"
+    if [[ "$SKIP_TESTS" -eq 1 ]]; then
+      JAVA_HOME="$jdk" ./gradlew "$gradle_assemble" --no-daemon "-Dorg.gradle.java.home=$jdk"
+    else
+      JAVA_HOME="$jdk" ./gradlew test "$gradle_assemble" --no-daemon "-Dorg.gradle.java.home=$jdk"
+    fi
+  )
+
+  ls -lh "$apk"
+
+  if [[ "$BUILD_VARIANT" == "release" ]]; then
+    local apksigner_bin
+    apksigner_bin="$(find_apksigner)"
+    if [[ -z "$apksigner_bin" ]]; then
+      echo "apksigner not found in Android SDK build-tools or PATH; cannot verify release APK signature" >&2
+      return 1
+    fi
+    log "Verifying release APK signature ($apksigner_bin)"
+    "$apksigner_bin" verify --print-certs "$apk"
+  fi
+
+  if [[ "$NO_INSTALL" -eq 1 ]]; then
+    return 0
+  fi
+
+  local adb_bin
+  adb_bin="$(find_adb)"
+  if [[ -z "$adb_bin" ]]; then
+    log "adb not found; skipping phone install"
+    return 0
+  fi
+
+  local tid=""
+  if [[ -n "$DEVICE_FILTER" ]]; then
+    tid="$("$adb_bin" devices -l | awk -v pat="$DEVICE_FILTER" '/[[:space:]]device[[:space:]]/ && $0 ~ pat {for (i=1;i<=NF;i++) if ($i ~ /^transport_id:/) {sub(/^transport_id:/,"",$i); print $i; exit}}')"
+  else
+    tid="$("$adb_bin" devices -l | awk '/[[:space:]]device[[:space:]]/ {for (i=1;i<=NF;i++) if ($i ~ /^transport_id:/) {sub(/^transport_id:/,"",$i); print $i; exit}}')"
+  fi
+
+  if [[ -z "$tid" ]]; then
+    log "No connected ADB device${DEVICE_FILTER:+ matching '$DEVICE_FILTER'}; skipping install"
+    return 0
+  fi
+
+  local bridge_url
+  bridge_url="$(awk -F'"' '/^relay_url[[:space:]]*=/{print $2; exit}' "$HOME/.config/sidekick-bridge/config.toml" 2>/dev/null || true)"
+  if [[ "$bridge_url" =~ ^https?://(127\.0\.0\.1|localhost)(:[0-9]+)? ]]; then
+    log "Local bridge relay_url ($bridge_url) detected; setting adb reverse tcp:18090"
+    "$adb_bin" -t "$tid" reverse tcp:18090 tcp:18090 || true
+  fi
+
+  log "Installing $BUILD_VARIANT APK onto ADB transport_id=$tid"
+  local install_out=""
+  if install_out="$("$adb_bin" -t "$tid" install -r "$apk" 2>&1)"; then
+    printf '%s\n' "$install_out"
+    log "ADB install succeeded"
+  else
+    printf '%s\n' "$install_out" >&2
+    if [[ "$install_out" == *"INSTALL_FAILED_UPDATE_INCOMPATIBLE"* ]]; then
+      log "Hint: Signature differs from currently installed package (debug vs release); run '$adb_bin -t $tid uninstall dev.ddgrcf.sidekick' first."
+    fi
+    log "ADB install rejected/failed; pushing fallback APK to $phone_fallback"
+    "$adb_bin" -t "$tid" push "$apk" "$phone_fallback"
+  fi
+  "$adb_bin" -t "$tid" shell dumpsys package dev.ddgrcf.sidekick | grep -E 'versionCode|versionName|lastUpdateTime' | head -n 5 || true
+}
+
+case "$TARGET" in
+  relay)
+    update_relay
+    ;;
+  bridge)
+    update_bridge
+    ;;
+  server)
+    update_relay
+    update_bridge
+    ;;
+  android)
+    update_android
+    ;;
+  all)
+    update_relay
+    update_bridge
+    update_android
+    ;;
+esac

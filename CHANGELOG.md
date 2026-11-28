@@ -38,6 +38,7 @@
 
 ### Docs
 
+* **remote:** add unified `./scripts/update` release CLI (`--release` signed Android release APK build with R8 minification, resource shrinking, `arm64-v8a` / `zh,en` filtering, and `apksigner` verification), bespoke Twin-Monolith adaptive Android launcher icon (`ic_launcher`), Android release signing Gradle config, `deploy-relay` Make target, and `app/docs/update-workflow.md` standardizing Android APK, local bridge, and `jdserver` relay updates (linked from `AGENTS.md`)
 * **remote-server:** document the `/admin/ui` console, its redirect allowlist, and the static-export constraints in `app/docs/remote-sync-server.md` §5.6
 * **remote:** add remote-sync design docs under `app/docs/` (master spec including E2E image/video/audio media transfer design §3.5 + Go server + Android stack docs)
 

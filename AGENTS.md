@@ -21,6 +21,7 @@
 ## Paths
 
 - Remote sync (phone ↔ relay ↔ bridge): read `app/docs/remote-sync-design.md` (master), `remote-sync-server.md` (Go), `remote-sync-android.md` (Kotlin) before touching `app/server` or `app/android`.
+- Release & update workflow (Android app / local bridge / `jdserver` relay): follow `app/docs/update-workflow.md` via `./scripts/update <relay|bridge|server|android|all>` (add `--release` for signed Android release APK).
 - `lua/sidekick/nes/diff.lua` – diff core
 - `lua/sidekick/nes/init.lua` – NES orchestration
 - `lua/sidekick/treesitter.lua` – treesitter helpers
