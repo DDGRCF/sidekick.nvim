@@ -22,6 +22,39 @@ local Util = require("sidekick.util")
 -- the text area now.
 --
 -- Alternate-screen providers are unaffected: they own the whole pty grid.
+--
+-- TODO(cli): a slash dropdown permanently lifts the dock.
+--
+-- Opening `/model`, `/thinking` or any autocomplete list pushes the dock up and
+-- closing the list does not bring it back. Measured on `pi --tui-mode regular`
+-- in a 24 row pty, with a transcript that already fills the screen: the dock
+-- sits at row 20, typing `/` moves it to row 14, Escape leaves it at row 14.
+-- `agy` behaves the same way (row 18 -> 15 of 40).
+--
+-- A pty resize round trip does fix it, and only for some CLIs: `jobresize(w,
+-- h-1)` immediately followed by `jobresize(w, h)` puts the `pi` dock back on
+-- row 20, while `agy` ignores the relayout entirely. So the fix itself is sound
+-- and is what this used to do; the blocker is knowing *when* to nudge from
+-- inside Neovim. Every signal tried so far is either unavailable or fires on a
+-- legitimate layout change:
+--
+--   * blank rows below the last painted line: negative once the transcript
+--     fills the screen (measured -30), so it never fires when it matters;
+--   * a growing gap above known content: `/clear`, `Ctrl+L` and `/compact`
+--     shorten the transcript and look identical;
+--   * `nvim_win_get_cursor`: a terminal buffer always reports `{1, 0}`, the real
+--     cursor lives in the pty;
+--   * the agent's own CUP sequences: Neovim does not retain escape sequences in
+--     the terminal buffer, so there is nothing to parse;
+--   * tmux/zellij cursor position: the only signal that tracks the dock row
+--     correctly, but it is not readable from inside the embedded pty.
+--
+-- Pick this up once a reliable dock-row signal exists. Options seen while
+-- investigating, in rough order of robustness: a `:Sidekick cli redock` command
+-- that nudges on demand (no detection at all); trigger on a known dropdown
+-- footer (`↓ N more` for `pi`, `↑/↓ Navigate` for `agy`) within a short window
+-- of the dropdown closing; or a per-tool `M:tui_row()` hook that a tool config
+-- can implement when its TUI exposes a queryable cursor position.
 
 ---@class sidekick.cli.terminal.Cmd
 ---@field name string Name of the tool

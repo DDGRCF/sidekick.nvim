@@ -198,7 +198,8 @@ sidekick.nvim/                       主仓库（nvim 插件 + 文档）
   与 Lua 端逐字节一致（`internal/sid` 有 nvim 生成的测试向量）。
   **远程新建会话必须按此命名**，否则电脑端无法识别/attach。
 - **Conversation**：`{id, provider, resumable}`；provider 私有字段（文件路径）**绝不离开 bridge**。
-- **Message**：`seq` 从 1 起按主链单调；`parts` ∈ `text`/`thinking`/`tool_call`/`tool_result`。
+- **Message**：`seq` 从 1 起按主链单调；`parts` ∈ `text`/`thinking`/`tool_call`/`tool_result`/`media`；当 provider 原位追加同一 `seq` 内容时可重推同 `seq` 增量事件。
+- **StreamingDraft**（`SessionEvent.draft`，tag 15）：在 structured `Message` 落盘/提交前，由 bridge 从实时 PTY 输出提取纯净增量回答推送给 Chat 视图实现逐字流式展示；structured turn 提交或回到空闲提示符后下发 `active=false` 自动无缝切换为持久消息。
 - **reset**：provider 改写历史（压缩/分叉）时置 `reset`；客户端必须清缓存从 `after_seq=0` 重拉。
 - **Screen**：v1 全量快照（`capture-pane -e` ANSI）+ 单调 `revision`；不做 diff。
 - **InputRequest**：`text` 原样粘贴不解释成按键；按键只走 `KeysRequest` 枚举。

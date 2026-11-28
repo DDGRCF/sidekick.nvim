@@ -3,6 +3,7 @@ local M = {}
 ---@param opts? sidekick.Config
 function M.setup(opts)
   require("sidekick.config").setup(opts)
+  pcall(require("sidekick.cli.remote_bridge").setup)
 end
 
 function M.clear()

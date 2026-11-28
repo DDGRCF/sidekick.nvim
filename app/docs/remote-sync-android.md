@@ -136,7 +136,7 @@ App → Custom Tab: GET /auth/github/start?redirect_uri=sidekick://auth/callback
 
 | 路由 | 内容 | 验收要点 |
 |---|---|---|
-| `login` | GitHub 登录表单 → Custom Tab | 未登录冷启动必到；返回键退出 App |
+| `login` | GitHub 登录表单 → Custom Tab（Debug 包另带回环地址快速填入与 `POST /auth/dev/login` 本地开发登录） | 未登录冷启动必到；返回键退出 App |
 | `login/totp` | 6 位 code 输入 + recovery code 入口 | 错误 code 抖动提示 |
 | `home` | 电脑列表（`0.5dp` hairline 分隔、在线/离线区分与错误重试） | 下拉刷新 `/devices` |
 | `bridge/{deviceId}` | `PrimaryTabRow`（"会话/全部历史"）+ `PullToRefreshBox` + 虚拟化 `StartSessionSheet` | `Subscribe(updated)` 实时改 `LIVE` 徽标 |
@@ -150,8 +150,9 @@ App → Custom Tab: GET /auth/github/start?redirect_uri=sidekick://auth/callback
 **输入框获焦时**发 `Presence{REMOTE,typing=true}`（节流 1s），失焦发 false；
 对端 `Presence{LOCAL}` 时输入栏上方显示"本地正在输入…"banner（不锁输入，只提示）。
 
-**Chat 视图**（`STREAM_MESSAGES`）：
-- **去重框流式排版（类 ChatGPT / Claude 移动端）**：User 消息为右侧 `RoundedCornerShape(22.dp)` 柔和圆角气泡（`16sp/23sp`）；Assistant 回复**直接铺在纯净主画布上**（浅色为纯白 `#FFFFFF`，深色为 `#0B0E14`），顶部仅极简工具头像+模型名，底部附轻量引用回复（`FormatQuote`）与复制按钮；
+**Chat 视图**（`STREAM_MESSAGES` + `StreamingDraft`）：
+- **类 ChatGPT 实时流式响应**：发送消息后立即在对话流底部展示乐观 User 气泡与 `StreamingAssistantTurn`（等待首字时展示紧凑思考指示，收到 `SessionEvent.draft` 后通过逐帧 typewriter 动画与末尾 `▍` 光标平滑渲染 Markdown）；当结构化 `Message` 落盘或原位增量更新完成时无缝切换为正式消息卡片；若新会话初始 `conversation.id` 为空，通过 `_pending_<sid>` 临时分区与 `SessionEvent.updated` 自动迁移并绑定历史库；
+- **去重框流式排版（类 ChatGPT / Claude 移动端）**：User 消息为右侧 `RoundedCornerShape(22.dp)` 柔和圆角气泡（`16sp/23sp`）；Assistant 回复**直接铺在纯净主画布上**（浅色为纯白 `#FFFFFF`，深色为 `#0B0E14`），顶部仅极简工具头像+模型名（`15sp` SemiBold + `22dp` 图标），底部附轻量引用回复（`FormatQuote`）与复制按钮；
 - `text` 渲染增强 Markdown（类 ChatGPT 移动端字号：正文 `16sp/26sp`、标题 `21/19/17sp`、行内代码 `14sp`、代码块 `13.5sp/20sp`；支持表格 / 语法高亮 / 引用块 / 分割线 / 加粗 / 列表）；
 - `thinking`、`tool_call`/`tool_result` 采用轻量无边框内联折叠条，点开才展开等宽 JSON/输出；
 - `media` 媒体卡片：支持真实 PNG/JPEG/WebP 缩略图预览与全屏双指缩放灯箱（自动触发 `GetMediaRequest` 拉取并校验原图）、视频封面与全屏 `VideoView` 播放弹窗（点击后加密拉取并播放）、内联 `MediaPlayer` 音频波形与进度播放条，以及底部图片/视频/音频选择后分块加密上传（`UploadMediaRequest` ≤ 16 MiB）并以 `@rel_path` 发送给会话；

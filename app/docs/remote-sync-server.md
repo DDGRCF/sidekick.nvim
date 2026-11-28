@@ -79,7 +79,7 @@ app/server/
   1. `sidekick-bridge login` → `POST /auth/device/code` → 得 `{device_code, user_code(8位),
      verification_uri, expires_in, interval}`；
   2. 终端打印 `verification_uri` + `user_code`（用户在任何浏览器打开——通常已登录 relay
-     的浏览器——输入 code 批准）；
+     的浏览器——输入 code 批准；本地 `dev_login = true` 调试可直接加 `--dev` 走回环 `POST /auth/dev/login` 自动批准）；
   3. 按 `interval` 轮询 `POST /auth/device/token` 直到 `approved` → 得 `{access,refresh}`；
   4. 生成/加载 Noise 静态密钥对 → `POST /devices {kind:"bridge", name:hostname, pubkey}`
      → relay 发 `device_id`；
@@ -102,7 +102,7 @@ workspaces = ["/home/r/Scripts", "/home/r/projects"]     # cwd 白名单
 tools = ["codex", "claude", "pi", "devin", "antigravity"] # tool 白名单
 state_dir = ""        # 覆盖 nvim state dir；默认按 XDG/NVIM_APPNAME 探测（internal/state）
 audit_log = "~/.local/state/sidekick-bridge/audit.jsonl"
-screen_idle_ms = 300  # 抓屏最小间隔
+screen_idle_ms = 120  # 抓屏最小间隔（默认 120ms，兼顾实时流式刷新与低开销）
 mux_dump_lines = 2000 # capture-pane -S 的行数（与 nvim 侧 mux.dump 对齐）
 max_input_bytes = 65536
 ```
@@ -173,9 +173,9 @@ bridge 侧调 `remote.lua --cleanup <sid>`（`Util.del_state`）回滚。
 ### 3.6 Screen/消息推送循环（P2/P4 接线）
 
 - 订阅表：`session_id → {streams, subscribers}`。
-- `STREAM_SCREEN`：每 `screen_idle_ms` `Capture` 一次，`fnv64(ansi)` 变了才发 `Screen{revision++}`。
-- `STREAM_MESSAGES`：见 §4 的 watcher；新行解析出 `Message{seq=last+1}` 即发 `SessionEvent.message`。
-- `updated`：state dir 变化（fsnotify）或 pane 消失时发 `SessionEvent.updated/closed`。
+- `STREAM_SCREEN`：每 `screen_idle_ms` `Capture` 一次，`fnv64(ansi)` 变了才发 `Screen{revision++}`；当订阅同时包含 `STREAM_MESSAGES` 且 `InputRequest{submit=true}` 触发生成周期时，`liveStreamState` 从清洗后的终端 delta 提取结构化文本并发 `SessionEvent.draft`（`StreamingDraft{active,text,model}`），直到正式助手消息落盘（`onCommittedMessage`）或回落至空闲提示符时结束。
+- `STREAM_MESSAGES`：见 §4 的 watcher；按 `seq` + `messageDigest`（SHA-256）推送新增及原位更新的 `Message`。若新会话初始 `conversation_id` 为空，自动轮询 `ListSessions`/`ListHistory` 绑定并发 `SessionEvent.updated`。
+- `updated`：state dir 变化（fsnotify）、会话延迟绑定 `conversation_id` 或 pane 消失时发 `SessionEvent.updated/closed`。
 
 ## 4. history 解析器（provider 存储格式）
 
