@@ -389,3 +389,168 @@ describe("diff hunk actions", function()
     assert.are.same({ "one two THREE" }, pending)
   end)
 end)
+
+describe("diff hunk mutations", function()
+  it("describes byte-exact mutations for inline hunks", function()
+    local diff = {
+      range = { from = { 0, 0 }, to = { 0, 0 } },
+      from = { lines = { "one two three" } },
+      to = { lines = { "one TWO three" } },
+    }
+    local mutation = Diff.hunk_mutation(diff --[[@as sidekick.Diff]], {
+      kind = "change",
+      pos = { 0, 4 },
+      cover = 1,
+      inline = true,
+      from_index = 1,
+      to_index = 1,
+      from_col = 4,
+      from_end_col = 7,
+      to_col = 4,
+      to_end_col = 7,
+      extmarks = {},
+    })
+    assert.are.same({
+      kind = "bytes",
+      row = 0,
+      count = 0,
+      new_count = 0,
+      from_col = 4,
+      end_col = 7,
+      replacement = "TWO",
+    }, mutation)
+  end)
+
+  it("trims single-line block mutations to the changed bytes", function()
+    local diff = {
+      range = { from = { 0, 0 }, to = { 0, 0 } },
+      from = { lines = { "cccc dddd" } },
+      to = { lines = { "CCCC dddd" } },
+    }
+    local mutation = Diff.hunk_mutation(diff --[[@as sidekick.Diff]], {
+      kind = "change",
+      pos = { 0, 0 },
+      cover = 1,
+      from_index = 1,
+      from_count = 1,
+      to_index = 1,
+      to_count = 1,
+      extmarks = {},
+    })
+    assert.are.same({
+      kind = "bytes",
+      row = 0,
+      count = 0,
+      new_count = 0,
+      from_col = 0,
+      end_col = 4,
+      replacement = "CCCC",
+    }, mutation)
+  end)
+
+  it("describes line mutations for insertions and deletions", function()
+    local diff = {
+      range = { from = { 3, 0 }, to = { 3, 0 } },
+      from = { lines = { "a", "b" } },
+      to = { lines = { "a", "x", "y", "b" } },
+    }
+    -- insertion after diff line 1 (buffer row 3): rows insert before row 4
+    local insert = Diff.hunk_mutation(diff --[[@as sidekick.Diff]], {
+      kind = "add",
+      pos = { 3, 0 },
+      cover = 0,
+      from_index = 1,
+      from_count = 0,
+      to_index = 2,
+      to_count = 2,
+      extmarks = {},
+    })
+    assert.are.same({ kind = "lines", row = 4, count = 0, new_count = 2 }, insert)
+
+    local delete = Diff.hunk_mutation(diff --[[@as sidekick.Diff]], {
+      kind = "delete",
+      pos = { 3, 0 },
+      cover = 2,
+      from_index = 1,
+      from_count = 2,
+      to_index = 1,
+      to_count = 0,
+      extmarks = {},
+    })
+    assert.are.same({ kind = "lines", row = 3, count = 2, new_count = 0 }, delete)
+  end)
+
+  it("places insertions before the first line at the first row", function()
+    local diff = {
+      range = { from = { 2, 0 }, to = { 2, 0 } },
+      from = { lines = { "a" } },
+      to = { lines = { "x", "a" } },
+    }
+    local mutation = Diff.hunk_mutation(diff --[[@as sidekick.Diff]], {
+      kind = "add",
+      pos = { 2, 0 },
+      cover = 0,
+      from_index = 0,
+      from_count = 0,
+      to_index = 1,
+      to_count = 1,
+      extmarks = {},
+    })
+    assert.are.same({ kind = "lines", row = 2, count = 0, new_count = 1 }, mutation)
+  end)
+
+  describe("transform_pos", function()
+    local bytes = {
+      kind = "bytes",
+      row = 2,
+      count = 0,
+      new_count = 0,
+      from_col = 4,
+      end_col = 7,
+      replacement = "LONGER",
+    } ---@type sidekick.diff.Mutation
+
+    ---@type {name:string, pos:{integer,integer}, expected?:{integer,integer}}[]
+    local bytes_cases = {
+      { name = "other rows are untouched", pos = { 1, 6 }, expected = { 1, 6 } },
+      { name = "columns before the mutation are untouched", pos = { 2, 2 }, expected = { 2, 2 } },
+      { name = "the start boundary of a replacement stays", pos = { 2, 4 }, expected = { 2, 4 } },
+      { name = "positions inside the mutation are lost", pos = { 2, 5 } },
+      { name = "positions at the end boundary shift", pos = { 2, 7 }, expected = { 2, 10 } },
+      { name = "positions after the mutation shift by the delta", pos = { 2, 9 }, expected = { 2, 12 } },
+    }
+    for _, case in ipairs(bytes_cases) do
+      it(case.name, function()
+        assert.are.same(case.expected, Diff.transform_pos(case.pos, bytes))
+      end)
+    end
+
+    it("pushes positions at a pure insertion point past the inserted bytes", function()
+      local insertion = {
+        kind = "bytes",
+        row = 0,
+        count = 0,
+        new_count = 0,
+        from_col = 3,
+        end_col = 3,
+        replacement = "abc",
+      } ---@type sidekick.diff.Mutation
+      assert.are.same({ 0, 6 }, Diff.transform_pos({ 0, 3 }, insertion))
+      assert.are.same({ 0, 2 }, Diff.transform_pos({ 0, 2 }, insertion))
+    end)
+
+    it("shifts rows after line mutations and drops rows inside", function()
+      local lines = { kind = "lines", row = 2, count = 2, new_count = 5 } ---@type sidekick.diff.Mutation
+      assert.are.same({ 0, 3 }, Diff.transform_pos({ 0, 3 }, lines))
+      assert.is_nil(Diff.transform_pos({ 2, 0 }, lines))
+      assert.is_nil(Diff.transform_pos({ 3, 7 }, lines))
+      assert.are.same({ 7, 4 }, Diff.transform_pos({ 4, 4 }, lines))
+    end)
+
+    it("shifts rows below pure line insertions without losing positions", function()
+      local insert = { kind = "lines", row = 2, count = 0, new_count = 2 } ---@type sidekick.diff.Mutation
+      assert.are.same({ 1, 0 }, Diff.transform_pos({ 1, 0 }, insert))
+      assert.are.same({ 4, 5 }, Diff.transform_pos({ 2, 5 }, insert))
+    end)
+  end)
+end)

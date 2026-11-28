@@ -2,7 +2,6 @@ local Config = require("sidekick.config")
 local Util = require("sidekick.util")
 
 local M = {}
-local PARTIAL_NS = vim.api.nvim_create_namespace("sidekick.nes.partial")
 
 M._edits = {} ---@type sidekick.NesEdit[]
 M._requests = {} ---@type table<number, number>
@@ -337,7 +336,13 @@ end
 ---@return integer?
 local function current_review_index(items, cursor)
   for index, item in ipairs(items) do
-    local end_row = item.pos[1] + math.max(1, item.hunk.cover or 1) - 1
+    local cover = math.max(1, item.hunk.cover or 1)
+    if not item.hunk.inline and item.hunk.kind == "add" and (item.hunk.cover or 0) == 0 then
+      -- Pure insertions cover no source lines: their virtual lines render
+      -- between this row and the next, so both rows accept the hunk.
+      cover = 2
+    end
+    local end_row = item.pos[1] + cover - 1
     if cursor[1] >= item.pos[1] and cursor[1] <= end_row then
       if not item.hunk.inline then
         return index
@@ -453,109 +458,88 @@ local function ranges_overlap(a_from, a_to, b_from, b_to)
   return compare_pos(a_from, b_to) < 0 and compare_pos(b_from, a_to) < 0
 end
 
----@param edit sidekick.NesEdit
----@param diff sidekick.Diff
----@param hunk sidekick.diff.Hunk
----@return sidekick.Pos from
----@return sidekick.Pos to
-local function hunk_range(edit, diff, hunk)
-  if hunk.inline then
-    return vim.deepcopy(hunk.pos), { hunk.pos[1], hunk.from_end_col or hunk.pos[2] }
-  end
-  local from = { hunk.pos[1], 0 }
-  local count = hunk.from_count or hunk.cover or 0
-  if count == 0 then
-    if edit.from[1] == from[1] then
-      from[2] = edit.from[2]
-    end
-    return from, from
-  end
-  local from_index = hunk.from_index or 1
-  local last = diff.from.lines[from_index + count - 1] or ""
-  local to = { hunk.pos[1] + count - 1, #last }
-  if edit.from[1] == from[1] then
-    from[2] = edit.from[2]
-  end
-  if edit.to[1] == to[1] then
-    to[2] = edit.to[2]
-  end
-  return from, to
-end
-
----@param buf integer
----@param item sidekick.NesReviewItem
----@param diff sidekick.Diff
----@return {edit:sidekick.NesEdit,start:integer,finish:integer}[]
-local function mark_siblings(buf, item, diff)
-  local changed_from, changed_to = hunk_range(item.edit, diff, item.hunk)
-  local ret = {}
-  vim.api.nvim_buf_clear_namespace(buf, PARTIAL_NS, 0, -1)
-  for _, edit in ipairs(M._edits) do
-    if edit.buf == buf and edit ~= item.edit and not ranges_overlap(edit.from, edit.to, changed_from, changed_to) then
-      local ok_start, start = pcall(vim.api.nvim_buf_set_extmark, buf, PARTIAL_NS, edit.from[1], edit.from[2], {
-        right_gravity = true,
-      })
-      local ok_finish, finish = pcall(vim.api.nvim_buf_set_extmark, buf, PARTIAL_NS, edit.to[1], edit.to[2], {
-        right_gravity = true,
-      })
-      if ok_start and ok_finish then
-        ret[#ret + 1] = { edit = edit, start = start, finish = finish }
-      elseif ok_start then
-        pcall(vim.api.nvim_buf_del_extmark, buf, PARTIAL_NS, start)
-      end
-    end
-  end
-  return ret
-end
-
+--- Remap the positions of sibling edits across an accepted hunk using
+--- deterministic arithmetic. The accepted hunk is an exact byte/line
+--- mutation, so positions outside of it shift by a computable delta.
+--- Positions inside the mutation no longer map to meaningful content, so
+--- those edits are dropped instead of corrupting the buffer.
 ---@param client vim.lsp.Client
 ---@param buf integer
----@param marks {edit:sidekick.NesEdit,start:integer,finish:integer}[]
+---@param item sidekick.NesReviewItem
+---@param mutation sidekick.diff.Mutation
 ---@return table<sidekick.NesEdit, boolean>
-local function remap_siblings(client, buf, marks)
+local function remap_siblings(client, buf, item, mutation)
+  local Diff = require("sidekick.nes.diff")
   local kept = {}
   local version = vim.lsp.util.buf_versions[buf]
-  for _, mark in ipairs(marks) do
-    local from = vim.api.nvim_buf_get_extmark_by_id(buf, PARTIAL_NS, mark.start, {})
-    local to = vim.api.nvim_buf_get_extmark_by_id(buf, PARTIAL_NS, mark.finish, {})
-    if #from == 2 and #to == 2 then
-      mark.edit.from = { from[1], from[2] }
-      mark.edit.to = { to[1], to[2] }
-      mark.edit.range = {
-        start = lsp_position(client, buf, mark.edit.from),
-        ["end"] = lsp_position(client, buf, mark.edit.to),
-      }
-      mark.edit.textDocument.version = version or mark.edit.textDocument.version
-      if mark.edit.invalidate_diff then
-        mark.edit:invalidate_diff()
-      else
-        mark.edit._diff = nil
+  local mut_from, mut_to = Diff.mutation_range(mutation)
+  for _, edit in ipairs(M._edits) do
+    if edit.buf == buf and edit ~= item.edit and not ranges_overlap(edit.from, edit.to, mut_from, mut_to) then
+      local from = Diff.transform_pos(edit.from, mutation)
+      local to = Diff.transform_pos(edit.to, mutation)
+      if from and to and compare_pos(from, to) <= 0 then
+        edit.from = from
+        edit.to = to
+        edit.range = {
+          start = lsp_position(client, buf, from),
+          ["end"] = lsp_position(client, buf, to),
+        }
+        edit.textDocument.version = version or edit.textDocument.version
+        if edit.invalidate_diff then
+          edit:invalidate_diff()
+        else
+          edit._diff = nil
+        end
+        kept[edit] = true
       end
-      kept[mark.edit] = true
     end
   end
-  vim.api.nvim_buf_clear_namespace(buf, PARTIAL_NS, 0, -1)
   return kept
 end
 
+--- Build the remaining edit after a partial accept/reject. The edit keeps the
+--- precise columns of the original range instead of expanding to full lines,
+--- so it never overlaps neighbouring edits sharing the first or last row.
 ---@param client vim.lsp.Client
 ---@param edit sidekick.NesEdit
+---@param diff sidekick.Diff
 ---@param current string[]
 ---@param pending string[]
 ---@return sidekick.NesEdit
-local function partial_edit(client, edit, current, pending)
+local function partial_edit(client, edit, diff, current, pending)
   local buf = edit.buf
   local start_row = edit.from[1]
   local end_row = start_row + #current - 1
   local end_line = current[#current] or ""
-  local from = { start_row, 0 }
-  local to = { end_row, #end_line }
+
+  -- The content before/after the original edit range is shared context that
+  -- no hunk ever touches, so the first/last lines of both `current` and
+  -- `pending` still carry those exact bytes.
+  local prefix_len = edit.from[2]
+  local last_from_line = diff.from.lines[#diff.from.lines] or ""
+  local suffix_len = math.max(0, #last_from_line - edit.to[2])
+
+  local end_col = math.max(0, #end_line - suffix_len)
+  local from = { start_row, math.min(prefix_len, #(current[1] or "")) }
+  local to = { end_row, end_col }
+  if #current == 1 then
+    from[2] = math.min(from[2], end_col)
+  end
   local range = {
     start = lsp_position(client, buf, from),
     ["end"] = lsp_position(client, buf, to),
   }
   local version = vim.lsp.util.buf_versions[buf] or edit.textDocument.version or 0
-  vim.lsp.util.buf_versions[buf] = version
+
+  -- Strip the shared prefix/suffix from the proposal so applying the precise
+  -- range does not duplicate them.
+  local inner = vim.deepcopy(pending)
+  if #inner == 1 then
+    inner[1] = inner[1]:sub(prefix_len + 1, math.max(0, #inner[1] - suffix_len))
+  else
+    inner[1] = inner[1]:sub(prefix_len + 1)
+    inner[#inner] = inner[#inner]:sub(1, math.max(0, #inner[#inner] - suffix_len))
+  end
 
   local Edit = require("sidekick.nes.edit")
   local ret = setmetatable({
@@ -563,7 +547,7 @@ local function partial_edit(client, edit, current, pending)
     from = from,
     to = to,
     range = range,
-    text = table.concat(pending, "\n"),
+    text = table.concat(inner, "\n"),
     command = edit.command,
     textDocument = {
       uri = edit.textDocument.uri,
@@ -592,14 +576,14 @@ local function act_on_current_hunk(action)
   if #current == 0 then
     current = { "" }
   end
-  local sibling_marks = action == "accept" and mark_siblings(buf, item, diff) or {}
+  local mutation = action == "accept" and Diff.hunk_mutation(diff, item.hunk) or nil
   if action == "accept" then
     local start_row = diff.range.from[1]
     vim.api.nvim_buf_set_lines(buf, start_row, start_row + #diff.from.lines, false, current)
   end
-  local siblings = action == "accept" and remap_siblings(client, buf, sibling_marks) or {}
+  local siblings = mutation and remap_siblings(client, buf, item, mutation) or {}
 
-  local next_edit = partial_edit(client, item.edit, current, pending)
+  local next_edit = partial_edit(client, item.edit, diff, current, pending)
   local remaining = #next_edit:diff().hunks > 0 and next_edit or nil
   local edits = {}
   for _, edit in ipairs(M._edits) do
@@ -813,7 +797,6 @@ function M.apply()
   end, edits) --[[@as lsp.TextEdit[] ]]
   vim.schedule(function()
     local last = edits[#edits]
-    local diff = last:diff()
 
     -- apply the edits
     vim.lsp.util.apply_text_edits(text_edits, buf, client.offset_encoding)
@@ -832,9 +815,12 @@ function M.apply()
 
     -- jump to end of last edit
     local pos = vim.deepcopy(last.from)
-    if #diff.to.lines >= 1 then
-      pos[1] = pos[1] + (#diff.to.lines - 1)
-      pos[2] = pos[2] + #diff.to.text
+    local newlines = select(2, last.text:gsub("\n", ""))
+    if newlines > 0 then
+      pos[1] = pos[1] + newlines
+      pos[2] = #(last.text:match("[^\n]*$") or "")
+    else
+      pos[2] = pos[2] + #last.text
     end
     M._jump(pos)
   end)

@@ -588,7 +588,128 @@ describe("nes hunk actions", function()
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     assert.is_true(Nes.accept())
     assert.are.same({ "ABCdefghij" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-    assert.are.equal(1, #Nes.get(buf))
+    local remaining = Nes.get(buf)
+    assert.are.equal(1, #remaining)
+    -- Positions must survive exactly, not just the edit count: the sibling
+    -- edit covers the bytes of "def" which did not move here.
+    assert.are.same({ 0, 3 }, remaining[1].from)
+    assert.are.same({ 0, 6 }, remaining[1].to)
+  end)
+
+  it("shifts adjacent same-line edits when the accepted text length differs", function()
+    local Edit = require("sidekick.nes.edit")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "abcdefghij" })
+
+    local function make_edit(from_col, to_col, text, uri)
+      return setmetatable({
+        buf = buf,
+        from = { 0, from_col },
+        to = { 0, to_col },
+        range = {
+          start = { line = 0, character = from_col },
+          ["end"] = { line = 0, character = to_col },
+        },
+        text = text,
+        textDocument = { uri = uri, version = 0 },
+      }, Edit)
+    end
+
+    Nes._edits = {
+      make_edit(0, 3, "ABCDEF", "file:///tmp/nes-shift-a.lua"),
+      make_edit(3, 6, "XYZ", "file:///tmp/nes-shift-b.lua"),
+    }
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    assert.is_true(Nes.accept())
+    assert.are.same({ "ABCDEFdefghij" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    local remaining = Nes.get(buf)
+    assert.are.equal(1, #remaining)
+    -- "def" moved three bytes to the right when "abc" became "ABCDEF".
+    assert.are.same({ 0, 6 }, remaining[1].from)
+    assert.are.same({ 0, 9 }, remaining[1].to)
+
+    assert.is_true(Nes.apply())
+    vim.wait(100)
+    assert.are.same({ "ABCDEFXYZghij" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+  end)
+
+  it("keeps precise positions for siblings on the last row of a multi-line edit", function()
+    local Edit = require("sidekick.nes.edit")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "aaaa", "bbbb", "cccc dddd" })
+
+    local function make_edit(from, to, text, uri)
+      return setmetatable({
+        buf = buf,
+        from = from,
+        to = to,
+        range = {
+          start = { line = from[1], character = from[2] },
+          ["end"] = { line = to[1], character = to[2] },
+        },
+        text = text,
+        textDocument = { uri = uri, version = 0 },
+      }, Edit)
+    end
+
+    Nes._edits = {
+      make_edit({ 0, 0 }, { 2, 4 }, "AAAA\nbbbb\nCCCC", "file:///tmp/nes-multi-a.lua"),
+      make_edit({ 2, 5 }, { 2, 9 }, "DDDD", "file:///tmp/nes-multi-b.lua"),
+    }
+
+    -- accept the first hunk of the multi-line edit
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    assert.is_true(Nes.accept())
+    assert.are.same({ "AAAA", "bbbb", "cccc dddd" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+
+    local positions = {}
+    for _, edit in ipairs(Nes.get(buf)) do
+      positions[edit.text] = { from = vim.deepcopy(edit.from), to = vim.deepcopy(edit.to) }
+    end
+    -- the sibling keeps its exact position since row 2 was not rewritten
+    assert.are.same({ 2, 5 }, positions["DDDD"].from)
+    assert.are.same({ 2, 9 }, positions["DDDD"].to)
+
+    -- accept the remaining hunk of the multi-line edit, then the sibling
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    assert.is_true(Nes.accept())
+    vim.api.nvim_win_set_cursor(0, { 3, 6 })
+    assert.is_true(Nes.accept())
+    assert.are.same({ "AAAA", "bbbb", "CCCC DDDD" }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+  end)
+
+  it("accepts pure insertion hunks from the line below the insertion", function()
+    local Edit = require("sidekick.nes.edit")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "four", "five" })
+    Nes._edits = {
+      setmetatable({
+        buf = buf,
+        from = { 0, 0 },
+        to = { 4, 4 },
+        range = {
+          start = { line = 0, character = 0 },
+          ["end"] = { line = 4, character = 4 },
+        },
+        text = "one\nTWO\nthree\nfour\ninserted\nfive",
+        textDocument = { uri = "file:///tmp/nes-insert.lua", version = 0 },
+      }, Edit),
+    }
+
+    -- the insertion renders between "four" (row 4) and "five" (row 5):
+    -- accepting with the cursor on row 5 must work
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    assert.is_true(Nes.accept())
+    assert.are.same(
+      { "one", "two", "three", "four", "inserted", "five" },
+      vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    )
+
+    -- accepting the remaining change hunk afterwards stays consistent
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    assert.is_true(Nes.accept())
+    assert.are.same(
+      { "one", "TWO", "three", "four", "inserted", "five" },
+      vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    )
   end)
 
   it("uses the cursor column to select inline hunks", function()

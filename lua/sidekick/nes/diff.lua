@@ -350,4 +350,153 @@ function M.apply_hunk(diff, hunk, action)
   return current, pending
 end
 
+---@class sidekick.diff.Mutation
+---@field kind "lines"|"bytes"
+---@field row integer 0-based buffer row where the mutation starts
+---@field count integer lines mutation: number of rows replaced
+---@field new_count integer lines mutation: number of rows inserted in their place
+---@field from_col? integer bytes mutation: 0-based byte column of the replaced range
+---@field end_col? integer bytes mutation: 0-based exclusive end column of the replaced range
+---@field replacement? string bytes mutation: replacement bytes (never contains newlines)
+
+--- Length of the common prefix/suffix bytes of two strings, without overlap.
+---@param a string
+---@param b string
+---@return integer prefix
+---@return integer suffix
+local function common_affixes(a, b)
+  local min_len = math.min(#a, #b)
+  local prefix = 0
+  while prefix < min_len and a:byte(prefix + 1) == b:byte(prefix + 1) do
+    prefix = prefix + 1
+  end
+  local suffix = 0
+  while suffix < min_len - prefix and a:byte(#a - suffix) == b:byte(#b - suffix) do
+    suffix = suffix + 1
+  end
+  return prefix, suffix
+end
+
+--- Describe the exact buffer mutation performed when accepting a hunk.
+--- Inline hunks are byte-exact replacements within a single row, while block
+--- hunks replace whole rows. Positions outside the mutation can be remapped
+--- deterministically with `transform_pos`, so no extmark tracking is needed.
+---@param diff sidekick.Diff
+---@param hunk sidekick.diff.Hunk
+---@return sidekick.diff.Mutation
+function M.hunk_mutation(diff, hunk)
+  local from_index = hunk.from_index or 1
+  local from_count = hunk.from_count or hunk.cover or 0
+  local to_index = hunk.to_index or 1
+  local to_count = hunk.to_count or 0
+
+  if hunk.inline then
+    local to_line = diff.to.lines[to_index] or ""
+    local to_col = hunk.to_col or 0
+    local to_end_col = hunk.to_end_col or to_col
+    local row = hunk.pos[1]
+    local from_col = hunk.from_col or hunk.pos[2] or 0
+    return {
+      kind = "bytes",
+      row = row,
+      count = 0,
+      new_count = 0,
+      from_col = from_col,
+      end_col = hunk.from_end_col or from_col,
+      replacement = to_line:sub(to_col + 1, to_end_col),
+    }
+  end
+
+  local row = diff.range.from[1] + from_index - 1
+  if from_count == 1 and to_count == 1 then
+    -- A single-line block replacement only rewrites the bytes between the
+    -- common affixes of the old and new line, so columns outside that range
+    -- still map exactly.
+    local old_line = diff.from.lines[from_index] or ""
+    local new_line = diff.to.lines[to_index] or ""
+    local prefix, suffix = common_affixes(old_line, new_line)
+    return {
+      kind = "bytes",
+      row = math.max(row, 0),
+      count = 0,
+      new_count = 0,
+      from_col = prefix,
+      end_col = #old_line - suffix,
+      replacement = new_line:sub(prefix + 1, #new_line - suffix),
+    }
+  end
+
+  -- Deletion/change hunks cover diff lines `from_index..from_index+from_count-1`
+  -- (1-based). Pure insertions happen *after* diff line `from_index`, which is
+  -- before buffer row `range.from + from_index` (and `from_index` may be 0 for
+  -- insertions before the first line).
+  if from_count == 0 then
+    row = row + 1
+  end
+  return {
+    kind = "lines",
+    row = math.max(row, 0),
+    count = from_count,
+    new_count = to_count,
+  }
+end
+
+--- The buffer range a mutation touches, in pre-mutation coordinates.
+---@param mutation sidekick.diff.Mutation
+---@return sidekick.Pos from
+---@return sidekick.Pos to
+function M.mutation_range(mutation)
+  if mutation.kind == "bytes" then
+    local from_col = mutation.from_col or 0
+    return { mutation.row, from_col }, { mutation.row, mutation.end_col or from_col }
+  end
+  if mutation.count == 0 then
+    return { mutation.row, 0 }, { mutation.row, 0 }
+  end
+  return { mutation.row, 0 }, { mutation.row + mutation.count - 1, math.huge }
+end
+
+--- Remap a buffer position across an accepted hunk mutation.
+--- Returns nil when the position lies inside the mutated range, since it no
+--- longer maps to meaningful content. Byte-exact inline mutations preserve
+--- column positions on the same row; line mutations only shift rows and treat
+--- any position inside the replaced rows as lost.
+---@param pos sidekick.Pos
+---@param mutation sidekick.diff.Mutation
+---@return sidekick.Pos?
+function M.transform_pos(pos, mutation)
+  local row, col = pos[1], pos[2]
+  if mutation.kind == "bytes" then
+    if row ~= mutation.row then
+      return { row, col }
+    end
+    local from_col = mutation.from_col or 0
+    local end_col = mutation.end_col or from_col
+    local delta = #(mutation.replacement or "") - (end_col - from_col)
+    if col < from_col then
+      return { row, col }
+    end
+    if col == from_col then
+      -- Positions exactly at the start of a replacement stay put, while a pure
+      -- insertion pushes them past the inserted bytes.
+      if end_col > from_col then
+        return { row, col }
+      end
+      return { row, col + delta }
+    end
+    if col < end_col then
+      return nil
+    end
+    return { row, col + delta }
+  end
+
+  if row < mutation.row then
+    return { row, col }
+  end
+  if row >= mutation.row + mutation.count then
+    return { row + (mutation.new_count - mutation.count), col }
+  end
+  return nil
+end
+
 return M
