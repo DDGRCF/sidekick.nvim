@@ -400,8 +400,8 @@ local defaults = {
       --- CLI Tool Keymaps (default mode is `t`)
       ---@type table<string, sidekick.cli.Keymap|false>
       keys = {
-        buffers       = { "<c-b>", "buffers"   , mode = "nt", desc = "open buffer picker" },
-        files         = { "<c-f>", "files"     , mode = "nt", desc = "open file picker" },
+        buffers       = { "<c-b>", "buffers"   , mode = "t" , desc = "open buffer picker" },
+        files         = { "<c-f>", "files"     , mode = "t" , desc = "open file picker" },
         hide_n        = { "q"    , "hide"      , mode = "n" , desc = "hide the agent container" },
         hide_ctrl_q   = { "<c-q>", "hide"      , mode = "n" , desc = "hide the agent container" },
         hide_ctrl_dot = { "<c-.>", "hide"      , mode = "nt", desc = "hide the agent container" },
@@ -943,6 +943,15 @@ require("sidekick.cli").send(opts)
 ---@param opts? sidekick.cli.Show
 ---@overload fun(name: string)
 require("sidekick.cli").show(opts)
+```
+
+</td></tr>
+<tr><td><code>:Sidekick cli status</code> Dump the scanned terminal tail with the activity markers used for
+status detection, so they can be verified against a live screen.</td><td>
+
+
+```lua
+require("sidekick.cli").status()
 ```
 
 </td></tr>

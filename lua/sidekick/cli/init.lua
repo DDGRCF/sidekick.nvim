@@ -255,6 +255,12 @@ function M.zoom()
   require("sidekick.cli.panel").toggle_zoom()
 end
 
+--- Dump the scanned terminal tail with the activity markers used for
+--- status detection, so they can be verified against a live screen.
+function M.status()
+  require("sidekick.cli.status").report()
+end
+
 --- Re-read bufferline.nvim-style global keymaps for agent tabs.
 function M.sync()
   local active = require("sidekick.cli.panel").active()
