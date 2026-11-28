@@ -8,10 +8,12 @@ end
 
 ---@type sidekick.cli.Config
 return {
-  -- `regular` keeps Pi in the normal terminal buffer instead of the alternate
-  -- screen. Native fork, resume verification and Neovim scrolling all rely on
-  -- the session staying visible in the terminal scrollback.
-  cmd = { "pi", "--tui-mode", "regular" },
+  -- Pi defaults to fullscreen mode: the input dock stays pinned to the bottom
+  -- of the panel and dropdowns open right above it. Session-id capture and
+  -- fork verification flow through the bundled extension's control file, so
+  -- losing the terminal scrollback to the alternate screen breaks neither;
+  -- scrolling is Pi's own (it enables full mouse tracking).
+  cmd = { "pi" },
   capabilities = {
     resume = true,
     fork = true,
@@ -53,7 +55,7 @@ return {
     end,
   },
   continue = { "--continue" },
-  native_scroll = false,
+  native_scroll = true,
   -- Pi renders the `app.interrupt` shortcut in its footer while a turn runs.
   status = Status.markers({ busy = Status.INTERRUPT_HINT }),
 }

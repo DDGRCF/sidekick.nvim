@@ -4,7 +4,7 @@ local Panel = require("sidekick.cli.panel")
 local Session = require("sidekick.cli.session")
 local Util = require("sidekick.util")
 
--- Inline TUIs (`pi --tui-mode regular`, `codex --no-alt-screen`, claude with
+-- Inline TUIs (`codex --no-alt-screen`, claude with
 -- CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN, grok --no-alt-screen, agy inline) render
 -- from the top of their pty grid and keep the input dock right below the
 -- transcript, so a short session leaves the dock above the window bottom. That

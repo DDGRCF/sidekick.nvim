@@ -210,7 +210,7 @@ describe("cli conversation fork", function()
 
     local pi = assert(loadfile("sk/cli/pi.lua"))()
     local extension = vim.api.nvim_get_runtime_file("sk/extensions/pi-sidekick.ts", false)[1]
-    local expected = { "pi", "--tui-mode", "regular" }
+    local expected = { "pi" }
     if extension then
       vim.list_extend(expected, { "--extension", extension })
     end

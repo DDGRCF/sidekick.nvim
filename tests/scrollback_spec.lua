@@ -204,15 +204,15 @@ describe("cli scrollback", function()
     Config.cli.scrollback = old_scrollback
   end)
 
-  it("treats pi as a regular-mode tool with Neovim scrolling", function()
+  it("treats pi as a fullscreen tool with native scrolling", function()
     local tool = Config.get_tool("pi")
-    assert.is_false(tool.config.native_scroll)
-    assert.are.same({ "pi", "--tui-mode", "regular" }, tool.config.cmd)
+    assert.is_true(tool.config.native_scroll)
+    assert.are.same({ "pi" }, tool.config.cmd)
     local old_scrollback = Config.cli.scrollback
     Config.cli.scrollback = { enabled = true }
     local enabled = Scrollback.is_enabled({ tool = tool.config })
     Config.cli.scrollback = old_scrollback
-    assert.is_true(enabled)
+    assert.is_false(enabled)
   end)
 
   it("keeps codex and grok out of the alternate screen", function()
