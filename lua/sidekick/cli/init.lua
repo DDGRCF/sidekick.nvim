@@ -87,6 +87,8 @@ local M = {}
 ---@field target? sidekick.cli.Session|string Target agent; defaults to the current panel agent
 ---@field focus? boolean Focus the target after sending the reference
 ---@field submit? boolean Submit the reference immediately; defaults to true
+---@field note? string Custom handover note sent with the reference
+---@field context? boolean Embed recent output of the source agent into the reference file
 
 --- Keymap options similar to `vim.keymap.set` and `lazy.nvim` mappings
 ---@class sidekick.cli.Keymap: vim.keymap.set.Opts

@@ -43,6 +43,7 @@ describe("cli agent references", function()
     old.sessions = Session.sessions
     old.active = Panel.active
     old.select = vim.ui.select
+    old.input = vim.ui.input
     old.emit = Util.emit
     old.send = AgentReference.send
     old.reference = Config.cli.agent_reference
@@ -56,6 +57,7 @@ describe("cli agent references", function()
     Session.sessions = old.sessions
     Panel.active = old.active
     vim.ui.select = old.select
+    vim.ui.input = old.input
     Util.emit = old.emit
     AgentReference.send = old.send
     Config.cli.agent_reference = old.reference
@@ -242,9 +244,19 @@ describe("cli agent references", function()
       return target
     end
     local selected_items, select_opts
+    local select_calls = 0
     vim.ui.select = function(items, opts, cb)
-      selected_items, select_opts = items, opts
-      cb(items[1])
+      select_calls = select_calls + 1
+      if select_calls == 1 then
+        selected_items, select_opts = items, opts
+        cb(items[1])
+      else
+        -- context prompt: pick the first entry (no context)
+        cb(items[1], 1)
+      end
+    end
+    vim.ui.input = function(_, cb)
+      cb("")
     end
     local sent
     AgentReference.send = function(selected, current)
@@ -259,6 +271,101 @@ describe("cli agent references", function()
     assert.is_table(select_opts.format_item(source, true))
     assert.is_table(select_opts.snacks.format(source))
     assert.are.same({ source, target }, sent)
+  end)
+
+  it("embeds the handover note in the message and reference file", function()
+    local source = agent()
+    local sent
+    local target = agent({
+      id = "terminal: target",
+      instance_id = "target123",
+      name = "codex",
+      conversation_id = "target-conversation",
+    })
+    target.send = function(_, value)
+      sent = value
+    end
+    target.submit = function() end
+
+    local path = AgentReference.send(source, target, { note = "Pick up the parser fix from line 400" })
+
+    assert.is_not_nil(sent:find("Handover note: Pick up the parser fix from line 400", 1, true))
+    local content = table.concat(vim.fn.readfile(path), "\n")
+    assert.is_not_nil(content:find("## Handover note", 1, true))
+    assert.is_not_nil(content:find("Pick up the parser fix from line 400", 1, true))
+  end)
+
+  it("embeds a recent output snapshot only when context is requested", function()
+    local source = agent()
+    source.buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(source.buf, 0, -1, false, { "boot noise", "PARSER STATE: line 400 ready" })
+    local target = agent({
+      id = "terminal: target",
+      instance_id = "target123",
+      name = "codex",
+      conversation_id = "target-conversation",
+    })
+    target.send = function() end
+    target.submit = function() end
+
+    local plain = AgentReference.send(source, target)
+    local plain_content = table.concat(vim.fn.readfile(plain), "\n")
+    assert.is_nil(plain_content:find("PARSER STATE", 1, true))
+    assert.is_nil(plain_content:find("## Recent output snapshot", 1, true))
+
+    local path = AgentReference.send(source, target, { context = true })
+    local content = table.concat(vim.fn.readfile(path), "\n")
+    assert.is_not_nil(content:find("## Recent output snapshot", 1, true))
+    assert.is_not_nil(content:find("PARSER STATE: line 400 ready", 1, true))
+    vim.api.nvim_buf_delete(source.buf, { force = true })
+  end)
+
+  it("aborts the handover when the note prompt is cancelled", function()
+    local source = agent()
+    local target = agent({
+      id = "terminal: target",
+      instance_id = "target123",
+      name = "codex",
+      conversation_id = "target-conversation",
+    })
+    local send_called = false
+    AgentReference.send = function()
+      send_called = true
+    end
+    vim.ui.input = function(_, cb)
+      cb(nil) -- user pressed <esc>
+    end
+
+    AgentReference.handover_opts(source, target, {})
+
+    assert.is_false(send_called)
+  end)
+
+  it("passes the context choice through the interactive handover flow", function()
+    local source = agent()
+    local target = agent({
+      id = "terminal: target",
+      instance_id = "target123",
+      name = "codex",
+      conversation_id = "target-conversation",
+    })
+    vim.ui.input = function(_, cb)
+      cb("continue the migration")
+    end
+    vim.ui.select = function(items, _, cb)
+      cb(items[2], 2) -- include recent output
+    end
+    local got
+    AgentReference.send = function(sel, tgt, opts)
+      got = { sel, tgt, opts }
+    end
+
+    AgentReference.handover_opts(source, target, {})
+
+    assert.are.same(source, got[1])
+    assert.are.same(target, got[2])
+    assert.are.equal("continue the migration", got[3].note)
+    assert.is_true(got[3].context)
   end)
 
   it("formats Codex references with icon, status, session, backend, and project", function()

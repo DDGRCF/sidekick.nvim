@@ -216,10 +216,14 @@ local function query_command(ref)
   )
 end
 
+local output_limits, output, trim_output
+
 ---@param source sidekick.cli.Session
+---@param opts? sidekick.cli.AgentReferenceOpts
 ---@return string? path
 ---@return string? error
-function M.create(source)
+function M.create(source, opts)
+  opts = opts or {}
   if not source or not source.tool then
     return nil, "invalid source agent"
   end
@@ -234,8 +238,6 @@ function M.create(source)
   local native_id = current and one_line(current.id) or ""
   local lines = {
     "# Sidekick Running Agent Reference",
-    "",
-    "This file identifies a running agent. It intentionally contains no conversation content.",
     "",
     ("- Agent: `%s`"):format(one_line(source.tool.name)),
     ("- Provider: `%s`"):format(provider),
@@ -254,6 +256,38 @@ function M.create(source)
   local data_path = current and current.data and current.data.path
   if type(data_path) == "string" and data_path ~= "" then
     lines[#lines + 1] = ("- Provider conversation data: `%s`"):format(one_line(data_path))
+  end
+  local note = type(opts.note) == "string" and vim.trim(opts.note) or ""
+  if note == "" and not opts.context then
+    table.insert(lines, "This file identifies a running agent. It intentionally contains no conversation content.")
+  end
+  if note ~= "" then
+    vim.list_extend(lines, {
+      "",
+      "## Handover note",
+      "",
+      note,
+    })
+  end
+  if opts.context then
+    local max_lines, max_bytes = output_limits()
+    local context_lines = tonumber((Config.cli.agent_reference or {}).context_lines) or 100
+    if context_lines > 0 then
+      local text = output(source, math.min(max_lines, context_lines))
+      text = text and trim_output(text, context_lines, max_bytes) or ""
+      if text ~= "" then
+        vim.list_extend(lines, {
+          "",
+          "## Recent output snapshot",
+          "",
+          "Point-in-time capture when the handover was written; query the agent for its live state.",
+          "",
+          "```",
+          text,
+          "```",
+        })
+      end
+    end
   end
   local command = query_command(ref)
   if command then
@@ -285,7 +319,7 @@ end
 
 ---@return integer max_lines
 ---@return integer max_bytes
-local function output_limits()
+output_limits = function()
   local opts = Config.cli.agent_reference or {}
   return math.max(1, tonumber(opts.max_lines) or 2000), math.max(1024, tonumber(opts.max_bytes) or 256 * 1024)
 end
@@ -293,7 +327,7 @@ end
 ---@param source sidekick.cli.Session
 ---@param max_lines integer
 ---@return string?
-local function output(source, max_lines)
+output = function(source, max_lines)
   if source.buf and vim.api.nvim_buf_is_valid(source.buf) then
     local line_count = vim.api.nvim_buf_line_count(source.buf)
     local first = math.max(0, line_count - max_lines)
@@ -307,7 +341,7 @@ local function output(source, max_lines)
   end
 end
 
-local function trim_output(text, max_lines, max_bytes)
+trim_output = function(text, max_lines, max_bytes)
   local lines = vim.split(strip_terminal_sequences(text), "\n", { plain = true })
   lines = vim.list_slice(lines, math.max(1, #lines - max_lines + 1))
   local ret, bytes = {}, 0
@@ -371,7 +405,7 @@ function M.send(source, target, opts)
   elseif same(source, target) then
     return Util.warn("Select a different source agent")
   end
-  local path, err = M.create(source)
+  local path, err = M.create(source, opts)
   if not path then
     return Util.error("Failed to create agent reference: " .. tostring(err))
   end
@@ -383,6 +417,10 @@ function M.send(source, target, opts)
   line[#line + 1] = {
     (" (agent: %s, session: %s). Inspect and query it when needed."):format(source.tool.name, session_id(source)),
   }
+  local note = type(opts.note) == "string" and vim.trim(opts.note) or ""
+  if note ~= "" then
+    line[#line + 1] = { "\n\nHandover note: " .. note }
+  end
   local formatted = target.tool:format({ line })
   target:send(formatted .. "\n")
   if opts.submit ~= false then
@@ -444,8 +482,41 @@ function M.select(opts)
     },
   }, function(selected)
     if selected then
-      M.send(selected, target, opts)
+      M.handover_opts(selected, target, opts)
     end
+  end)
+end
+
+--- Prompt for the handover note and context inclusion, then send the reference.
+--- Programmatic callers can skip the prompts by passing `note`/`context` in opts
+--- directly to `M.send`.
+---@param source sidekick.cli.Session
+---@param target sidekick.cli.Session
+---@param opts? sidekick.cli.AgentReferenceOpts
+function M.handover_opts(source, target, opts)
+  opts = vim.deepcopy(opts or {})
+  local context_lines = tonumber((Config.cli.agent_reference or {}).context_lines) or 100
+  vim.ui.input({
+    prompt = "Handover note (optional): ",
+    kind = "sidekick_agent_reference_note",
+  }, function(input)
+    if input == nil then
+      return -- aborted
+    end
+    opts.note = vim.trim(input)
+    if context_lines <= 0 then
+      return M.send(source, target, opts)
+    end
+    vim.ui.select({ "No context", ("Include recent output (%d lines)"):format(context_lines) }, {
+      prompt = "Handover context:",
+      kind = "sidekick_agent_reference_context",
+    }, function(_, idx)
+      if idx == nil then
+        return -- aborted
+      end
+      opts.context = idx == 2
+      M.send(source, target, opts)
+    end)
   end)
 end
 
