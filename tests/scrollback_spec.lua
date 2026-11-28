@@ -215,9 +215,11 @@ describe("cli scrollback", function()
     assert.is_false(enabled)
   end)
 
-  it("keeps codex and grok out of the alternate screen", function()
+  it("keeps codex out of the alternate screen while grok scrolls natively", function()
     assert.is_true(vim.tbl_contains(Config.get_tool("codex").config.cmd, "--no-alt-screen"))
-    assert.is_true(vim.tbl_contains(Config.get_tool("grok").config.cmd, "--no-alt-screen"))
+    local grok = Config.get_tool("grok")
+    assert.is_false(vim.tbl_contains(grok.config.cmd, "--no-alt-screen"))
+    assert.is_true(grok.config.native_scroll)
   end)
 
   it("bounds terminal dump and provides async dump", function()

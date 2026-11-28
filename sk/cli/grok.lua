@@ -1,8 +1,11 @@
 local Status = require("sidekick.cli.status")
 ---@type sidekick.cli.Config
 return {
-  -- Inline rendering keeps Grok's transcript in terminal scrollback.
-  cmd = { "grok", "--no-alt-screen" },
+  -- Grok defaults to fullscreen mode: the composer stays pinned to the
+  -- bottom of the panel and popups open right above it. Session capture is
+  -- process-file-scan based, so the alternate screen breaks neither resume
+  -- nor fork verification; scrolling is Grok's own.
+  cmd = { "grok" },
   capabilities = {
     resume = true,
     fork = true,
@@ -14,6 +17,7 @@ return {
     install = "curl -fsSL https://x.ai/cli/install.sh | bash",
   },
   is_proc = "\\<grok\\>",
+  native_scroll = true,
   url = "https://github.com/xai-org/grok-build",
   resume = require("sidekick.cli.provider_sessions").adapter("grok", { "--resume" }),
   fork = {

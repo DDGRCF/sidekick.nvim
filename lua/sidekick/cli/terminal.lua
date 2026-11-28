@@ -4,14 +4,13 @@ local Panel = require("sidekick.cli.panel")
 local Session = require("sidekick.cli.session")
 local Util = require("sidekick.util")
 
--- Inline TUIs (`codex --no-alt-screen`, claude with
--- CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN, grok --no-alt-screen, agy inline) render
--- from the top of their pty grid and keep the input dock right below the
--- transcript, so a short session leaves the dock above the window bottom. That
--- is the CLI's own layout and a pty resize cannot move it: a SIGWINCH round trip
--- leaves the dock where it was (measured on agy: row 18 of 40 before a resize,
--- row 16 after 40→39→40), and `virt_lines_above` does not render in a terminal
--- buffer.
+-- `pi` and `grok` run in their native fullscreen mode and own the whole grid.
+-- `codex` and `claude` stay inline but position their dock at the bottom of the
+-- pty grid with cursor addressing, so neither floats. `agy` is the remaining
+-- inline CLI whose dock follows the transcript: a short session leaves it above
+-- the window bottom, and that is the CLI's own layout — a pty resize cannot
+-- move it (measured on agy: row 18 of 40 before a resize, row 16 after
+-- 40→39→40), and `virt_lines_above` does not render in a terminal buffer.
 --
 -- What *is* fixable is the off-by-one this used to add on top: the panel draws a
 -- `winbar` in one of the window's grid rows, and `nvim_win_get_height` counts it

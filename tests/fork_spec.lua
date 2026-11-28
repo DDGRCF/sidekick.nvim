@@ -194,7 +194,7 @@ describe("cli conversation fork", function()
         name = "opencode",
         expected = { "opencode", "--port", "0", "--session", "conversation-42", "--fork" },
       },
-      { name = "grok", expected = { "grok", "--no-alt-screen", "--resume", "conversation-42", "--fork-session" } },
+      { name = "grok", expected = { "grok", "--resume", "conversation-42", "--fork-session" } },
       { name = "antigravity", expected = { "agy", "--conversation", "conversation-42" } },
     }) do
       local config = assert(loadfile("sk/cli/" .. case.name .. ".lua"))()
